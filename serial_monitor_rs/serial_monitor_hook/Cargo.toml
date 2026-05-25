@@ -1,0 +1,31 @@
+[package]
+name = "serial_monitor_hook"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+name = "serial_monitor_hook"
+
+[dependencies]
+
+# retour uses `extern "win64"` in its macro which is only valid on x86_64.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+retour = { version = "0.3", features = ["static-detour"] }
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_IO",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+]
+
+[profile.release]
+opt-level = 2
+panic = "abort"

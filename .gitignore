@@ -328,3 +328,8 @@ ASALocalRun/
 
 # MFractors (Xamarin productivity tool) working folder 
 .mfractor/
+
+# Rust
+serial_monitor_rs/target/
+serial_monitor_rs/Cargo.lock
+**/*.rs.bk

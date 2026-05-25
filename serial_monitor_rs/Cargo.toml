@@ -1,0 +1,3 @@
+[workspace]
+members = ["serial_monitor", "serial_monitor_hook"]
+resolver = "2"
