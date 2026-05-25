@@ -28,7 +28,7 @@
 
 exe便携版：[国内用户点我下载](https://llcom.papapoi.com/llcom.zip)
 
-CI快照版：[Appveyor Artifacts](https://ci.appveyor.com/project/chenxuuu/llcom/build/artifacts)
+CI快照版：[Github Action](https://nightly.link/chenxuuu/llcom/workflows/build/master/llcom_x64)
 
 所有正式版本：[GitHub Releases](https://github.com/chenxuuu/llcom/releases/latest)
 
