@@ -203,23 +203,9 @@ namespace llcom.Model
             serial.Write(data, 0, data.Length);
             Tools.Global.setting.SentCount += data.Length;
 
-            //判断data与dataRaw是否相同，如果相同就只显示一个
-            if (dataRaw != null) {
-                if (dataRaw.Length == data.Length)
-                {
-                    bool same = true;
-                    for (int i = 0; i < data.Length; i++)
-                    {
-                        if (data[i] != dataRaw[i])
-                        {
-                            same = false;
-                            break;
-                        }
-                    }
-                    if (same)
-                        dataRaw = null;
-                }
-            }
+            //判断data与dataRaw是否相同，如果相同且实际发送也显示，就只显示一个
+            if (dataRaw != null && Tools.Global.setting.showSend && dataRaw.SequenceEqual(data))
+                dataRaw = null;
             if (dataRaw != null && Tools.Global.setting.showSendRaw) UartDataRawSent?.Invoke(dataRaw, EventArgs.Empty);
             if(Tools.Global.setting.showSend) UartDataSent?.Invoke(data, EventArgs.Empty);//回调
         }

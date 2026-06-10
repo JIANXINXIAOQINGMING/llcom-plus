@@ -67,6 +67,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="0" />
@@ -79,7 +80,7 @@
             </Grid.ColumnDefinitions>
             <Button
                 Name="openClosePortButton"
-                Grid.RowSpan="2"
+                Grid.RowSpan="3"
                 Grid.Column="3"
                 Margin="2"
                 Click="OpenClosePortButton_Click">
@@ -95,8 +96,16 @@
                 Click="ClearLogButton_Click"
                 Content="{DynamicResource ClearLog}" />
             <Button
-                Name="MoreSettingButton"
+                Name="sendFileButton"
                 Grid.Row="1"
+                Grid.Column="4"
+                Margin="2"
+                Click="SendFileButton_Click"
+                Content="{DynamicResource SendFileButton}"
+                ToolTip="{DynamicResource SendFileButtonTip}" />
+            <Button
+                Name="MoreSettingButton"
+                Grid.Row="2"
                 Grid.Column="4"
                 Margin="2"
                 Click="MoreSettingButton_Click"
@@ -104,19 +113,20 @@
                 ToolTip="{DynamicResource MoreSettingsTip}" />
             <TextBox
                 Name="toSendDataTextBox"
-                Grid.RowSpan="2"
+                Grid.RowSpan="3"
                 Grid.Column="5"
-                Height="50"
+                Height="75"
                 Margin="2"
                 VerticalContentAlignment="Top"
                 AcceptsReturn="True"
                 FontFamily="Consolas"
+                PreviewKeyDown="ToSendDataTextBox_PreviewKeyDown"
                 Text="{Binding dataToSend}"
                 TextWrapping="Wrap"
                 VerticalScrollBarVisibility="Auto" />
             <Button
                 Name="sendDataButton"
-                Grid.RowSpan="2"
+                Grid.RowSpan="3"
                 Grid.Column="6"
                 Margin="2"
                 Command="{StaticResource SendUartData}"

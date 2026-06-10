@@ -65,6 +65,7 @@ namespace llcom.Pages
             HEXBox.DataContext = Tools.Global.setting;
             HexSendCheckBox.DataContext = Tools.Global.setting;
             this.ExtraEnterCheckBox.DataContext = Tools.Global.setting;
+            EnterSendCheckBox.DataContext = Tools.Global.setting;
             DisableLogCheckBox.DataContext = Tools.Global.setting;
             EnableSymbolCheckBox.DataContext = Tools.Global.setting;
 
@@ -196,9 +197,11 @@ namespace llcom.Pages
                 {
                     try
                     {
+                        var uartPara = new byte[0];
+                        var uartSendRaw = new byte[0];
                         temp = LuaEnv.LuaLoader.Run(
                             $"{Tools.Global.setting.recvScript}.lua",
-                            new System.Collections.ArrayList { "uartData", temp },
+                            new System.Collections.ArrayList { "uartData", temp, "uartPara", uartPara, "uartSendRaw", uartSendRaw },
                             "user_script_recv_convert/");
                     }
                     catch (Exception ex)

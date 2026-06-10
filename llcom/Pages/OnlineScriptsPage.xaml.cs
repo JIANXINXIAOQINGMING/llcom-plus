@@ -137,10 +137,12 @@ namespace llcom.Pages
         {
             while (true)
             {
-                var (result, fileName) = Tools.InputDialog.OpenDialog(
+                var ret = Tools.InputDialog.OpenDialog(
                         TryFindResource("OnlineScriptDownloadSaveNotice") as string ?? "?!",
                         $"{ScriptNow.Name}",
                         TryFindResource("OnlineScriptDownloadTitle") as string ?? "?!");
+                var result = ret.Item1;
+                var fileName = ret.Item2;
                 if (!result)
                     return;
                 //文件已经有了

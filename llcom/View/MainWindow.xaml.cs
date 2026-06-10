@@ -600,6 +600,8 @@ namespace llcom
         }
 
         private byte[] toSendData = null;//待发送的数据
+        private bool? toSendDataIsHex = null;
+        private bool toSendDataApplySendProcessing = true;
         private void openPort()
         {
             Tools.Logger.AddUartLogDebug($"[openPort]{isOpeningPort},{serialPortsListComboBox.SelectedItem}");
@@ -655,8 +657,10 @@ namespace llcom
                             Tools.Logger.AddUartLogDebug($"[openPort]check to send");
                             if (toSendData != null)
                             {
-                                sendUartData(toSendData);
+                                sendUartData(toSendData, toSendDataIsHex, toSendDataApplySendProcessing);
                                 toSendData = null;
+                                toSendDataIsHex = null;
+                                toSendDataApplySendProcessing = true;
                             }
                             Tools.Logger.AddUartLogDebug($"[openPort]done");
                         }
@@ -711,6 +715,25 @@ namespace llcom
             Tools.Logger.ClearData();
         }
 
+        private void SendFileButton_Click(object sender, RoutedEventArgs e)
+        {
+            System.Windows.Forms.OpenFileDialog openFileDialog = new System.Windows.Forms.OpenFileDialog();
+            openFileDialog.Filter = TryFindResource("SendFileFilter") as string ?? "All files|*.*";
+            if (openFileDialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                return;
+
+            try
+            {
+                Global.setting.recvScript = recvScriptBackup;
+                var data = File.ReadAllBytes(openFileDialog.FileName);
+                sendUartData(data, true, false);
+            }
+            catch (Exception ex)
+            {
+                Tools.MessageBox.Show($"{TryFindResource("ErrorSendFileFail") as string ?? "?!"}\r\n" + ex.ToString());
+            }
+        }
+
         private int lastBaudRateSelectedIndex = -1;
         private void BaudRateComboBox_Changed(object sender, EventArgs e)
         {
@@ -753,35 +776,42 @@ namespace llcom
         /// 发串口数据
         /// </summary>
         /// <param name="data"></param>
-        private void sendUartData(byte[] data, bool? is_hex = null)
+        private void sendUartData(byte[] data, bool? is_hex = null, bool applySendProcessing = true)
         {
+            if (data == null)
+                return;
+
             if (!Tools.Global.uart.IsOpen())
             {
-                openPort();
                 toSendData = (byte[])data.Clone();//带发送数据缓存起来，连上串口后发出去
+                toSendDataIsHex = is_hex;
+                toSendDataApplySendProcessing = applySendProcessing;
+                openPort();
+                return;
             }
 
             if (Tools.Global.uart.IsOpen())
             {
-                byte[] dataConvert;
-                try
+                byte[] dataConvert = data;
+                if (applySendProcessing)
                 {
-                    dataConvert = LuaEnv.LuaLoader.Run(
-                        $"{Tools.Global.setting.sendScript}.lua",
-                        new System.Collections.ArrayList 
-                        { 
-                            "uartData",
-                            is_hex == null ? 
-                            (Tools.Global.setting.hexSend ? Tools.Global.Hex2Byte(Tools.Global.Byte2String(data)) : data) : data
-                        });
-                }
-                catch (Exception ex)
-                {
-                    Tools.MessageBox.Show($"{TryFindResource("ErrorScript") as string ?? "?!"}\r\n" + ex.ToString());
-                    return;
-                }
-                try
-                {
+                    try
+                    {
+                        dataConvert = LuaEnv.LuaLoader.Run(
+                            $"{Tools.Global.setting.sendScript}.lua",
+                            new System.Collections.ArrayList
+                            {
+                                "uartData",
+                                is_hex == null ?
+                                (Tools.Global.setting.hexSend ? Tools.Global.Hex2Byte(Tools.Global.Byte2String(data)) : data) : data
+                            });
+                    }
+                    catch (Exception ex)
+                    {
+                        Tools.MessageBox.Show($"{TryFindResource("ErrorScript") as string ?? "?!"}\r\n" + ex.ToString());
+                        return;
+                    }
+
                     if (Tools.Global.setting.extraEnter)
                     {
                         var temp = dataConvert.ToList();
@@ -789,7 +819,11 @@ namespace llcom
                         temp.Add(0x0a);
                         dataConvert = temp.ToArray();
                     }
-                    Tools.Global.uart.SendData(dataConvert, data);
+                }
+
+                try
+                {
+                    Tools.Global.uart.SendData(dataConvert, applySendProcessing ? data : null);
                 }
                 catch(Exception ex)
                 {
@@ -800,6 +834,22 @@ namespace llcom
         }
 
         private void SendUartData_Executed(object sender, ExecutedRoutedEventArgs e)
+        {
+            SendCurrentTextBoxData();
+        }
+
+        private void ToSendDataTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if ((e.Key != Key.Return && e.Key != Key.Enter) || !Tools.Global.setting.enterSend)
+                return;
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+                return;
+
+            e.Handled = true;
+            SendCurrentTextBoxData();
+        }
+
+        private void SendCurrentTextBoxData()
         {
             Global.setting.recvScript = recvScriptBackup;
             var data = Global.GetEncoding().GetBytes(toSendDataTextBox.Text);
@@ -1277,12 +1327,16 @@ namespace llcom
             {
                 data = ((Grid)sender).Tag as ToSendData;
             }
+            if (data == null)
+                return;
             Tuple<bool, string> ret = Tools.InputDialog.OpenDialog(TryFindResource("QuickSendChangeIdButton") as string ?? "?!",
                 data.id.ToString(), (TryFindResource("QuickSendChangeIdTitle") as string ?? "?!") + data.id.ToString());
 
             if (!ret.Item1)
                 return;
             CheckToSendListId();
+            if (data.id <= 0 || data.id > toSendListItems.Count)
+                return;
             if (ret.Item2.Trim().Length == 0)//留空删除该项目
             {
                 toSendListItems.RemoveAt(data.id-1);
@@ -1321,6 +1375,8 @@ namespace llcom
                 {
                     data = JsonConvert.DeserializeObject<List<ToSendData>>(
                         File.ReadAllText(OpenFileDialog.FileName));
+                    if (data == null)
+                        throw new Exception(TryFindResource("QuickSendLoadError") as string ?? "?!");
                 }
                 catch (Exception err)
                 {
@@ -1383,8 +1439,10 @@ namespace llcom
 
         private void removeAllButton_Click(object sender, RoutedEventArgs e)
         {
-            (bool r,string s) = Tools.InputDialog.OpenDialog(TryFindResource("DeleteConfirmationMsg") as string ?? "?!",
+            var ret = Tools.InputDialog.OpenDialog(TryFindResource("DeleteConfirmationMsg") as string ?? "?!",
                 "", TryFindResource("DeleteConfirmation") as string ?? "?!");
+            bool r = ret.Item1;
+            string s = ret.Item2;
             if (r && s == "YES")
             {
                 toSendListItems.Clear();

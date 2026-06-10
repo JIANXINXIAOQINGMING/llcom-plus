@@ -39,6 +39,7 @@ namespace llcom.Model
         private int _encoding = 65001;
         private bool _terminal = true;
         private bool _extraEnter = false;
+        private bool _enterSend = false;
         private bool _enableSymbol = true;
 
         //窗口大小与位置
@@ -85,27 +86,27 @@ namespace llcom.Model
         {
             get
             {
-                if (_quickSendSelect < 0 || _quickSendSelect > 10)
+                if (_quickSendSelect < 0 || _quickSendSelect >= 10)
                     return new List<ToSendData>();
-                if (quickSendList.Count <= 10)
-                {
-                    for (var i = 0; i < 10; i++)
-                        quickSendList.Add(new List<ToSendData>());
-                }
+                EnsureQuickSendListCount();
                 return quickSendList[_quickSendSelect];
             }
             set
             {
-                if (_quickSendSelect < 0 || _quickSendSelect > 10)
+                if (_quickSendSelect < 0 || _quickSendSelect >= 10)
                     return;
-                if (quickSendList.Count <= 10)
-                {
-                    for (var i = 0; i < 10; i++)
-                        quickSendList.Add(new List<ToSendData>());
-                }
+                EnsureQuickSendListCount();
                 quickSendList[_quickSendSelect] = value;
                 Save();
             }
+        }
+
+        private void EnsureQuickSendListCount()
+        {
+            if (quickSendList == null)
+                quickSendList = new List<List<ToSendData>>();
+            while (quickSendList.Count < 10)
+                quickSendList.Add(new List<ToSendData>());
         }
 
         /// <summary>
@@ -119,7 +120,7 @@ namespace llcom.Model
             }
             set
             {
-                _quickSendSelect = value;
+                _quickSendSelect = value < 0 || value >= 10 ? 0 : value;
                 Save();
             }
         }
@@ -460,6 +461,19 @@ namespace llcom.Model
             set
             {
                 _extraEnter = value;
+                Save();
+            }
+        }
+
+        public bool enterSend
+        {
+            get
+            {
+                return _enterSend;
+            }
+            set
+            {
+                _enterSend = value;
                 Save();
             }
         }

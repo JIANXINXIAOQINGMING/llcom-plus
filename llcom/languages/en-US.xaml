@@ -14,6 +14,10 @@
     <system:String x:Key="ClearLog">Clear Log</system:String>
     <system:String x:Key="MoreSettings">Settings</system:String>
     <system:String x:Key="MoreSettingsTip">Set stopbit, parity, Lua script for data to send and so on.</system:String>
+    <system:String x:Key="SendFileButton">Send File</system:String>
+    <system:String x:Key="SendFileButtonTip">Select a file and send its raw binary bytes.</system:String>
+    <system:String x:Key="SendFileFilter">All files|*.*</system:String>
+    <system:String x:Key="ErrorSendFileFail">File send failed!</system:String>
     <system:String x:Key="SendDataButton">Send</system:String>
     <system:String x:Key="SendDataButtonTip">same as Ctrl+Enter</system:String>
     <system:String x:Key="RefreshPortButton">Refresh List</system:String>
@@ -162,6 +166,8 @@
     <system:String x:Key="KickClientButton">Kick Client</system:String>
     <system:String x:Key="AddExtraEnter">send data add an extra enter</system:String>
     <system:String x:Key="AddExtraEnterTip">before do this, alse will use Lua script for data to send</system:String>
+    <system:String x:Key="EnterSendMode">Enter/Newline</system:String>
+    <system:String x:Key="EnterSendModeTip">When checked, Enter sends data and Shift+Enter inserts a newline</system:String>
     <system:String x:Key="LockLogButton">Lock logs and disable auto scroll</system:String>
     <system:String x:Key="LockLogText">Locked</system:String>
     <system:String x:Key="SaveLogButton">Click to save received logs</system:String>
@@ -223,7 +229,7 @@
     <system:String x:Key="SaveSucceed">File saved!</system:String>
     <system:String x:Key="DisableLog">Stop print</system:String>
     <system:String x:Key="ShowSymbol">Replace invisible characters</system:String>
-    <system:String x:Key="ShowSymbolTooltip">Only support UTF8</system:String>
+    <system:String x:Key="ShowSymbolTooltip">Show invisible characters as \r, \n, \t text. Only supports UTF8.</system:String>
     <system:String x:Key="MQTTTLSCert">use user's certificate</system:String>
     <system:String x:Key="MQTTTLSCA">CA file path(right click me to select file)</system:String>
     <system:String x:Key="MQTTTLSClient">Client certificate path(right click me to select file)</system:String>

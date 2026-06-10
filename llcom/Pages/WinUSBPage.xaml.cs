@@ -121,7 +121,7 @@ namespace llcom.Pages
             if(r != null)
                 foreach (var i in r)
                     UsbListComboBox.Items.Add(i);
-            UsbListComboBox.SelectedIndex = 0;
+            UsbListComboBox.SelectedIndex = UsbListComboBox.Items.Count > 0 ? 0 : -1;
         }
 
         private async void Page_Loaded(object sender, RoutedEventArgs e)
@@ -194,8 +194,11 @@ namespace llcom.Pages
                     }
                     UsbConfigInfo configInfo = device.Configs[0];
                     ReadOnlyCollection<UsbInterfaceInfo> interfaceList = configInfo.Interfaces;
-                    if (interfaceList.Count < target.Interface - 1)
+                    if (target.Interface < 0 || target.Interface >= interfaceList.Count)
+                    {
+                        matched = false;
                         continue;
+                    }
                     device.SetConfiguration(1);
                     device.ClaimInterface(target.Interface);
                     device.SetAltInterface(0);
@@ -211,6 +214,13 @@ namespace llcom.Pages
                 UsbConfigInfo configInfo1 = device.Configs[0];
                 ReadOnlyCollection<UsbInterfaceInfo> interfaceList1 = configInfo1.Interfaces;
                 //ep
+                if (UsbInComboBox.SelectedItem == null || UsbOutComboBox.SelectedItem == null)
+                {
+                    matched = false;
+                    ShowData("open failed: endpoint not selected");
+                    try { device.Close(); } catch { }
+                    break;
+                }
                 var rep = (ReadEndpointID)UsbInComboBox.SelectedItem;
                 var wep = (WriteEndpointID)UsbOutComboBox.SelectedItem;
                 //包大小
@@ -316,6 +326,11 @@ namespace llcom.Pages
                         }
                     }
                 }).Start();
+            }
+            if (!IsConnected)
+            {
+                allDevices.Dispose();
+                context.Dispose();
             }
         }
 

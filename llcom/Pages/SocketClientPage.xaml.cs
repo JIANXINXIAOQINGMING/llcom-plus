@@ -113,7 +113,11 @@ namespace llcom.Pages
                 catch
                 {
                     var hostEntry = Dns.GetHostEntry(ServerTextBox.Text);
-                    ip = hostEntry.AddressList[0];
+                    ip = hostEntry.AddressList.FirstOrDefault(a =>
+                        a.AddressFamily == AddressFamily.InterNetwork ||
+                        a.AddressFamily == AddressFamily.InterNetworkV6);
+                    if (ip == null)
+                        throw new Exception("server host has no available IP address");
                 }
                 ipe = new IPEndPoint(ip, int.Parse(PortTextBox.Text));
                 s = new Socket(ipe.AddressFamily,

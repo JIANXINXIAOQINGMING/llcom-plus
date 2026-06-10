@@ -167,6 +167,8 @@ namespace llcom.Tools
                 {
                     //cost 309ms
                     setting = JsonConvert.DeserializeObject<Model.Settings>(File.ReadAllText(ProfilePath + "settings.json"));
+                    if (setting == null)
+                        throw new Exception("settings.json is empty");
                     setting.SentCount = 0;
                     setting.ReceivedCount = 0;
                     setting.DisableLog = false;
@@ -420,18 +422,33 @@ namespace llcom.Tools
             return GetEncoding().GetString(br.Take(len).ToArray());
         }
 
-        private static byte[] b_del = Encoding.GetEncoding(65001).GetBytes("␡");
-
-        private static byte[][] symbols =
+        private static string Byte2VisibleSymbol(byte data)
         {
-            new byte[]{226,144,128},new byte[]{226,144,129},new byte[]{226,144,130},new byte[]{226,144,131},new byte[]{226,144,132},
-            new byte[]{226,144,133},new byte[]{226,144,134},new byte[]{226,144,135},new byte[]{226,144,136},new byte[]{226,144,137},
-            new byte[]{226,144,138},new byte[]{226,144,139},new byte[]{226,144,140},new byte[]{226,144,141},new byte[]{226,144,142},
-            new byte[]{226,144,143},new byte[]{226,144,144},new byte[]{226,144,145},new byte[]{226,144,146},new byte[]{226,144,147},
-            new byte[]{226,144,148},new byte[]{226,144,149},new byte[]{226,144,150},new byte[]{226,144,151},new byte[]{226,144,152},
-            new byte[]{226,144,153},new byte[]{226,144,154},new byte[]{226,144,155},new byte[]{226,144,156},new byte[]{226,144,157},
-            new byte[]{226,144,158},new byte[]{226,144,159},
-        };
+            switch (data)
+            {
+                case 0x00:
+                    return "\\0";
+                case 0x07:
+                    return "\\a";
+                case 0x08:
+                    return "\\b";
+                case 0x09:
+                    return "\\t";
+                case 0x0a:
+                    return "\\n";
+                case 0x0b:
+                    return "\\v";
+                case 0x0c:
+                    return "\\f";
+                case 0x0d:
+                    return "\\r";
+                case 0x1b:
+                    return "\\e";
+                default:
+                    return $"\\x{data:X2}";
+            }
+        }
+
         /// <summary>
         /// byte转string（可读）
         /// </summary>
@@ -439,51 +456,60 @@ namespace llcom.Tools
         /// <returns></returns>
         public static string Byte2Readable(byte[] vBytes, int len = -1)
         {
-            if (len == -1)
-                len = vBytes.Length;
             if (vBytes == null)//fix
                 return "";
+            if (len == -1 || len > vBytes.Length)
+                len = vBytes.Length;
             //没开这个功能/非utf8就别搞了
             if (!setting.EnableSymbol || setting.encoding != 65001)
                 return Byte2String(vBytes, len);
-            var tb = new List<byte>();
+
+            var text = new StringBuilder();
+            var plainBytes = new List<byte>();
             for (int i = 0; i < len; i++)
             {
-                switch(vBytes[i])
+                // Show whitespace controls, while preserving their visual effect.
+                if (vBytes[i] == 0x0d && i < len - 1 && vBytes[i + 1] == 0x0a)
                 {
-                    case 0x0d:
-                        //遇到成对出现
-                        if(i < len - 1 && vBytes[i+1] == 0x0a)
-                        {
-                            tb.AddRange(symbols[0x0d]);
-                            tb.AddRange(symbols[0x0a]);
-                            tb.Add(0x0d);
-                            tb.Add(0x0a);
-                            i++;
-                        }
-                        else
-                        {
-                            tb.AddRange(symbols[0x0d]);
-                            tb.Add(vBytes[i]);
-                        }
-                        break;
-                    case 0x0a:
-                    case 0x09://tab字符
-                        tb.AddRange(symbols[vBytes[i]]);
-                        tb.Add(vBytes[i]);
-                        break;
-                    default:
-                        //普通的字符
-                        if(vBytes[i] <= 0x1f)
-                            tb.AddRange(symbols[vBytes[i]]);
-                        else if (vBytes[i] == 0x7f)//del
-                            tb.AddRange(b_del);
-                        else
-                            tb.Add(vBytes[i]);
-                        break;
+                    if (plainBytes.Count > 0)
+                    {
+                        text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+                        plainBytes.Clear();
+                    }
+                    text.Append("\\r\\n");
+                    text.Append("\r\n");
+                    i++;
+                    continue;
+                }
+                if (vBytes[i] == 0x0d || vBytes[i] == 0x0a || vBytes[i] == 0x09)
+                {
+                    if (plainBytes.Count > 0)
+                    {
+                        text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+                        plainBytes.Clear();
+                    }
+                    text.Append(Byte2VisibleSymbol(vBytes[i]));
+                    text.Append((char)vBytes[i]);
+                    continue;
+                }
+
+                if (vBytes[i] <= 0x1f || vBytes[i] == 0x7f)
+                {
+                    if (plainBytes.Count > 0)
+                    {
+                        text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+                        plainBytes.Clear();
+                    }
+                    text.Append(Byte2VisibleSymbol(vBytes[i]));
+                }
+                else
+                {
+                    plainBytes.Add(vBytes[i]);
                 }
             }
-            return GetEncoding().GetString(tb.ToArray());
+            if (plainBytes.Count > 0)
+                text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+            return text.ToString();
         }
 
         /// <summary>
