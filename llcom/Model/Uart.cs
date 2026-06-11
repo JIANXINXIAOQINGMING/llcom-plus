@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Ports;
-using System.Linq;
 using System.Management;
 using System.Text;
 using System.Threading;
@@ -22,6 +21,7 @@ namespace llcom.Model
         public event EventHandler UartDataSent;
         public event EventHandler UartDataRawSent;
         private Stream lastPortBaseStream = null;
+        private readonly object sendLock = new object();
         private bool _rts = false;
         private bool _dtr = true;
 
@@ -33,7 +33,9 @@ namespace llcom.Model
             }
             set
             {
-                Tools.Global.uart.serial.RtsEnable = _rts = value;
+                _rts = value;
+                if (!IsHardwareFlowControl())
+                    Tools.Global.uart.serial.RtsEnable = value;
             }
         }
         public bool Dtr
@@ -57,8 +59,7 @@ namespace llcom.Model
         {
             //声明接收到事件
             serial.DataReceived += Serial_DataReceived;
-            serial.RtsEnable = Rts;
-            serial.DtrEnable = Dtr;
+            ApplyControlLines();
             new Thread(ReadData).Start();
 
             //适配一下通用通道
@@ -133,9 +134,52 @@ namespace llcom.Model
             serial.Parity = (Parity)Tools.Global.setting.parity;
             serial.DataBits = Tools.Global.setting.dataBits;
             serial.StopBits = (StopBits)Tools.Global.setting.stopBit;
-            serial.RtsEnable = Rts;
-            serial.DtrEnable = Dtr;
+            ApplyControlLines();
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]done");
+        }
+
+        public void ApplyFlowControl()
+        {
+            ApplyControlLines();
+        }
+
+        private void ApplyControlLines()
+        {
+            var handshake = GetHandshake();
+            if (handshake == Handshake.RequestToSend)
+            {
+                try
+                {
+                    serial.RtsEnable = false;
+                }
+                catch
+                {
+                }
+            }
+            serial.Handshake = handshake;
+            if (handshake != Handshake.RequestToSend)
+                serial.RtsEnable = Rts;
+            serial.DtrEnable = Dtr;
+        }
+
+        private bool IsHardwareFlowControl()
+        {
+            return Tools.Global.setting != null && Tools.Global.setting.flowControl == 1;
+        }
+
+        private Handshake GetHandshake()
+        {
+            if (Tools.Global.setting == null)
+                return Handshake.None;
+            switch (Tools.Global.setting.flowControl)
+            {
+                case 1:
+                    return Handshake.RequestToSend;
+                case 2:
+                    return Handshake.XOnXOff;
+                default:
+                    return Handshake.None;
+            }
         }
 
         /// <summary>
@@ -200,14 +244,51 @@ namespace llcom.Model
         {
             if (data.Length == 0)
                 return;
-            serial.Write(data, 0, data.Length);
-            Tools.Global.setting.SentCount += data.Length;
 
-            //判断data与dataRaw是否相同，如果相同且实际发送也显示，就只显示一个
-            if (dataRaw != null && Tools.Global.setting.showSend && dataRaw.SequenceEqual(data))
-                dataRaw = null;
-            if (dataRaw != null && Tools.Global.setting.showSendRaw) UartDataRawSent?.Invoke(dataRaw, EventArgs.Empty);
-            if(Tools.Global.setting.showSend) UartDataSent?.Invoke(data, EventArgs.Empty);//回调
+            lock (sendLock)
+            {
+                WriteData(data);
+                Tools.Global.setting.SentCount += data.Length;
+
+                //判断data与dataRaw是否相同，如果相同且实际发送也显示，就只显示一个
+                if (dataRaw != null && Tools.Global.setting.showSend && ByteArrayEquals(dataRaw, data))
+                    dataRaw = null;
+                if (dataRaw != null && Tools.Global.setting.showSendRaw) UartDataRawSent?.Invoke(dataRaw, EventArgs.Empty);
+                if (Tools.Global.setting.showSend) UartDataSent?.Invoke(data, EventArgs.Empty);//回调
+            }
+        }
+
+        private void WriteData(byte[] data)
+        {
+            var packetSize = Math.Max(0, Tools.Global.setting.sendThrottlePacketSize);
+            var delayMs = Math.Max(0, Tools.Global.setting.sendThrottleDelayMs);
+            if (packetSize == 0 || delayMs == 0 || data.Length <= packetSize)
+            {
+                serial.Write(data, 0, data.Length);
+                return;
+            }
+
+            for (int offset = 0; offset < data.Length; offset += packetSize)
+            {
+                var count = Math.Min(packetSize, data.Length - offset);
+                serial.Write(data, offset, count);
+                if (delayMs > 0 && offset + count < data.Length)
+                    Thread.Sleep(delayMs);
+            }
+        }
+
+        private static bool ByteArrayEquals(byte[] first, byte[] second)
+        {
+            if (ReferenceEquals(first, second))
+                return true;
+            if (first == null || second == null || first.Length != second.Length)
+                return false;
+            for (int i = 0; i < first.Length; i++)
+            {
+                if (first[i] != second[i])
+                    return false;
+            }
+            return true;
         }
 
         //收到串口事件的信号量

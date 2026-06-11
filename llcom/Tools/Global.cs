@@ -322,13 +322,12 @@ namespace llcom.Tools
                     CreateFile("DefaultFiles/user_script_recv_convert/default.lua", ProfilePath + "user_script_recv_convert/default.lua");
                 if (!File.Exists(ProfilePath + "user_script_recv_convert/绘制曲线.lua"))
                     CreateFile("DefaultFiles/user_script_recv_convert/绘制曲线.lua", ProfilePath + "user_script_recv_convert/绘制曲线.lua");
-                if (!File.Exists(ProfilePath + "user_scrispt_recv_convert/绘制曲线-多条.lua"))
+                if (!File.Exists(ProfilePath + "user_script_recv_convert/绘制曲线-多条.lua"))
                     CreateFile("DefaultFiles/user_script_recv_convert/绘制曲线-多条.lua", ProfilePath + "user_script_recv_convert/绘制曲线-多条.lua");
                 if (!File.Exists(ProfilePath + "user_script_recv_convert/绘制曲线-解析结构体.lua"))
                     CreateFile("DefaultFiles/user_script_recv_convert/绘制曲线-解析结构体.lua", ProfilePath + "user_script_recv_convert/绘制曲线-解析结构体.lua");
 
                 CreateFile("DefaultFiles/LICENSE", ProfilePath + "LICENSE", false);
-                CreateFile("DefaultFiles/反馈网址.txt", ProfilePath + "反馈网址.txt", false);
 
                 if (IntPtr.Size == 8)
                     CreateFile("DefaultFiles/libusb-1.0-x64.dll", ProfilePath + "libusb-1.0", false);
@@ -355,6 +354,7 @@ namespace llcom.Tools
             uart.serial.Parity = (Parity)setting.parity;
             uart.serial.DataBits = setting.dataBits;
             uart.serial.StopBits = (StopBits)setting.stopBit;
+            uart.ApplyFlowControl();
             uart.UartDataRecived += Uart_UartDataRecived;
             uart.UartDataSent += Uart_UartDataSent;
             uart.UartDataRawSent += Uart_UartDataRawSent;

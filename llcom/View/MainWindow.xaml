@@ -96,8 +96,16 @@
                 Click="ClearLogButton_Click"
                 Content="{DynamicResource ClearLog}" />
             <Button
-                Name="MoreSettingButton"
+                Name="FlowControlButton"
                 Grid.Row="1"
+                Grid.Column="4"
+                Margin="2"
+                Click="FlowControlButton_Click"
+                Content="{DynamicResource FlowControlButton}"
+                ToolTip="{DynamicResource FlowControlButtonTip}" />
+            <Button
+                Name="MoreSettingButton"
+                Grid.Row="2"
                 Grid.Column="4"
                 Margin="2"
                 Click="MoreSettingButton_Click"

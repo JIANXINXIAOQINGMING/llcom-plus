@@ -232,38 +232,6 @@ namespace llcom
                     //加载完了，可以允许点击
                     MainGrid.IsEnabled = true;
 
-                    //检查更新
-                    if (!Tools.Global.IsMSIX())
-                    {
-                        Task.Run(() => {
-                            bool runed = false;
-                            AutoUpdaterDotNET.AutoUpdater.CheckForUpdateEvent += (args) =>
-                            {
-                                if (runed) return; runed = true;
-                                if (args.IsUpdateAvailable)
-                                {
-                                    Global.HasNewVersion = true;//有新版本
-                                    if(Tools.Global.setting.autoUpdate)//开了自动升级功能再开
-                                    {
-                                        this.Dispatcher.Invoke(new Action(delegate
-                                        {
-                                            AutoUpdaterDotNET.AutoUpdater.ShowUpdateForm(args);
-                                        }));
-                                    }
-                                }
-                            };
-                            Random r = new Random();//加上随机参数，确保获取的是最新数据
-                            try
-                            {
-                                AutoUpdaterDotNET.AutoUpdater.Start("https://llcom.papapoi.com/autoUpdate.xml?" + r);
-                            }
-                            catch
-                            {
-                                runed = true;
-                            }
-                        });
-                    }
-
                     //更换标题栏
                     var title = "";
                     title = this.Title;
@@ -608,6 +576,13 @@ namespace llcom
             settingPage.Show();
         }
 
+        Window flowControlPage = new FlowControlWindow();
+        private void FlowControlButton_Click(object sender, RoutedEventArgs e)
+        {
+            flowControlPage.Owner = this;
+            flowControlPage.Show();
+        }
+
 
         private void ApiDocumentButton_Click(object sender, RoutedEventArgs e)
         {
@@ -892,15 +867,13 @@ namespace llcom
         {
             if (e.Key == Key.Down)
             {
-                if (sendSuggestListBox.Items.Count > 0)
-                    sendSuggestListBox.SelectedIndex = Math.Min(sendSuggestListBox.SelectedIndex + 1, sendSuggestListBox.Items.Count - 1);
+                SelectSendSuggestion(sendSuggestListBox.SelectedIndex + 1);
                 e.Handled = true;
                 return true;
             }
             if (e.Key == Key.Up)
             {
-                if (sendSuggestListBox.Items.Count > 0)
-                    sendSuggestListBox.SelectedIndex = Math.Max(sendSuggestListBox.SelectedIndex - 1, 0);
+                SelectSendSuggestion(sendSuggestListBox.SelectedIndex - 1);
                 e.Handled = true;
                 return true;
             }
@@ -969,9 +942,32 @@ namespace llcom
             }
 
             sendSuggestListBox.ItemsSource = items;
-            sendSuggestListBox.SelectedIndex = 0;
             sendSuggestListBox.Width = toSendDataTextBox.ActualWidth;
             sendSuggestPopup.IsOpen = true;
+            SelectSendSuggestion(0);
+        }
+
+        private void SelectSendSuggestion(int index)
+        {
+            if (sendSuggestListBox.Items.Count == 0)
+                return;
+
+            sendSuggestListBox.SelectedIndex = Math.Max(0, Math.Min(index, sendSuggestListBox.Items.Count - 1));
+            ScrollSelectedSendSuggestionIntoView();
+        }
+
+        private void ScrollSelectedSendSuggestionIntoView()
+        {
+            var selected = sendSuggestListBox.SelectedItem;
+            if (selected == null)
+                return;
+
+            sendSuggestListBox.ScrollIntoView(selected);
+            Dispatcher.BeginInvoke(new Action(delegate
+            {
+                if (sendSuggestListBox.SelectedItem != null)
+                    sendSuggestListBox.ScrollIntoView(sendSuggestListBox.SelectedItem);
+            }));
         }
 
         private IEnumerable<string> GetQuickSendAtCommands()

@@ -10,7 +10,6 @@ using System.Windows;
 [assembly: AssemblyTitle("能跑lua脚本的开源串口调试工具！")]
 [assembly: AssemblyDescription("https://github.com/chenxuuu/llcom")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("晨旭")]
 [assembly: AssemblyProduct("LLCOM")]
 [assembly: AssemblyCopyright("Apache 2 license")]
 [assembly: AssemblyTrademark("chenxublog.com")]
@@ -51,7 +50,7 @@ using System.Windows;
 //可以指定所有这些值，也可以使用“生成号”和“修订号”的默认值
 //通过使用 "*"，如下所示:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("1.1.4.2")]
-[assembly: AssemblyFileVersion("1.1.4.2")]
+[assembly: AssemblyVersion("1.0.0.3")]
+[assembly: AssemblyFileVersion("1.0.0.3")]
 [assembly: NeutralResourcesLanguage("zh-CN")]
 

@@ -26,6 +26,9 @@ namespace llcom.Model
         private int _timeout = 50;
         private int _dataBits = 8;
         private int _stopBit = 1;
+        private int _flowControl = 0;
+        private int _sendThrottlePacketSize = 0;
+        private int _sendThrottleDelayMs = 0;
         private string _sendScript = "default";
         private string _recvScript = "default";
         private string _runScript = "example";
@@ -33,7 +36,6 @@ namespace llcom.Model
         public List<List<ToSendData>> quickSendList = new List<List<ToSendData>>();
         private int _quickSendSelect = -1;
         private bool _bitDelay = true;
-        private bool _autoUpdate = true;
         private uint _maxLength = 10240;
         private string _language = System.Threading.Thread.CurrentThread.CurrentCulture.Name;
         private int _encoding = 65001;
@@ -127,22 +129,6 @@ namespace llcom.Model
             }
         }
 
-        /// <summary>
-        /// 是否开启自动升级
-        /// </summary>
-        public bool autoUpdate
-        {
-            get
-            {
-                return _autoUpdate;
-            }
-            set
-            {
-                _autoUpdate = value;
-                Save();
-            }
-        }
-
         public bool bitDelay
         {
             get
@@ -152,6 +138,64 @@ namespace llcom.Model
             set
             {
                 _bitDelay = value;
+                Save();
+            }
+        }
+
+        /// <summary>
+        /// 0 无流控，1 RTS/CTS硬件流控，2 XON/XOFF软件流控
+        /// </summary>
+        public int flowControl
+        {
+            get
+            {
+                return _flowControl;
+            }
+            set
+            {
+                try
+                {
+                    _flowControl = value < 0 || value > 2 ? 0 : value;
+                    Tools.Global.uart.ApplyFlowControl();
+                    Save();
+                }
+                catch (Exception e)
+                {
+                    Tools.MessageBox.Show(e.Message);
+                }
+            }
+        }
+
+        public int sendThrottlePacketSize
+        {
+            get
+            {
+                return _sendThrottlePacketSize;
+            }
+            set
+            {
+                _sendThrottlePacketSize = value < 0 ? 0 : value;
+                if (_sendThrottlePacketSize == 0 && _sendThrottleDelayMs != 0)
+                    sendThrottleDelayMs = 0;
+                Save();
+            }
+        }
+
+        public int sendThrottleDelayMs
+        {
+            get
+            {
+                return _sendThrottleDelayMs;
+            }
+            set
+            {
+                if (value < 0)
+                    value = 0;
+                if (_sendThrottlePacketSize == 0)
+                    value = 0;
+                if (value > 10000)
+                    value = 10000;
+                _sendThrottleDelayMs = value;
                 Save();
             }
         }

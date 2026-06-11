@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -358,9 +357,21 @@ namespace llcom.Pages
 
             var mode = (MatchModeComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
             if (mode == "exact")
-                return buffer.SequenceEqual(expected);
+                return ByteListEquals(buffer, expected);
 
             return IndexOf(buffer, expected) >= 0;
+        }
+
+        private bool ByteListEquals(List<byte> buffer, byte[] expected)
+        {
+            if (buffer.Count != expected.Length)
+                return false;
+            for (int i = 0; i < expected.Length; i++)
+            {
+                if (buffer[i] != expected[i])
+                    return false;
+            }
+            return true;
         }
 
         private int IndexOf(List<byte> buffer, byte[] expected)
