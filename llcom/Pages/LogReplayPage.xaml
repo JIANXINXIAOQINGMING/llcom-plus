@@ -1,0 +1,105 @@
+<Page
+    x:Class="llcom.Pages.LogReplayPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="LogReplayPage"
+    d:DesignHeight="450"
+    d:DesignWidth="800"
+    Loaded="Page_Loaded"
+    Unloaded="Page_Unloaded"
+    mc:Ignorable="d">
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="8" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="8" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button
+                MinWidth="90"
+                Margin="0,0,6,0"
+                Click="SelectLogButton_Click"
+                Content="{DynamicResource LogReplaySelectLog}" />
+            <TextBox
+                Name="LogPathTextBox"
+                Grid.Column="1"
+                IsReadOnly="True"
+                Text="{DynamicResource LogReplayNoLog}" />
+        </Grid>
+
+        <WrapPanel Grid.Row="2" VerticalAlignment="Center">
+            <TextBlock VerticalAlignment="Center" Text="{DynamicResource LogReplayTimeout}" />
+            <TextBox
+                Name="TimeoutTextBox"
+                Width="70"
+                Margin="4,0,12,0"
+                Text="5000" />
+            <TextBlock VerticalAlignment="Center" Text="{DynamicResource LogReplayMatchMode}" />
+            <ComboBox
+                Name="MatchModeComboBox"
+                Width="100"
+                Margin="4,0,12,0"
+                SelectedIndex="0">
+                <ComboBoxItem Content="{DynamicResource LogReplayMatchContains}" Tag="contains" />
+                <ComboBoxItem Content="{DynamicResource LogReplayMatchExact}" Tag="exact" />
+            </ComboBox>
+            <Button
+                Name="StartReplayButton"
+                MinWidth="80"
+                Margin="0,0,6,0"
+                Click="StartReplayButton_Click"
+                Content="{DynamicResource LogReplayStart}"
+                IsEnabled="False" />
+            <Button
+                Name="StopReplayButton"
+                MinWidth="80"
+                Margin="0,0,12,0"
+                Click="StopReplayButton_Click"
+                Content="{DynamicResource LogReplayStop}"
+                IsEnabled="False" />
+            <TextBlock
+                Name="ReplayStatusTextBlock"
+                VerticalAlignment="Center"
+                Text="{DynamicResource LogReplayIdle}" />
+        </WrapPanel>
+
+        <DataGrid
+            Name="ReplayStepsGrid"
+            Grid.Row="4"
+            AutoGenerateColumns="False"
+            CanUserAddRows="False"
+            CanUserDeleteRows="False"
+            CanUserResizeRows="False"
+            HeadersVisibility="Column"
+            IsReadOnly="True"
+            ItemsSource="{Binding Steps}">
+            <DataGrid.Columns>
+                <DataGridTextColumn
+                    Width="60"
+                    Binding="{Binding Index}"
+                    Header="#" />
+                <DataGridTextColumn
+                    Width="90"
+                    Binding="{Binding DirectionText}"
+                    Header="{DynamicResource LogReplayDirection}" />
+                <DataGridTextColumn
+                    Width="*"
+                    Binding="{Binding Text}"
+                    Header="{DynamicResource LogReplayData}" />
+                <DataGridTextColumn
+                    Width="120"
+                    Binding="{Binding Status}"
+                    Header="{DynamicResource LogReplayStepStatus}" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</Page>

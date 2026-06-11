@@ -68,6 +68,8 @@ namespace llcom.Pages
             EnterSendCheckBox.DataContext = Tools.Global.setting;
             DisableLogCheckBox.DataContext = Tools.Global.setting;
             EnableSymbolCheckBox.DataContext = Tools.Global.setting;
+            SessionLogCheckBox.DataContext = Tools.Global.setting;
+            SessionLogFolderButton.DataContext = Tools.Global.setting;
 
             lastPackShowMode = Tools.Global.setting.timeout >= 0;
             MainListScrollViewer.Visibility = lastPackShowMode ? Visibility.Visible : Visibility.Collapsed;
@@ -288,6 +290,26 @@ namespace llcom.Pages
                 sw.Flush();
                 sw.Close();
                 fs.Close();
+            }
+        }
+
+        private void SessionLogFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = TryFindResource("SessionLogFolderTip") as string ?? "Select log folder";
+                if (!string.IsNullOrWhiteSpace(Tools.Global.setting.sessionLogFolder) &&
+                    Directory.Exists(Tools.Global.setting.sessionLogFolder))
+                {
+                    dialog.SelectedPath = Tools.Global.setting.sessionLogFolder;
+                }
+                else
+                {
+                    dialog.SelectedPath = Tools.Global.ProfilePath;
+                }
+
+                if (dialog.ShowDialog() == DialogResult.OK)
+                    Tools.Global.setting.sessionLogFolder = dialog.SelectedPath;
             }
         }
     }

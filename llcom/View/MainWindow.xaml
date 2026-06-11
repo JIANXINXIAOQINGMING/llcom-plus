@@ -96,16 +96,8 @@
                 Click="ClearLogButton_Click"
                 Content="{DynamicResource ClearLog}" />
             <Button
-                Name="sendFileButton"
-                Grid.Row="1"
-                Grid.Column="4"
-                Margin="2"
-                Click="SendFileButton_Click"
-                Content="{DynamicResource SendFileButton}"
-                ToolTip="{DynamicResource SendFileButtonTip}" />
-            <Button
                 Name="MoreSettingButton"
-                Grid.Row="2"
+                Grid.Row="1"
                 Grid.Column="4"
                 Margin="2"
                 Click="MoreSettingButton_Click"
@@ -122,8 +114,33 @@
                 FontFamily="Consolas"
                 PreviewKeyDown="ToSendDataTextBox_PreviewKeyDown"
                 Text="{Binding dataToSend}"
+                TextChanged="ToSendDataTextBox_TextChanged"
                 TextWrapping="Wrap"
+                LostFocus="ToSendDataTextBox_LostFocus"
                 VerticalScrollBarVisibility="Auto" />
+            <Popup
+                Name="sendSuggestPopup"
+                Grid.RowSpan="3"
+                Grid.Column="5"
+                AllowsTransparency="True"
+                Placement="Top"
+                PlacementTarget="{Binding ElementName=toSendDataTextBox}"
+                StaysOpen="False"
+                VerticalOffset="-4">
+                <Border
+                    Padding="1"
+                    Background="White"
+                    BorderBrush="#888"
+                    BorderThickness="1">
+                    <ListBox
+                        Name="sendSuggestListBox"
+                        MinHeight="26"
+                        MaxHeight="180"
+                        Width="{Binding ElementName=toSendDataTextBox, Path=ActualWidth}"
+                        FontFamily="Consolas"
+                        MouseDoubleClick="SendSuggestListBox_MouseDoubleClick" />
+                </Border>
+            </Popup>
             <Button
                 Name="sendDataButton"
                 Grid.RowSpan="3"
@@ -801,6 +818,12 @@
                     </TabItem>
                     <TabItem Header="{DynamicResource TcpClientTitle}">
                         <Frame Name="tcpClientFrame" NavigationUIVisibility="Hidden" />
+                    </TabItem>
+                    <TabItem Header="{DynamicResource DataCalcToolTab}">
+                        <Frame Name="DataCalcFrame" NavigationUIVisibility="Hidden" />
+                    </TabItem>
+                    <TabItem Header="{DynamicResource LogReplayToolTab}">
+                        <Frame Name="LogReplayFrame" NavigationUIVisibility="Hidden" />
                     </TabItem>
                     <TabItem Header="{DynamicResource EncodingToolsTab}">
                         <Frame Name="EncodingToolsFrame" NavigationUIVisibility="Hidden" />

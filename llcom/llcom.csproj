@@ -248,8 +248,14 @@
     <Compile Include="Pages\ConvertPage.xaml.cs">
       <DependentUpon>ConvertPage.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Pages\DataCalcPage.xaml.cs">
+      <DependentUpon>DataCalcPage.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Pages\EncodingFixPage.xaml.cs">
       <DependentUpon>EncodingFixPage.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Pages\LogReplayPage.xaml.cs">
+      <DependentUpon>LogReplayPage.xaml</DependentUpon>
     </Compile>
     <Compile Include="Pages\MqttTestPage.xaml.cs">
       <DependentUpon>MqttTestPage.xaml</DependentUpon>
@@ -312,7 +318,15 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="Pages\DataCalcPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Pages\EncodingFixPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Pages\LogReplayPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>

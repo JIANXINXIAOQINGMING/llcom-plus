@@ -124,7 +124,7 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
-        <StackPanel
+        <WrapPanel
             Grid.Row="1"
             Margin="10,0,0,3"
             HorizontalAlignment="Left"
@@ -175,7 +175,19 @@
                 Margin="5,0,0,0"
                 Content="{DynamicResource DisableLog}"
                 IsChecked="{Binding DisableLog}" />
-        </StackPanel>
+            <CheckBox
+                Name="SessionLogCheckBox"
+                Margin="5,0,0,0"
+                Content="{DynamicResource SessionLog}"
+                IsChecked="{Binding sessionLogEnabled}"
+                ToolTip="{DynamicResource SessionLogTip}" />
+            <Button
+                Name="SessionLogFolderButton"
+                Margin="5,0,0,0"
+                Click="SessionLogFolderButton_Click"
+                Content="{DynamicResource SessionLogFolder}"
+                ToolTip="{DynamicResource SessionLogFolderTip}" />
+        </WrapPanel>
         <Button
             Name="LockLogButton"
             Margin="0,0,18,25"

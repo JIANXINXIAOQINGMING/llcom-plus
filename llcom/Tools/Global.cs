@@ -42,6 +42,7 @@ namespace llcom.Tools
                 if (value)
                 {
                     uart.WaitUartReceive.Set();
+                    Logger.StopSessionLog();
                     Logger.CloseUartLog();
                     Logger.CloseLuaLog();
                     if (File.Exists(ProfilePath + "lock"))
@@ -130,6 +131,18 @@ namespace llcom.Tools
         /// </summary>
         public static event EventHandler<string> ChangeTitleEvent;
         public static void ChangeTitle(string s) => ChangeTitleEvent?.Invoke(null, s);
+
+        /// <summary>
+        /// 让工具页面请求主串口发送原始字节
+        /// </summary>
+        public static event Action<byte[]> SendRawDataRequest;
+        public static bool RequestSendRawData(byte[] data)
+        {
+            if (data == null || data.Length == 0 || SendRawDataRequest == null)
+                return false;
+            SendRawDataRequest(data);
+            return true;
+        }
 
         /// <summary>
         /// 刷新lua脚本列表

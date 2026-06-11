@@ -21,16 +21,18 @@ namespace llcom.Tools
             DataClearEvent?.Invoke(null,null);
         }
         //显示日志数据
-        public static void ShowData(byte[] data, bool send)
+        public static void ShowData(byte[] data, bool send, string sessionStringText = null)
         {
             //不刷新日志
             if (Tools.Global.setting.DisableLog)
                 return;
-            DataShowTask?.Invoke(null, new DataShowPara
+            var showData = new DataShowPara
             {
                 data = data,
                 send = send
-            });
+            };
+            WriteSessionLog(showData.time, send ? "send" : "recv", null, data, sessionStringText);
+            DataShowTask?.Invoke(null, showData);
         }
 
         public static void ShowRawData(string title, byte[] data, bool send)
@@ -38,12 +40,13 @@ namespace llcom.Tools
             //不刷新日志
             if (Tools.Global.setting.DisableLog)
                 return;
-            DataShowTask?.Invoke(null, new DataShowRaw
+            var showData = new DataShowRaw
             {
                 title = title,
                 data = data,
                 color = send ? Brushes.DarkRed : Brushes.DarkGreen
-            });
+            };
+            DataShowTask?.Invoke(null, showData);
         }
         //显示日志数据
         public static void ShowDataRaw(DataShowRaw s)
@@ -102,6 +105,187 @@ namespace llcom.Tools
             if (uartLogFile == null)
                 InitUartLog();
             uartLogFile.Debug(l);
+        }
+
+        private static readonly object sessionLogLock = new object();
+        private static StreamWriter sessionStringLogWriter = null;
+        private static StreamWriter sessionHexLogWriter = null;
+        public static string SessionStringLogFilePath { get; private set; } = "";
+        public static string SessionHexLogFilePath { get; private set; } = "";
+
+        public static void StartSessionLog(string portName)
+        {
+            StopSessionLog();
+            if (Tools.Global.setting == null || !Tools.Global.setting.sessionLogEnabled)
+                return;
+
+            try
+            {
+                var folder = Tools.Global.setting.sessionLogFolder;
+                if (string.IsNullOrWhiteSpace(folder))
+                {
+                    folder = Path.Combine(Tools.Global.ProfilePath, "session_logs");
+                    Tools.Global.setting.sessionLogFolder = folder;
+                }
+
+                var safePortName = MakeSafeFileName(string.IsNullOrWhiteSpace(portName) ? "COM" : portName);
+                var portFolder = Path.Combine(folder, safePortName);
+                var stringFolder = Path.Combine(portFolder, "STRING");
+                var hexFolder = Path.Combine(portFolder, "HEX");
+                Directory.CreateDirectory(stringFolder);
+                Directory.CreateDirectory(hexFolder);
+
+                var fileName = $"{DateTime.Now:yyyyMMdd_HHmmss}.log";
+                SessionStringLogFilePath = Path.Combine(stringFolder, fileName);
+                SessionHexLogFilePath = Path.Combine(hexFolder, fileName);
+                lock (sessionLogLock)
+                {
+                    sessionStringLogWriter = CreateSessionLogWriter(SessionStringLogFilePath);
+                    sessionHexLogWriter = CreateSessionLogWriter(SessionHexLogFilePath);
+                    var startLine = $"[START] {DateTime.Now:yyyy/MM/dd HH:mm:ss.fff} {portName}";
+                    sessionStringLogWriter.WriteLine(startLine);
+                    sessionHexLogWriter.WriteLine(startLine);
+                }
+            }
+            catch (Exception ex)
+            {
+                StopSessionLog();
+                AddUartLogDebug($"[SessionLog]start failed:{ex.Message}");
+                SessionStringLogFilePath = "";
+                SessionHexLogFilePath = "";
+            }
+        }
+
+        public static void StopSessionLog()
+        {
+            lock (sessionLogLock)
+            {
+                if (sessionStringLogWriter == null && sessionHexLogWriter == null)
+                    return;
+                try
+                {
+                    var endLine = $"[END] {DateTime.Now:yyyy/MM/dd HH:mm:ss.fff}";
+                    sessionStringLogWriter?.WriteLine(endLine);
+                    sessionHexLogWriter?.WriteLine(endLine);
+                }
+                catch { }
+                finally
+                {
+                    sessionStringLogWriter?.Dispose();
+                    sessionHexLogWriter?.Dispose();
+                    sessionStringLogWriter = null;
+                    sessionHexLogWriter = null;
+                    SessionStringLogFilePath = "";
+                    SessionHexLogFilePath = "";
+                }
+            }
+        }
+
+        private static StreamWriter CreateSessionLogWriter(string path)
+        {
+            return new StreamWriter(
+                new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read),
+                Encoding.UTF8)
+            {
+                AutoFlush = true
+            };
+        }
+
+        private static string MakeSafeFileName(string value)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars())
+                value = value.Replace(c, '_');
+            return value;
+        }
+
+        private static string Byte2SessionString(byte[] data)
+        {
+            var text = new StringBuilder();
+            var plainBytes = new List<byte>();
+            foreach (var b in data)
+            {
+                if (b <= 0x1f || b == 0x7f)
+                {
+                    if (plainBytes.Count > 0)
+                    {
+                        text.Append(Tools.Global.GetEncoding().GetString(plainBytes.ToArray()));
+                        plainBytes.Clear();
+                    }
+                    text.Append(Byte2SessionVisibleSymbol(b));
+                }
+                else
+                {
+                    plainBytes.Add(b);
+                }
+            }
+            if (plainBytes.Count > 0)
+                text.Append(Tools.Global.GetEncoding().GetString(plainBytes.ToArray()));
+            return text.ToString();
+        }
+
+        private static string Byte2SessionVisibleSymbol(byte data)
+        {
+            switch (data)
+            {
+                case 0x00:
+                    return "\\0";
+                case 0x07:
+                    return "\\a";
+                case 0x08:
+                    return "\\b";
+                case 0x09:
+                    return "\\t";
+                case 0x0a:
+                    return "\\n";
+                case 0x0b:
+                    return "\\v";
+                case 0x0c:
+                    return "\\f";
+                case 0x0d:
+                    return "\\r";
+                case 0x1b:
+                    return "\\e";
+                default:
+                    return $"\\x{data:X2}";
+            }
+        }
+
+        private static string EscapeSessionString(string text)
+        {
+            if (text == null)
+                return null;
+            return text
+                .Replace("\\", "\\\\")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n")
+                .Replace("\t", "\\t");
+        }
+
+        private static void WriteSessionLog(DateTime time, string direction, string title, byte[] data, string stringText = null)
+        {
+            if (data == null || data.Length == 0)
+                return;
+
+            lock (sessionLogLock)
+            {
+                if (sessionStringLogWriter == null && sessionHexLogWriter == null)
+                    return;
+                try
+                {
+                    var prefix = $"[{time:yyyy/MM/dd HH:mm:ss.fff}] [{direction}]";
+                    if (!string.IsNullOrWhiteSpace(title))
+                        prefix += $" [{title}]";
+
+                    var readable = stringText == null ? Byte2SessionString(data) : EscapeSessionString(stringText);
+                    var hex = Tools.Global.Byte2Hex(data, " ", data.Length);
+                    sessionStringLogWriter?.WriteLine($"{prefix} {readable}");
+                    sessionHexLogWriter?.WriteLine($"{prefix} {hex}");
+                }
+                catch (Exception ex)
+                {
+                    AddUartLogDebug($"[SessionLog]write failed:{ex.Message}");
+                }
+            }
         }
 
         /// <summary>

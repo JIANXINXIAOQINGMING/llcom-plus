@@ -41,6 +41,8 @@ namespace llcom.Model
         private bool _extraEnter = false;
         private bool _enterSend = false;
         private bool _enableSymbol = true;
+        private bool _sessionLogEnabled = false;
+        private string _sessionLogFolder = "";
 
         //窗口大小与位置
         private double _windowTop = 0;
@@ -486,6 +488,26 @@ namespace llcom.Model
             set
             {
                 _enableSymbol = value;
+                Save();
+            }
+        }
+
+        public bool sessionLogEnabled
+        {
+            get => _sessionLogEnabled;
+            set
+            {
+                _sessionLogEnabled = value;
+                Save();
+            }
+        }
+
+        public string sessionLogFolder
+        {
+            get => _sessionLogFolder;
+            set
+            {
+                _sessionLogFolder = value ?? "";
                 Save();
             }
         }

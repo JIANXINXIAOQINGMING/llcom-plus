@@ -67,6 +67,9 @@ namespace llcom
         private bool forcusClosePort = true;
         private bool canSaveSendList = true;
         private bool isOpeningPort = false;
+        private bool applyingSendSuggestion = false;
+        private readonly object sessionSendStringLock = new object();
+        private readonly Queue<string> sessionSendStringOverrides = new Queue<string>();
         public static string recvScriptBackup = "";
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
@@ -78,6 +81,7 @@ namespace llcom
                     Tools.Global.uart.UartDataRecived += Uart_UartDataRecived;
                     Tools.Global.uart.UartDataSent += Uart_UartDataSent;
                     Tools.Global.uart.UartDataRawSent += Uart_UartDataRawSent;
+                    Tools.Global.SendRawDataRequest += Global_SendRawDataRequest;
 
                     //初始化所有数据
                     Tools.Global.Initial();
@@ -186,6 +190,12 @@ namespace llcom
 
                     //tcp客户端页面
                     tcpClientFrame.Navigate(new Uri("Pages/SocketClientPage.xaml", UriKind.Relative));
+
+                    //数据计算和文件发送
+                    DataCalcFrame.Navigate(new Uri("Pages/DataCalcPage.xaml", UriKind.Relative));
+
+                    //日志回放
+                    LogReplayFrame.Navigate(new Uri("Pages/LogReplayPage.xaml", UriKind.Relative));
 
                     //本地tcp服务器
                     tcpLocalTestFrame.Navigate(new Uri("Pages/TcpLocalPage.xaml", UriKind.Relative));
@@ -324,7 +334,7 @@ namespace llcom
 
         private void Uart_UartDataSent(object sender, EventArgs e)
         {
-            Tools.Logger.ShowData(sender as byte[], true);
+            Tools.Logger.ShowData(sender as byte[], true, DequeueSessionSendStringOverride());
         }
 
         private string RawSentTitle = null;
@@ -338,6 +348,27 @@ namespace llcom
         private void Uart_UartDataRecived(object sender, EventArgs e)
         {
             Tools.Logger.ShowData(sender as byte[], false);
+        }
+
+        private void Global_SendRawDataRequest(byte[] data)
+        {
+            Dispatcher.Invoke(new Action(delegate
+            {
+                Global.setting.recvScript = recvScriptBackup;
+                sendUartData(data, true, false);
+            }));
+        }
+
+        private void EnqueueSessionSendStringOverride(string value)
+        {
+            lock (sessionSendStringLock)
+                sessionSendStringOverrides.Enqueue(value);
+        }
+
+        private string DequeueSessionSendStringOverride()
+        {
+            lock (sessionSendStringLock)
+                return sessionSendStringOverrides.Count > 0 ? sessionSendStringOverrides.Dequeue() : null;
         }
 
         private bool refreshLock = false;
@@ -439,6 +470,7 @@ namespace llcom
                                     try
                                     {
                                         Tools.Global.uart.Open();
+                                        Tools.Logger.StartSessionLog(Tools.Global.uart.GetName());
                                         Dispatcher.Invoke(new Action(delegate
                                         {
                                             openClosePortTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
@@ -602,6 +634,7 @@ namespace llcom
         private byte[] toSendData = null;//待发送的数据
         private bool? toSendDataIsHex = null;
         private bool toSendDataApplySendProcessing = true;
+        private string toSendDataSessionStringLogOverride = null;
         private void openPort()
         {
             Tools.Logger.AddUartLogDebug($"[openPort]{isOpeningPort},{serialPortsListComboBox.SelectedItem}");
@@ -647,6 +680,7 @@ namespace llcom
                             Tools.Global.uart.SetName(port);
                             Tools.Logger.AddUartLogDebug($"[openPort]open");
                             Tools.Global.uart.Open();
+                            Tools.Logger.StartSessionLog(port);
                             Tools.Logger.AddUartLogDebug($"[openPort]change show");
                             this.Dispatcher.Invoke(new Action(delegate
                             {
@@ -657,10 +691,11 @@ namespace llcom
                             Tools.Logger.AddUartLogDebug($"[openPort]check to send");
                             if (toSendData != null)
                             {
-                                sendUartData(toSendData, toSendDataIsHex, toSendDataApplySendProcessing);
+                                sendUartData(toSendData, toSendDataIsHex, toSendDataApplySendProcessing, toSendDataSessionStringLogOverride);
                                 toSendData = null;
                                 toSendDataIsHex = null;
                                 toSendDataApplySendProcessing = true;
+                                toSendDataSessionStringLogOverride = null;
                             }
                             Tools.Logger.AddUartLogDebug($"[openPort]done");
                         }
@@ -693,6 +728,7 @@ namespace llcom
                     forcusClosePort = true;//不再重新开启串口
                     lastPort = Tools.Global.uart.GetName();//串口号
                     Tools.Global.uart.Close();
+                    Tools.Logger.StopSessionLog();
                     Tools.Logger.AddUartLogDebug($"[OpenClosePortButton]close done");
                 }
                 catch
@@ -713,25 +749,6 @@ namespace llcom
         private void ClearLogButton_Click(object sender, RoutedEventArgs e)
         {
             Tools.Logger.ClearData();
-        }
-
-        private void SendFileButton_Click(object sender, RoutedEventArgs e)
-        {
-            System.Windows.Forms.OpenFileDialog openFileDialog = new System.Windows.Forms.OpenFileDialog();
-            openFileDialog.Filter = TryFindResource("SendFileFilter") as string ?? "All files|*.*";
-            if (openFileDialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
-                return;
-
-            try
-            {
-                Global.setting.recvScript = recvScriptBackup;
-                var data = File.ReadAllBytes(openFileDialog.FileName);
-                sendUartData(data, true, false);
-            }
-            catch (Exception ex)
-            {
-                Tools.MessageBox.Show($"{TryFindResource("ErrorSendFileFail") as string ?? "?!"}\r\n" + ex.ToString());
-            }
         }
 
         private int lastBaudRateSelectedIndex = -1;
@@ -776,7 +793,7 @@ namespace llcom
         /// 发串口数据
         /// </summary>
         /// <param name="data"></param>
-        private void sendUartData(byte[] data, bool? is_hex = null, bool applySendProcessing = true)
+        private void sendUartData(byte[] data, bool? is_hex = null, bool applySendProcessing = true, string sessionStringLogOverride = null)
         {
             if (data == null)
                 return;
@@ -786,6 +803,7 @@ namespace llcom
                 toSendData = (byte[])data.Clone();//带发送数据缓存起来，连上串口后发出去
                 toSendDataIsHex = is_hex;
                 toSendDataApplySendProcessing = applySendProcessing;
+                toSendDataSessionStringLogOverride = sessionStringLogOverride;
                 openPort();
                 return;
             }
@@ -821,12 +839,23 @@ namespace llcom
                     }
                 }
 
+                if (dataConvert.Length == 0)
+                    return;
+
+                var overrideQueued = false;
                 try
                 {
+                    if (sessionStringLogOverride != null && Tools.Global.setting.showSend)
+                    {
+                        EnqueueSessionSendStringOverride(sessionStringLogOverride);
+                        overrideQueued = true;
+                    }
                     Tools.Global.uart.SendData(dataConvert, applySendProcessing ? data : null);
                 }
                 catch(Exception ex)
                 {
+                    if (overrideQueued)
+                        DequeueSessionSendStringOverride();
                     Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n"+ ex.ToString());
                     return;
                 }
@@ -840,6 +869,9 @@ namespace llcom
 
         private void ToSendDataTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (sendSuggestPopup.IsOpen && HandleSendSuggestionKey(e))
+                return;
+
             if ((e.Key != Key.Return && e.Key != Key.Enter) || !Tools.Global.setting.enterSend)
                 return;
             if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
@@ -853,7 +885,159 @@ namespace llcom
         {
             Global.setting.recvScript = recvScriptBackup;
             var data = Global.GetEncoding().GetBytes(toSendDataTextBox.Text);
-            sendUartData(data);
+            sendUartData(data, null, true, Tools.Global.setting.hexSend ? toSendDataTextBox.Text : null);
+        }
+
+        private bool HandleSendSuggestionKey(KeyEventArgs e)
+        {
+            if (e.Key == Key.Down)
+            {
+                if (sendSuggestListBox.Items.Count > 0)
+                    sendSuggestListBox.SelectedIndex = Math.Min(sendSuggestListBox.SelectedIndex + 1, sendSuggestListBox.Items.Count - 1);
+                e.Handled = true;
+                return true;
+            }
+            if (e.Key == Key.Up)
+            {
+                if (sendSuggestListBox.Items.Count > 0)
+                    sendSuggestListBox.SelectedIndex = Math.Max(sendSuggestListBox.SelectedIndex - 1, 0);
+                e.Handled = true;
+                return true;
+            }
+            if (e.Key == Key.Return || e.Key == Key.Enter || e.Key == Key.Tab)
+            {
+                e.Handled = ApplySelectedSendSuggestion();
+                return e.Handled;
+            }
+            if (e.Key == Key.Escape)
+            {
+                sendSuggestPopup.IsOpen = false;
+                e.Handled = true;
+                return true;
+            }
+            return false;
+        }
+
+        private void ToSendDataTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (!applyingSendSuggestion)
+                UpdateSendSuggestions();
+        }
+
+        private void ToSendDataTextBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(delegate
+            {
+                if (!sendSuggestListBox.IsKeyboardFocusWithin)
+                    sendSuggestPopup.IsOpen = false;
+            }));
+        }
+
+        private void SendSuggestListBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (ApplySelectedSendSuggestion())
+                e.Handled = true;
+        }
+
+        private void UpdateSendSuggestions()
+        {
+            if (!toSendDataTextBox.IsKeyboardFocusWithin)
+            {
+                sendSuggestPopup.IsOpen = false;
+                return;
+            }
+
+            int lineStart;
+            int prefixLength;
+            var prefix = GetCurrentSendLinePrefix(out lineStart, out prefixLength);
+            var matchPrefix = prefix.TrimStart();
+            if (matchPrefix.Length == 0 || !matchPrefix.StartsWith("A", StringComparison.OrdinalIgnoreCase))
+            {
+                sendSuggestPopup.IsOpen = false;
+                return;
+            }
+
+            var items = GetQuickSendAtCommands()
+                .Where(i => i.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase))
+                .Take(12)
+                .ToList();
+
+            if (items.Count == 0)
+            {
+                sendSuggestPopup.IsOpen = false;
+                return;
+            }
+
+            sendSuggestListBox.ItemsSource = items;
+            sendSuggestListBox.SelectedIndex = 0;
+            sendSuggestListBox.Width = toSendDataTextBox.ActualWidth;
+            sendSuggestPopup.IsOpen = true;
+        }
+
+        private IEnumerable<string> GetQuickSendAtCommands()
+        {
+            var allItems = new List<ToSendData>();
+            allItems.AddRange(toSendListItems);
+            if (Tools.Global.setting.quickSendList != null)
+            {
+                foreach (var list in Tools.Global.setting.quickSendList)
+                {
+                    if (list != null)
+                        allItems.AddRange(list);
+                }
+            }
+
+            return allItems
+                .Where(i => i != null && !i.hex && !string.IsNullOrWhiteSpace(i.text))
+                .Select(i => i.text.Trim())
+                .Where(i => i.StartsWith("AT", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private string GetCurrentSendLinePrefix(out int lineStart, out int prefixLength)
+        {
+            var text = toSendDataTextBox.Text ?? "";
+            var caret = Math.Min(toSendDataTextBox.CaretIndex, text.Length);
+            if (caret <= 0)
+            {
+                lineStart = 0;
+                prefixLength = 0;
+                return "";
+            }
+
+            var searchStart = caret - 1;
+            lineStart = Math.Max(text.LastIndexOf('\n', searchStart), text.LastIndexOf('\r', searchStart)) + 1;
+            prefixLength = caret - lineStart;
+            return prefixLength <= 0 ? "" : text.Substring(lineStart, prefixLength);
+        }
+
+        private bool ApplySelectedSendSuggestion()
+        {
+            var selected = sendSuggestListBox.SelectedItem as string;
+            if (string.IsNullOrEmpty(selected))
+                return false;
+
+            int lineStart;
+            int prefixLength;
+            var prefix = GetCurrentSendLinePrefix(out lineStart, out prefixLength);
+            var leadingSpaces = prefix.Length - prefix.TrimStart().Length;
+            var replaceStart = lineStart + leadingSpaces;
+            var replaceLength = Math.Max(prefixLength - leadingSpaces, 0);
+            var text = toSendDataTextBox.Text ?? "";
+
+            applyingSendSuggestion = true;
+            try
+            {
+                toSendDataTextBox.Text = text.Remove(replaceStart, replaceLength).Insert(replaceStart, selected);
+                toSendDataTextBox.CaretIndex = replaceStart + selected.Length;
+            }
+            finally
+            {
+                applyingSendSuggestion = false;
+                sendSuggestPopup.IsOpen = false;
+                toSendDataTextBox.Focus();
+            }
+            return true;
         }
 
         private void AddSendListButton_Click(object sender, RoutedEventArgs e)
@@ -898,7 +1082,7 @@ namespace llcom
             }
 
             var sendData = data.hex ? Global.Hex2Byte(data.text) : Global.GetEncoding().GetBytes(data.text);
-            sendUartData(sendData, true);
+            sendUartData(sendData, true, true, data.hex ? data.text : null);
         }
 
         private void Button_MouseDoubleClick(object sender, MouseButtonEventArgs e)
