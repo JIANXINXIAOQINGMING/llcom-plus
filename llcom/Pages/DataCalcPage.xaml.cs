@@ -2,7 +2,6 @@ using llcom.Tools;
 using System;
 using System.IO;
 using System.Security.Cryptography;
-using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -19,7 +18,7 @@ namespace llcom.Pages
         public DataCalcPage()
         {
             InitializeComponent();
-            UpdateResult(null, TryFindResource("DataCalcNoData") as string ?? "No data");
+            UpdateSelectedSourceResult();
         }
 
         private void SelectFileButton_Click(object sender, RoutedEventArgs e)
@@ -36,72 +35,100 @@ namespace llcom.Pages
                 selectedFilePath = openFileDialog.FileName;
                 selectedFileBytes = File.ReadAllBytes(selectedFilePath);
                 FilePathTextBox.Text = selectedFilePath;
-                FileLengthTextBlock.Text = $"{selectedFileBytes.LongLength} bytes";
-                SendFileDataButton.IsEnabled = selectedFileBytes.Length > 0;
-                UpdateResult(selectedFileBytes, selectedFilePath);
+                SourceComboBox.SelectedIndex = 1;
+                UpdateSelectedSourceResult();
             }
             catch (Exception ex)
             {
                 selectedFilePath = "";
                 selectedFileBytes = null;
-                SendFileDataButton.IsEnabled = false;
                 Tools.MessageBox.Show($"{TryFindResource("ErrorSendFileFail") as string ?? "?!"}\r\n" + ex);
             }
         }
 
-        private void SendFileDataButton_Click(object sender, RoutedEventArgs e)
+        private void SendSelectedDataButton_Click(object sender, RoutedEventArgs e)
         {
-            if (selectedFileBytes == null || selectedFileBytes.Length == 0)
+            var data = GetSelectedSourceBytes();
+            if (data == null || data.Length == 0)
             {
                 Tools.MessageBox.Show(TryFindResource("DataCalcNoData") as string ?? "No data");
                 return;
             }
 
-            if (!Global.RequestSendRawData(selectedFileBytes))
+            if (!Global.RequestSendRawData(data))
                 Tools.MessageBox.Show(TryFindResource("DataCalcSendUnavailable") as string ?? "Serial sender is unavailable.");
         }
 
-        private void CalculateManualButton_Click(object sender, RoutedEventArgs e)
+        private void SourceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            UpdateManualResult();
+            UpdateSelectedSourceResult();
         }
 
-        private void ManualDataChanged(object sender, RoutedEventArgs e)
+        private void InputChanged(object sender, RoutedEventArgs e)
         {
-            UpdateManualResult();
+            UpdateSelectedSourceResult();
         }
 
-        private void UpdateManualResult()
+        private void UpdateSelectedSourceResult()
         {
-            if (ManualDataTextBox == null || ResultTextBox == null)
+            if (SourceResultTextBox == null || SourceComboBox == null)
                 return;
 
-            var data = HexInputCheckBox.IsChecked == true ?
+            UpdateResult(GetSelectedSourceBytes(), GetSelectedSourceName());
+        }
+
+        private byte[] GetSelectedSourceBytes()
+        {
+            if (SourceComboBox != null && SourceComboBox.SelectedIndex == 1)
+                return selectedFileBytes;
+            return GetManualDataBytes();
+        }
+
+        private string GetSelectedSourceName()
+        {
+            if (SourceComboBox != null && SourceComboBox.SelectedIndex == 1)
+            {
+                if (!string.IsNullOrWhiteSpace(selectedFilePath))
+                    return selectedFilePath;
+                return TryFindResource("DataCalcNoFileSelected") as string ?? "No file selected";
+            }
+            return TryFindResource("DataCalcManualInput") as string ?? "Manual input";
+        }
+
+        private byte[] GetManualDataBytes()
+        {
+            return HexInputCheckBox.IsChecked == true ?
                 Global.Hex2Byte(ManualDataTextBox.Text ?? "") :
                 Global.GetEncoding().GetBytes(ManualDataTextBox.Text ?? "");
-            UpdateResult(data, TryFindResource("DataCalcManualInput") as string ?? "Manual input");
         }
 
         private void UpdateResult(byte[] data, string source)
         {
-            ResultTextBox.Text = BuildResult(data, source);
+            SourceResultTextBox.Text = source;
+            if (data == null)
+            {
+                LengthResultTextBox.Text = "0 bytes";
+                ClearResultHashes();
+                return;
+            }
+
+            LengthResultTextBox.Text = $"{data.LongLength} bytes";
+            Md5ResultTextBox.Text = ComputeHash(MD5.Create(), data);
+            Sha1ResultTextBox.Text = ComputeHash(SHA1.Create(), data);
+            Sha256ResultTextBox.Text = ComputeHash(SHA256.Create(), data);
+            Sha512ResultTextBox.Text = ComputeHash(SHA512.Create(), data);
+            Crc16ResultTextBox.Text = $"0x{ComputeCrc16Modbus(data):X4}";
+            Crc32ResultTextBox.Text = $"0x{ComputeCrc32(data):X8}";
         }
 
-        private string BuildResult(byte[] data, string source)
+        private void ClearResultHashes()
         {
-            if (data == null)
-                return $"{source}\r\nLength: 0 bytes";
-
-            var sb = new StringBuilder();
-            sb.AppendLine(source);
-            sb.AppendLine($"Length: {data.LongLength} bytes");
-            sb.AppendLine($"MD5:    {ComputeHash(MD5.Create(), data)}");
-            sb.AppendLine($"SHA1:   {ComputeHash(SHA1.Create(), data)}");
-            sb.AppendLine($"SHA256: {ComputeHash(SHA256.Create(), data)}");
-            sb.AppendLine($"SHA512: {ComputeHash(SHA512.Create(), data)}");
-            sb.AppendLine($"CRC16(Modbus): 0x{ComputeCrc16Modbus(data):X4}");
-            sb.AppendLine($"CRC32:         0x{ComputeCrc32(data):X8}");
-            return sb.ToString();
+            Md5ResultTextBox.Text = "";
+            Sha1ResultTextBox.Text = "";
+            Sha256ResultTextBox.Text = "";
+            Sha512ResultTextBox.Text = "";
+            Crc16ResultTextBox.Text = "";
+            Crc32ResultTextBox.Text = "";
         }
 
         private string ComputeHash(HashAlgorithm hashAlgorithm, byte[] data)

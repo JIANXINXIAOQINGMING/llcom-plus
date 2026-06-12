@@ -3,7 +3,7 @@ using LibUsbDotNet;
 using LibUsbDotNet.Info;
 using LibUsbDotNet.LibUsb;
 using LibUsbDotNet.Main;
-using llcom.LuaEnv;
+using llcom.ScriptEnv;
 using llcom.Tools;
 using System;
 using System.Collections.Generic;
@@ -141,7 +141,7 @@ namespace llcom.Pages
             MainGrid.DataContext = this;
 
             //适配一下通用通道
-            LuaApis.SendChannelsRegister("winusb", (data,_) =>
+            ScriptApis.SendChannelsRegister("winusb", (data,_) =>
             {
                 if (!IsConnected)
                     return false;
@@ -268,7 +268,7 @@ namespace llcom.Pages
                                 var data = temp.Take(readLength).ToArray();
                                 ShowData($"recv {readLength} bytes", data);
                                 //适配一下通用通道
-                                LuaApis.SendChannelsReceived("winusb", data);
+                                ScriptApis.SendChannelsReceived("winusb", data);
                             }
                             lock (toSendBuffer)//发数据
                             {

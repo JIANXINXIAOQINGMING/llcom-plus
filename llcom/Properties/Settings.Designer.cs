@@ -169,9 +169,9 @@ namespace llcom.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("{\"data\":[{\"id\":1,\"text\":\"example string\",\"hex\":false},{\"id\":2,\"text\":\"lua可通过接口获取此" +
+        [global::System.Configuration.DefaultSettingValueAttribute("{\"data\":[{\"id\":1,\"text\":\"example string\",\"hex\":false},{\"id\":2,\"text\":\"JavaScript可通过接口获取此" +
             "处数据\",\"hex\":false},{\"id\":3,\"text\":\"aa 01 02 0d 0a\",\"hex\":true},{\"id\":4,\"text\":\"此处" +
-            "数据会被lua处理\",\"hex\":false}]}")]
+            "数据会被JavaScript处理\",\"hex\":false}]}")]
         public string quickData {
             get {
                 return ((string)(this["quickData"]));

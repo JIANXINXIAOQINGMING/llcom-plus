@@ -1,4 +1,4 @@
-using llcom.LuaEnv;
+﻿using llcom.ScriptEnv;
 using llcom.Tools;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -36,7 +36,7 @@ namespace llcom.Pages
         }
 
         public WebSocket ws = new WebSocket("wss://gps.openluat.com/netlab/ws/netlab");
-        public WebSocket wsV6 = new WebSocket("wss://netlab.luatos.org/ws/netlab");
+        public WebSocket wsV6 = new WebSocket("wss://netlab.jstos.org/ws/netlab");
         ObservableCollection<string> clients = new ObservableCollection<string>();
 
         /// <summary>
@@ -107,7 +107,7 @@ namespace llcom.Pages
                                     ClientList.Text = (string)o["client"];
                             }));
                             //适配一下通用通道
-                            LuaApis.SendChannelsReceived("netlab",
+                            ScriptApis.SendChannelsReceived("netlab",
                                 new
                                 {
                                     client = "connected",
@@ -123,7 +123,7 @@ namespace llcom.Pages
                                     ClientList.Text = clients[0];
                             }));
                             //适配一下通用通道
-                            LuaApis.SendChannelsReceived("netlab",
+                            ScriptApis.SendChannelsReceived("netlab",
                                 new
                                 {
                                     client = "disconnected",
@@ -135,7 +135,7 @@ namespace llcom.Pages
                             byte[] buff = (bool)o["hex"] ? Global.Hex2Byte(data) : Global.GetEncoding().GetBytes(data);
                             ShowData($" → receive from [{o["client"]}]", buff);
                             //适配一下通用通道
-                            LuaApis.SendChannelsReceived("netlab",
+                            ScriptApis.SendChannelsReceived("netlab",
                                 new
                                 {
                                     client = (string)o["client"],
@@ -178,7 +178,7 @@ namespace llcom.Pages
                                     ClientList.Text = (string)o["client"];
                             }));
                             //适配一下通用通道
-                            LuaApis.SendChannelsReceived("netlab",
+                            ScriptApis.SendChannelsReceived("netlab",
                                 new
                                 {
                                     client = "connected",
@@ -194,7 +194,7 @@ namespace llcom.Pages
                                     ClientList.Text = clients[0];
                             }));
                             //适配一下通用通道
-                            LuaApis.SendChannelsReceived("netlab",
+                            ScriptApis.SendChannelsReceived("netlab",
                                 new
                                 {
                                     client = "disconnected",
@@ -206,7 +206,7 @@ namespace llcom.Pages
                             byte[] buff = (bool)o["hex"] ? Global.Hex2Byte(data) : Global.GetEncoding().GetBytes(data);
                             ShowData($" → receive from [{o["client"]}]", buff);
                             //适配一下通用通道
-                            LuaApis.SendChannelsReceived("netlab",
+                            ScriptApis.SendChannelsReceived("netlab",
                                 new
                                 {
                                     client = (string)o["client"],
@@ -236,14 +236,17 @@ namespace llcom.Pages
             };
 
             //适配一下通用通道
-            LuaApis.SendChannelsRegister("netlab", (_, t) =>
+            ScriptApis.SendChannelsRegister("netlab", (data, options) =>
             {
-                if (IsConnected && t != null)
+                if (IsConnected && options != null)
                 {
+                    var client = ScriptApis.GetOption<string>(options, "client");
+                    if (string.IsNullOrEmpty(client))
+                        return false;
                     return Send(
-                        Tools.Global.Byte2Hex(t.Get<byte[]>("data")),
+                        Tools.Global.Byte2Hex(data),
                         true,
-                        t.Get<string>("client")
+                        client
                         );
                 }
                 else
@@ -294,9 +297,9 @@ namespace llcom.Pages
                         }));
                     }
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
-                    //ShowData($"📢 Create failed, {e.Message}");
+                    //ShowData("📢 Create failed");
                 }
             });
             connecting = false;

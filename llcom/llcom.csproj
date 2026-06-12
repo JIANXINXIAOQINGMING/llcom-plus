@@ -1,6 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.props" Condition="Exists('..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.props')" />
   <Import Project="..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props" Condition="Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props')" />
   <Import Project="..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props" Condition="Exists('..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
@@ -11,6 +10,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>llcom</RootNamespace>
     <AssemblyName>llcom</AssemblyName>
+    <StartupObject>llcom.Program</StartupObject>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
@@ -38,7 +38,7 @@
     <BootstrapperEnabled>true</BootstrapperEnabled>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>llcom.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
     <DebugSymbols>true</DebugSymbols>
@@ -95,6 +95,9 @@
     <Reference Include="AdonisUI.ClassicTheme, Version=1.17.1.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\AdonisUI.ClassicTheme.1.17.1\lib\net45\AdonisUI.ClassicTheme.dll</HintPath>
     </Reference>
+    <Reference Include="Acornima, Version=1.6.2.0, Culture=neutral, PublicKeyToken=496b38436bb9edeb, processorArchitecture=MSIL">
+      <HintPath>..\packages\Acornima.1.6.2\lib\net462\Acornima.dll</HintPath>
+    </Reference>
     <Reference Include="CoAP.NET, Version=1.1.0.0, Culture=neutral, PublicKeyToken=e2c10a743037308b, processorArchitecture=MSIL">
       <HintPath>..\packages\CoAP.1.1.0\lib\net40\CoAP.NET.dll</HintPath>
     </Reference>
@@ -110,6 +113,9 @@
     <Reference Include="ICSharpCode.AvalonEdit, Version=6.3.0.90, Culture=neutral, PublicKeyToken=9cc39be672370310, processorArchitecture=MSIL">
       <HintPath>..\packages\AvalonEdit.6.3.0.90\lib\net462\ICSharpCode.AvalonEdit.dll</HintPath>
     </Reference>
+    <Reference Include="Jint, Version=4.9.3.0, Culture=neutral, PublicKeyToken=2e92ba9c8d81157f, processorArchitecture=MSIL">
+      <HintPath>..\packages\Jint.4.9.3\lib\net462\Jint.dll</HintPath>
+    </Reference>
     <Reference Include="LibUsbDotNet, Version=3.0.0.0, Culture=neutral, PublicKeyToken=c677239abe1e02a9, processorArchitecture=MSIL">
       <HintPath>..\packages\LibUsbDotNet.3.0.102-alpha\lib\net45\LibUsbDotNet.dll</HintPath>
     </Reference>
@@ -122,9 +128,6 @@
     </Reference>
     <Reference Include="PropertyChanged, Version=3.4.0.0, Culture=neutral, PublicKeyToken=ee3ee20bcf148ddd, processorArchitecture=MSIL">
       <HintPath>..\packages\PropertyChanged.Fody.3.4.0\lib\net40\PropertyChanged.dll</HintPath>
-    </Reference>
-    <Reference Include="RestSharp, Version=106.15.0.0, Culture=neutral, PublicKeyToken=598062e77f915f75, processorArchitecture=MSIL">
-      <HintPath>..\packages\RestSharp.106.15.0\lib\net452\RestSharp.dll</HintPath>
     </Reference>
     <Reference Include="ScottPlot, Version=4.1.65.0, Culture=neutral, PublicKeyToken=86698dc10387c39e, processorArchitecture=MSIL">
       <HintPath>..\packages\ScottPlot.4.1.65\lib\net462\ScottPlot.dll</HintPath>
@@ -231,19 +234,13 @@
     <Reference Include="WindowsBase" />
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
-    <Reference Include="XLua.Mini">
-      <HintPath>Lib\XLua.Mini.dll</HintPath>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
-    <Compile Include="LuaEnv\LuaEnv.cs" />
     <Compile Include="Model\LinePlotPoint.cs" />
-    <Compile Include="Model\LuaFolding.cs" />
-    <Compile Include="Model\OnlineScript.cs" />
     <Compile Include="Pages\Convert.cs" />
     <Compile Include="Pages\ConvertPage.xaml.cs">
       <DependentUpon>ConvertPage.xaml</DependentUpon>
@@ -259,9 +256,6 @@
     </Compile>
     <Compile Include="Pages\MqttTestPage.xaml.cs">
       <DependentUpon>MqttTestPage.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="Pages\OnlineScriptsPage.xaml.cs">
-      <DependentUpon>OnlineScriptsPage.xaml</DependentUpon>
     </Compile>
     <Compile Include="Pages\PlotPage.xaml.cs">
       <DependentUpon>PlotPage.xaml</DependentUpon>
@@ -284,17 +278,28 @@
     <Compile Include="Pages\WinUSBPage.xaml.cs">
       <DependentUpon>WinUSBPage.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Program.cs" />
     <Compile Include="Tools\InputDialog.cs" />
+    <Compile Include="Tools\StartupProfiler.cs" />
     <Compile Include="Tools\Win32.cs" />
+    <Compile Include="HttpTools\HeaderParser.cs" />
+    <Compile Include="HttpTools\HttpRequestService.cs" />
+    <Compile Include="HttpTools\HttpToolModels.cs" />
     <Compile Include="View\InputDialogWindow.xaml.cs">
       <DependentUpon>InputDialogWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="View\FlowControlWindow.xaml.cs">
       <DependentUpon>FlowControlWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="LuaEnv\LuaApis.cs" />
-    <Compile Include="LuaEnv\LuaLoader.cs" />
-    <Compile Include="LuaEnv\LuaRunEnv.cs" />
+    <Compile Include="View\DataCalcWindow.xaml.cs">
+      <DependentUpon>DataCalcWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="View\HttpToolWindow.xaml.cs">
+      <DependentUpon>HttpToolWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ScriptEnv\ScriptApis.cs" />
+    <Compile Include="ScriptEnv\JavaScriptLoader.cs" />
+    <Compile Include="ScriptEnv\JavaScriptRunEnv.cs" />
     <Compile Include="Model\Settings.cs" />
     <Compile Include="Model\ToSendData.cs" />
     <Compile Include="Model\Uart.cs" />
@@ -337,10 +342,6 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\OnlineScriptsPage.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
     <Page Include="Pages\PlotPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -374,6 +375,14 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="View\FlowControlWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="View\DataCalcWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="View\HttpToolWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -420,29 +429,27 @@
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
-    <EmbeddedResource Include="Lua.xshd" />
-    <Resource Include="DefaultFiles\core_script\head.lua" />
-    <Resource Include="DefaultFiles\core_script\JSON.lua" />
-    <Resource Include="DefaultFiles\core_script\log.lua" />
-    <Resource Include="DefaultFiles\core_script\strings.lua" />
-    <Resource Include="DefaultFiles\core_script\sys.lua" />
     <Resource Include="DefaultFiles\LICENSE" />
-    <Resource Include="DefaultFiles\user_script_run\AT控制TCP连接-快发模式.lua" />
-    <Resource Include="DefaultFiles\user_script_run\AT控制TCP连接-慢发模式.lua" />
-    <Resource Include="DefaultFiles\user_script_run\example.lua" />
-    <Resource Include="DefaultFiles\user_script_run\循环发送快捷发送区数据.lua" />
-    <Resource Include="DefaultFiles\user_script_send_convert\16进制数据.lua" />
-    <Resource Include="DefaultFiles\user_script_send_convert\GPS NMEA.lua" />
-    <Resource Include="DefaultFiles\user_script_send_convert\加上换行回车.lua" />
-    <Resource Include="DefaultFiles\user_script_send_convert\解析换行回车的转义字符.lua" />
-    <Resource Include="DefaultFiles\user_script_send_convert\default.lua" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\default.lua" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线.lua" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线-多条.lua" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线-解析结构体.lua" />
-    <Resource Include="DefaultFiles\user_script_run\channel-demo.lua" />
-    <Resource Include="DefaultFiles\user_script_send_convert\checksum.lua" />
+    <Resource Include="DefaultFiles\user_script_run\AT控制TCP连接-快发模式.js" />
+    <Resource Include="DefaultFiles\user_script_run\AT控制TCP连接-慢发模式.js" />
+    <Resource Include="DefaultFiles\user_script_run\example.js" />
+    <Resource Include="DefaultFiles\user_script_run\循环发送快捷发送区数据.js" />
+    <Resource Include="DefaultFiles\user_script_run\channel-demo.js" />
+    <Resource Include="DefaultFiles\user_script_send_convert\16进制数据.js" />
+    <Resource Include="DefaultFiles\user_script_send_convert\GPS NMEA.js" />
+    <Resource Include="DefaultFiles\user_script_send_convert\加上换行回车.js" />
+    <Resource Include="DefaultFiles\user_script_send_convert\解析换行回车的转义字符.js" />
+    <Resource Include="DefaultFiles\user_script_send_convert\default.js" />
+    <Resource Include="DefaultFiles\user_script_send_convert\checksum.js" />
+    <Resource Include="DefaultFiles\user_script_recv_convert\default.js" />
+    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线.js" />
+    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线-多条.js" />
+    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线-解析结构体.js" />
     <None Include="packages.config" />
+    <None Include="..\JavaScriptApi.md">
+      <Link>JavaScriptApi.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="Properties\Settings.settings">
       <Generator>PublicSettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -452,13 +459,13 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="llcom.ico" />
+    <Resource Include="Assets\AppIcon.ico" />
+    <Resource Include="Assets\AppBackground.png" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="FodyWeavers.xml" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="costura32\xlua.dll" />
   </ItemGroup>
   <ItemGroup>
   </ItemGroup>
@@ -479,17 +486,37 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="costura64\serial_monitor.dll" />
-    <EmbeddedResource Include="costura64\xlua.dll" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="DefaultFiles\libusb-1.0-x64.dll" />
     <Resource Include="DefaultFiles\libusb-1.0-x86.dll" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Target Name="AfterBuild">
+  <Target Name="CreateReleaseZip" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <GetAssemblyIdentity AssemblyFiles="$(TargetPath)">
+      <Output TaskParameter="Assemblies" ItemName="BuiltAssemblyIdentity" />
+    </GetAssemblyIdentity>
+    <PropertyGroup>
+      <ReleasePackageVersion>%(BuiltAssemblyIdentity.Version)</ReleasePackageVersion>
+      <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>
+      <ReleasePackagePlatform Condition="'$(ReleasePackagePlatform)' == ''">$(Platform)</ReleasePackagePlatform>
+      <ReleasePackageRoot>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)release_package\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform)</ReleasePackageRoot>
+      <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
+    </PropertyGroup>
     <ItemGroup>
-      <MoveToLibFolder Include="$(OutputPath)*.dll ; $(OutputPath)*.pdb ; $(OutputPath)*.xml" />
+      <ReleasePackageFile Include="$(TargetPath)" />
+      <ReleasePackageFile Include="$(TargetDir)$(TargetFileName).config" Condition="Exists('$(TargetDir)$(TargetFileName).config')" />
+      <ReleasePackageFile Include="$(TargetDir)CrashReporter.NET.dll.config" Condition="Exists('$(TargetDir)CrashReporter.NET.dll.config')" />
+      <ReleasePackageFile Include="$(TargetDir)JavaScriptApi.md" Condition="Exists('$(TargetDir)JavaScriptApi.md')" />
+      <ReleasePackageFile Include="$(MSBuildProjectDirectory)\DefaultFiles\LICENSE" Condition="Exists('$(MSBuildProjectDirectory)\DefaultFiles\LICENSE')" />
     </ItemGroup>
+    <MakeDir Directories="$(MSBuildProjectDirectory)\..\artifacts\release" />
+    <RemoveDir Directories="$(ReleasePackageRoot)" Condition="Exists('$(ReleasePackageRoot)')" />
+    <MakeDir Directories="$(ReleasePackageRoot)" />
+    <Copy SourceFiles="@(ReleasePackageFile)" DestinationFiles="@(ReleasePackageFile->'$(ReleasePackageRoot)\%(Filename)%(Extension)')" />
+    <Delete Files="$(ReleasePackageZip)" Condition="Exists('$(ReleasePackageZip)')" />
+    <ZipDirectory SourceDirectory="$(ReleasePackageRoot)" DestinationFile="$(ReleasePackageZip)" />
+    <Message Importance="High" Text="Release zip -> $(ReleasePackageZip)" />
   </Target>
   <PropertyGroup>
     <PostBuildEvent>
@@ -504,11 +531,8 @@
     <Error Condition="!Exists('..\packages\Fody.6.6.0\build\Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Fody.6.6.0\build\Fody.targets'))" />
     <Error Condition="!Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props'))" />
     <Error Condition="!Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets'))" />
-    <Error Condition="!Exists('..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.props'))" />
-    <Error Condition="!Exists('..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.targets'))" />
   </Target>
   <Import Project="..\packages\NETStandard.Library.2.0.3\build\netstandard2.0\NETStandard.Library.targets" Condition="Exists('..\packages\NETStandard.Library.2.0.3\build\netstandard2.0\NETStandard.Library.targets')" />
   <Import Project="..\packages\Fody.6.6.0\build\Fody.targets" Condition="Exists('..\packages\Fody.6.6.0\build\Fody.targets')" />
   <Import Project="..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets" Condition="Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets')" />
-  <Import Project="..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.targets" Condition="Exists('..\packages\Walterlv.Environment.Source.7.2.0\build\Walterlv.Environment.Source.targets')" />
 </Project>

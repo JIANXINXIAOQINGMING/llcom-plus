@@ -1,4 +1,4 @@
-<Window
+﻿<Window
     x:Class="llcom.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -12,6 +12,7 @@
     Title="{DynamicResource AppTitle}"
     Width="900"
     Height="500"
+    Icon="pack://application:,,,/Assets/AppIcon.ico"
     adonisExtensions:RippleExtension.FadeInDuration="0"
     adonisExtensions:RippleExtension.FadeOutDuration="0"
     Activated="Window_Activated"
@@ -28,6 +29,144 @@
         <local_page:rsTooltip x:Key="rsToolTipConverter" />
         <local_page:rsOpacity x:Key="rsOpacityConverter" />
         <local_page:boolOpacity x:Key="boolOpacityConverter" />
+        <Style x:Key="GlassPanelStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="#DBFFFFFF" />
+            <Setter Property="BorderBrush" Value="#A6FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect
+                        BlurRadius="18"
+                        Direction="270"
+                        Opacity="0.18"
+                        ShadowDepth="3"
+                        Color="#5C4B3B" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GlassPanelTightStyle" BasedOn="{StaticResource GlassPanelStyle}" TargetType="{x:Type Border}">
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect
+                        BlurRadius="12"
+                        Direction="270"
+                        Opacity="0.14"
+                        ShadowDepth="2"
+                        Color="#5C4B3B" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GlassButtonStyle" BasedOn="{StaticResource {x:Type Button}}" TargetType="{x:Type Button}">
+            <Setter Property="Background" Value="{StaticResource AppGlassControlBackground}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,4" />
+        </Style>
+        <Style x:Key="GlassTextBoxStyle" BasedOn="{StaticResource {x:Type TextBox}}" TargetType="{x:Type TextBox}">
+            <Setter Property="Background" Value="{StaticResource AppGlassInputBackground}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="7,5" />
+        </Style>
+        <Style x:Key="GlassTabControlStyle" TargetType="{x:Type TabControl}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TabControl}">
+                        <Grid KeyboardNavigation.TabNavigation="Local">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border
+                                Grid.Row="0"
+                                Margin="0,0,0,8"
+                                Padding="4"
+                                Background="#36FFFFFF"
+                                BorderBrush="#55FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="12">
+                                <TabPanel
+                                    IsItemsHost="True"
+                                    KeyboardNavigation.TabIndex="1"
+                                    Panel.ZIndex="1" />
+                            </Border>
+                            <Border Grid.Row="1" Background="Transparent">
+                                <ContentPresenter
+                                    x:Name="PART_SelectedContentHost"
+                                    ContentSource="SelectedContent"
+                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GlassTabItemStyle" TargetType="{x:Type TabItem}">
+            <Setter Property="Background" Value="{StaticResource AppGlassControlBackground}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="#1E1E1E" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Margin" Value="1" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TabItem}">
+                        <Border
+                            x:Name="Chrome"
+                            MinHeight="31"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="9">
+                            <ContentPresenter
+                                Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                ContentSource="Header"
+                                RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource AppGlassControlHoverBackground}" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#FAFFFFFF" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="StatusPillStyle" TargetType="{x:Type Border}">
+            <Setter Property="Margin" Value="5,0,0,0" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="Background" Value="#DFF6FBFF" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="9" />
+        </Style>
+        <Style x:Key="StatusLabelStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{StaticResource AppGlassMutedBrush}" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+        </Style>
+        <Style x:Key="StatusValueStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource AppGlassTextBrush}" />
+        </Style>
     </Window.Resources>
     <Window.InputBindings>
         <KeyBinding
@@ -39,6 +178,12 @@
         <CommandBinding Command="{StaticResource SendUartData}" Executed="SendUartData_Executed" />
     </Window.CommandBindings>
     <Grid Name="MainGrid" IsEnabled="False">
+        <Grid.Background>
+            <ImageBrush
+                ImageSource="pack://application:,,,/Assets/AppBackground.png"
+                Opacity="0.58"
+                Stretch="UniformToFill" />
+        </Grid.Background>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -49,21 +194,38 @@
             <ColumnDefinition Width="auto" />
             <ColumnDefinition Width="7*" />
         </Grid.ColumnDefinitions>
+        <Border
+            Grid.RowSpan="3"
+            Grid.ColumnSpan="3"
+            Background="#24FFF8EC"
+            IsHitTestVisible="False" />
 
         <!--  收发数据显示  -->
-        <Frame
-            Name="dataShowFrame"
-            Background="Transparent"
-            BorderBrush="#00000000"
-            BorderThickness="0.5"
-            GotFocus="uartDataFlowDocument_GotFocus"
-            LostFocus="uartDataFlowDocument_LostFocus"
-            NavigationUIVisibility="Hidden"
-            PreviewKeyDown="uartDataFlowDocument_PreviewKeyDown"
-            PreviewTextInput="uartDataFlowDocument_PreviewTextInput" />
+        <Border
+            Grid.Row="0"
+            Grid.Column="0"
+            Margin="10,10,6,6"
+            Padding="6"
+            Style="{StaticResource GlassPanelStyle}">
+            <Frame
+                Name="dataShowFrame"
+                Background="Transparent"
+                BorderBrush="#00000000"
+                BorderThickness="0.5"
+                GotFocus="uartDataFlowDocument_GotFocus"
+                LostFocus="uartDataFlowDocument_LostFocus"
+                NavigationUIVisibility="Hidden"
+                PreviewKeyDown="uartDataFlowDocument_PreviewKeyDown"
+                PreviewTextInput="uartDataFlowDocument_PreviewTextInput" />
+        </Border>
 
         <!--  发送数据区  -->
-        <Grid Grid.Row="1" Margin="2">
+        <Border
+            Grid.Row="1"
+            Margin="10,4,6,8"
+            Padding="6"
+            Style="{StaticResource GlassPanelTightStyle}">
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
@@ -83,6 +245,7 @@
                 Grid.RowSpan="3"
                 Grid.Column="3"
                 Margin="2"
+                Style="{StaticResource GlassButtonStyle}"
                 Click="OpenClosePortButton_Click">
                 <WrapPanel>
                     <TextBlock Name="openClosePortTextBlock" Text="{DynamicResource OpenPort_open}" />
@@ -93,6 +256,7 @@
                 Name="clearLogButton"
                 Grid.Column="4"
                 Margin="2"
+                Style="{StaticResource GlassButtonStyle}"
                 Click="ClearLogButton_Click"
                 Content="{DynamicResource ClearLog}" />
             <Button
@@ -100,6 +264,7 @@
                 Grid.Row="1"
                 Grid.Column="4"
                 Margin="2"
+                Style="{StaticResource GlassButtonStyle}"
                 Click="FlowControlButton_Click"
                 Content="{DynamicResource FlowControlButton}"
                 ToolTip="{DynamicResource FlowControlButtonTip}" />
@@ -108,6 +273,7 @@
                 Grid.Row="2"
                 Grid.Column="4"
                 Margin="2"
+                Style="{StaticResource GlassButtonStyle}"
                 Click="MoreSettingButton_Click"
                 Content="{DynamicResource MoreSettings}"
                 ToolTip="{DynamicResource MoreSettingsTip}" />
@@ -117,6 +283,7 @@
                 Grid.Column="5"
                 Height="75"
                 Margin="2"
+                Style="{StaticResource GlassTextBoxStyle}"
                 VerticalContentAlignment="Top"
                 AcceptsReturn="True"
                 FontFamily="Consolas"
@@ -136,10 +303,11 @@
                 StaysOpen="False"
                 VerticalOffset="-4">
                 <Border
-                    Padding="1"
-                    Background="White"
-                    BorderBrush="#888"
-                    BorderThickness="1">
+                    Padding="3"
+                    Background="#FAFFFFFF"
+                    BorderBrush="{StaticResource AppGlassBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
                     <ListBox
                         Name="sendSuggestListBox"
                         MinHeight="26"
@@ -154,220 +322,162 @@
                 Grid.RowSpan="3"
                 Grid.Column="6"
                 Margin="2"
+                Style="{StaticResource GlassButtonStyle}"
                 Command="{StaticResource SendUartData}"
                 Content="{DynamicResource SendDataButton}"
                 ToolTip="{DynamicResource SendDataButtonTip}" />
         </Grid>
+        </Border>
 
 
         <!--  底部状态栏  -->
-        <DockPanel Grid.Row="2" Grid.ColumnSpan="3">
-            <StatusBar DockPanel.Dock="Bottom">
-                <StatusBar.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="auto" />
-                            </Grid.ColumnDefinitions>
-                        </Grid>
-                    </ItemsPanelTemplate>
-                </StatusBar.ItemsPanel>
-                <Button
-                    Name="refreshPortButton"
-                    Grid.Column="0"
-                    Click="RefreshPortButton_Click"
-                    Content="{DynamicResource RefreshPortButton}"
-                    IsEnabled="{Binding ElementName=serialPortsListComboBox, Path=IsEnabled}" />
-                <StatusBarItem Grid.Column="1">
-                    <TextBlock Text="{DynamicResource ShowPorts}" />
-                </StatusBarItem>
-                <Separator Grid.Column="2" />
-                <StatusBarItem Grid.Column="3">
-                    <ComboBox
-                        Name="serialPortsListComboBox"
-                        MinWidth="150"
-                        MaxWidth="300" />
-                </StatusBarItem>
-                <Separator Grid.Column="4" />
-                <StatusBarItem Grid.Column="5">
-                    <TextBlock Text="{DynamicResource ShowBaudRate}" />
-                </StatusBarItem>
-                <Separator Grid.Column="6" />
-                <StatusBarItem Grid.Column="7">
-                    <ComboBox
-                        Name="baudRateComboBox"
-                        Width="80"
-                        DropDownClosed="BaudRateComboBox_Changed"
-                        DropDownOpened="BaudRateComboBox_Changed">
-                        <ComboBoxItem Content="110" />
-                        <ComboBoxItem Content="330" />
-                        <ComboBoxItem Content="600" />
-                        <ComboBoxItem Content="1200" />
-                        <ComboBoxItem Content="2400" />
-                        <ComboBoxItem Content="4800" />
-                        <ComboBoxItem Content="9600" />
-                        <ComboBoxItem Content="14400" />
-                        <ComboBoxItem Content="19200" />
-                        <ComboBoxItem Content="38400" />
-                        <ComboBoxItem Content="56000" />
-                        <ComboBoxItem Content="57600" />
-                        <ComboBoxItem Content="115200" />
-                        <ComboBoxItem Content="128000" />
-                        <ComboBoxItem Content="230400" />
-                        <ComboBoxItem Content="256000" />
-                        <ComboBoxItem Content="460800" />
-                        <ComboBoxItem Content="500000" />
-                        <ComboBoxItem Content="128000" />
-                        <ComboBoxItem Content="512000" />
-                        <ComboBoxItem Content="600000" />
-                        <ComboBoxItem Content="750000" />
-                        <ComboBoxItem Content="921600" />
-                        <ComboBoxItem Content="1000000" />
-                        <ComboBoxItem Content="1500000" />
-                        <ComboBoxItem Content="2000000" />
-                        <ComboBoxItem Content="3000000" />
-                        <ComboBoxItem Content="{DynamicResource OtherRate}" />
-                    </ComboBox>
-                </StatusBarItem>
-                <Separator Grid.Column="8" />
-                <StatusBarItem Grid.Column="9">
-                    <TextBlock Text="{DynamicResource ShowStatus}" />
-                </StatusBarItem>
-                <Separator Grid.Column="10" />
-                <StatusBarItem Grid.Column="11">
-                    <TextBlock Name="statusTextBlock" Text="{DynamicResource OpenPort_close}" />
-                </StatusBarItem>
-                <Separator Grid.Column="12" />
-                <StatusBarItem Grid.Column="13">
-                    <TextBlock
-                        Cursor="Cross"
-                        MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
-                        Text="{DynamicResource SentCount}"
-                        ToolTip="{DynamicResource ClearCountTip}" />
-                </StatusBarItem>
-                <Separator Grid.Column="14" />
-                <StatusBarItem Grid.Column="15">
-                    <TextBlock
-                        Name="sentCountTextBlock"
-                        Cursor="Cross"
-                        MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
-                        Text="{Binding SentCount}"
-                        ToolTip="{DynamicResource ClearCountTip}" />
-                </StatusBarItem>
-                <Separator Grid.Column="16" />
-                <StatusBarItem Grid.Column="17">
-                    <TextBlock
-                        Cursor="Cross"
-                        MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
-                        Text="{DynamicResource ReceivedCount}"
-                        ToolTip="{DynamicResource ClearCountTip}" />
-                </StatusBarItem>
-                <Separator Grid.Column="18" />
-                <StatusBarItem Grid.Column="19">
-                    <TextBlock
-                        Name="receivedCountTextBlock"
-                        Cursor="Cross"
-                        MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
-                        Text="{Binding ReceivedCount}"
-                        ToolTip="{DynamicResource ClearCountTip}" />
-                </StatusBarItem>
-            </StatusBar>
-        </DockPanel>
+        <Border
+            Grid.Row="2"
+            Grid.ColumnSpan="3"
+            Margin="10,0,10,10"
+            Padding="4"
+            Style="{StaticResource GlassPanelTightStyle}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button
+                Name="refreshPortButton"
+                Grid.Column="0"
+                MinHeight="32"
+                Margin="0,0,8,0"
+                Style="{StaticResource GlassButtonStyle}"
+                Click="RefreshPortButton_Click"
+                Content="{DynamicResource RefreshPortButton}"
+                IsEnabled="{Binding ElementName=serialPortsListComboBox, Path=IsEnabled}" />
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Orientation="Horizontal">
+                <TextBlock
+                    Margin="0,0,6,0"
+                    VerticalAlignment="Center"
+                    Text="{DynamicResource ShowPorts}" />
+                <ComboBox
+                    Name="serialPortsListComboBox"
+                    MinWidth="190"
+                    MaxWidth="320"
+                    Margin="0,0,12,0" />
+                <TextBlock
+                    Margin="0,0,6,0"
+                    VerticalAlignment="Center"
+                    Text="{DynamicResource ShowBaudRate}" />
+                <ComboBox
+                    Name="baudRateComboBox"
+                    Width="90"
+                    DropDownClosed="BaudRateComboBox_Changed"
+                    DropDownOpened="BaudRateComboBox_Changed">
+                    <ComboBoxItem Content="110" />
+                    <ComboBoxItem Content="330" />
+                    <ComboBoxItem Content="600" />
+                    <ComboBoxItem Content="1200" />
+                    <ComboBoxItem Content="2400" />
+                    <ComboBoxItem Content="4800" />
+                    <ComboBoxItem Content="9600" />
+                    <ComboBoxItem Content="14400" />
+                    <ComboBoxItem Content="19200" />
+                    <ComboBoxItem Content="38400" />
+                    <ComboBoxItem Content="56000" />
+                    <ComboBoxItem Content="57600" />
+                    <ComboBoxItem Content="115200" />
+                    <ComboBoxItem Content="128000" />
+                    <ComboBoxItem Content="230400" />
+                    <ComboBoxItem Content="256000" />
+                    <ComboBoxItem Content="460800" />
+                    <ComboBoxItem Content="500000" />
+                    <ComboBoxItem Content="128000" />
+                    <ComboBoxItem Content="512000" />
+                    <ComboBoxItem Content="600000" />
+                    <ComboBoxItem Content="750000" />
+                    <ComboBoxItem Content="921600" />
+                    <ComboBoxItem Content="1000000" />
+                    <ComboBoxItem Content="1500000" />
+                    <ComboBoxItem Content="2000000" />
+                    <ComboBoxItem Content="3000000" />
+                    <ComboBoxItem Content="{DynamicResource OtherRate}" />
+                </ComboBox>
+            </StackPanel>
+            <StackPanel
+                Grid.Column="3"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Orientation="Horizontal">
+                <Border Style="{StaticResource StatusPillStyle}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource ShowStatus}" />
+                        <TextBlock Name="statusTextBlock" Style="{StaticResource StatusValueStyle}" Text="{DynamicResource OpenPort_close}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatusPillStyle}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock
+                            Cursor="Cross"
+                            MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusLabelStyle}"
+                            Text="{DynamicResource SentCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                        <TextBlock
+                            Name="sentCountTextBlock"
+                            Cursor="Cross"
+                            MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusValueStyle}"
+                            Text="{Binding SentCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatusPillStyle}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock
+                            Cursor="Cross"
+                            MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusLabelStyle}"
+                            Text="{DynamicResource ReceivedCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                        <TextBlock
+                            Name="receivedCountTextBlock"
+                            Cursor="Cross"
+                            MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusValueStyle}"
+                            Text="{Binding ReceivedCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
+        </Border>
 
         <!--  中间改变分割大小的东西  -->
         <GridSplitter
             Grid.RowSpan="2"
             Grid.Column="1"
             Width="5"
-            HorizontalAlignment="Stretch" />
+            Margin="0,10,0,8"
+            HorizontalAlignment="Stretch"
+            Background="#66FFFFFF" />
 
         <!--  右侧脚本、快捷发送  -->
-        <TabControl Grid.RowSpan="2" Grid.Column="3">
-            <TabItem>
-                <TabItem.Header>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{DynamicResource QuickSendCard}" />
-                        <Menu Grid.Column="1" HorizontalAlignment="Left">
-                            <MenuItem ToolTip="{DynamicResource QuickSendChangeList}">
-                                <MenuItem.Header>
-                                    <Grid>
-                                        <fa:FontAwesome Foreground="LightYellow" Icon="StickyNote" />
-                                        <fa:FontAwesome Foreground="Black" Icon="StickyNoteOutline" />
-                                    </Grid>
-                                </MenuItem.Header>
-                                <MenuItem
-                                    Name="QuiclListName0"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName0}"
-                                    Tag="0" />
-                                <MenuItem
-                                    Name="QuiclListName1"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName1}"
-                                    Tag="1" />
-                                <MenuItem
-                                    Name="QuiclListName2"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName2}"
-                                    Tag="2" />
-                                <MenuItem
-                                    Name="QuiclListName3"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName3}"
-                                    Tag="3" />
-                                <MenuItem
-                                    Name="QuiclListName4"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName4}"
-                                    Tag="4" />
-                                <MenuItem
-                                    Name="QuiclListName5"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName5}"
-                                    Tag="5" />
-                                <MenuItem
-                                    Name="QuiclListName6"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName6}"
-                                    Tag="6" />
-                                <MenuItem
-                                    Name="QuiclListName7"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName7}"
-                                    Tag="7" />
-                                <MenuItem
-                                    Name="QuiclListName8"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName8}"
-                                    Tag="8" />
-                                <MenuItem
-                                    Name="QuiclListName9"
-                                    Click="MenuItem_Click_QuickSendList"
-                                    Header="{Binding quickListName9}"
-                                    Tag="9" />
-                            </MenuItem>
-                        </Menu>
-                    </StackPanel>
-                </TabItem.Header>
+        <Border
+            Grid.RowSpan="2"
+            Grid.Column="3"
+            Margin="6,10,10,6"
+            Padding="8"
+            Style="{StaticResource GlassPanelStyle}">
+        <TabControl
+            Name="MainTabControl"
+            Background="Transparent"
+            BorderThickness="0"
+            Style="{StaticResource GlassTabControlStyle}"
+            ItemContainerStyle="{StaticResource GlassTabItemStyle}"
+            SelectionChanged="MainTabControl_SelectionChanged">
+            <TabItem Name="QuickSendTab" Header="{DynamicResource QuickSendCard}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="auto" />
@@ -381,15 +491,17 @@
                                     <ControlTemplate TargetType="{x:Type ListBoxItem}">
                                         <Grid Name="ItemGrid" Margin="0,3,0,0">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="28" />
                                                 <ColumnDefinition Width="4*" />
-                                                <ColumnDefinition Width="auto" />
-                                                <ColumnDefinition Width="20" />
-                                                <ColumnDefinition Width="25" />
+                                                <ColumnDefinition Width="64" />
+                                                <ColumnDefinition Width="42" />
+                                                <ColumnDefinition Width="46" />
+                                                <ColumnDefinition Width="40" />
+                                                <ColumnDefinition Width="0" />
                                             </Grid.ColumnDefinitions>
                                             <Grid
                                                 Margin="1"
-                                                Background="#F6F6F6"
+                                                Background="Transparent"
                                                 Cursor="Cross"
                                                 MouseRightButtonDown="TextBlock_MouseRightButtonDown"
                                                 Tag="{Binding}" />
@@ -409,6 +521,7 @@
                                                 Text="{Binding text, UpdateSourceTrigger=PropertyChanged}" />
                                             <Button
                                                 Grid.Column="2"
+                                                MinWidth="58"
                                                 HorizontalAlignment="Stretch"
                                                 Click="knowSendDataButton_click"
                                                 Content="{Binding commit}"
@@ -420,6 +533,7 @@
                                                 Grid.Column="3"
                                                 Margin="2"
                                                 HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
                                                 IsChecked="{Binding hex}" />
                                             <TextBlock
                                                 Name="recvScriptSet"
@@ -452,7 +566,7 @@
                                             <TextBlock
                                                 Visibility="Collapsed"
                                                 Name="recvScriptPara"
-                                                Grid.Column="5"
+                                                Grid.Column="6"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
                                                 Opacity="{Binding recvScriptPara, Converter={StaticResource rsOpacityConverter}}"
@@ -473,6 +587,22 @@
                                                     </fa:FontAwesome.Style>
                                                 </fa:FontAwesome>
                                             </TextBlock>
+                                            <Button
+                                                Grid.Column="5"
+                                                Width="28"
+                                                Height="24"
+                                                Margin="3,0,0,0"
+                                                Padding="0"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Click="RemoveSendListItemButton_Click"
+                                                Content="−"
+                                                FontSize="18"
+                                                FontWeight="Bold"
+                                                Foreground="#9B3333"
+                                                Style="{StaticResource GlassButtonStyle}"
+                                                Tag="{Binding}"
+                                                ToolTip="{DynamicResource QuickSendRemoveItem}" />
                                         </Grid>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsMouseOver" Value="true">
@@ -488,42 +618,53 @@
                         </Style>
                     </Grid.Resources>
                     <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="30" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="40" />
-                            <ColumnDefinition Width="25" />
-                            <ColumnDefinition Width="25" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel
-                            Name="QuickListNameStackPanel"
-                            Grid.Column="1"
-                            HorizontalAlignment="Left"
-                            Background="#F6F6F6"
-                            Cursor="Cross"
-                            MouseRightButtonDown="QuickListNameStackPanel_MouseRightButtonDown"
-                            Orientation="Horizontal"
-                            ToolTip="{DynamicResource QuickSendListNameTip}">
-                            <TextBlock Text="(" />
-                            <TextBlock Name="QuickListPageTextBlock" Text="___" />
-                            <TextBlock Text=")" />
-                        </StackPanel>
-                        <TextBlock
-                            Grid.Column="0"
-                            HorizontalAlignment="Center"
-                            Text="{DynamicResource QuickSendId}" />
-                        <TextBlock
-                            Grid.Column="1"
-                            HorizontalAlignment="Center"
-                            Text="{DynamicResource QuickSendContent}" />
-                        <TextBlock
-                            Grid.Column="3"
-                            HorizontalAlignment="Center"
-                            Text="{DynamicResource QuickSendHex}" />
-                        <TextBlock
-                            Grid.Column="4"
-                            HorizontalAlignment="Center"
-                            Text="{DynamicResource QuickSendRecvScript}" />
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock
+                                Margin="2,0,6,0"
+                                VerticalAlignment="Center"
+                                FontWeight="SemiBold"
+                                Text="{DynamicResource QuickSendPage}" />
+                            <ComboBox
+                                Name="QuickListSelectComboBox"
+                                MinWidth="150"
+                                MaxWidth="260"
+                                MaxDropDownHeight="280"
+                                HorizontalAlignment="Left"
+                                SelectionChanged="QuickListSelectComboBox_SelectionChanged"
+                                PreviewMouseRightButtonDown="QuickListSelectComboBox_MouseRightButtonDown"
+                                ToolTip="{DynamicResource QuickSendListNameTip}" />
+                        </DockPanel>
+                        <Grid Grid.Row="1" Margin="0,0,18,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="28" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="64" />
+                                <ColumnDefinition Width="42" />
+                                <ColumnDefinition Width="46" />
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="0" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                Grid.Column="0"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendId}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendContent}" />
+                            <TextBlock
+                                Grid.Column="3"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendHex}" />
+                            <TextBlock
+                                Grid.Column="4"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendRecvScript}" />
+                        </Grid>
                     </Grid>
                     <ListBox
                         Name="toSendList"
@@ -539,17 +680,20 @@
                         <ComboBox Name="recvScriptCombo" Width="250" DropDownClosed="recvScriptCombo_DropDownClosed"/>
                     </Popup>
                     <Popup Name="recvScriptParaPopup" Placement="Bottom" VerticalOffset="5" StaysOpen="False">
-                        <Grid Background="White">
-                            <Border BorderBrush="DarkGray" BorderThickness="1">
-                                <avalonEdit:TextEditor
-                                    xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
+                        <Grid Background="#FAFFFFFF">
+                            <Border
+                                BorderBrush="{StaticResource AppGlassBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <TextBox
                                     Name="recvScriptParaBox" 
                                     Margin="3"
                                     Width="250" Height="100" 
-                                    WordWrap="True"
+                                    AcceptsReturn="True"
                                     HorizontalContentAlignment="Left"
+                                    TextWrapping="Wrap"
                                     VerticalContentAlignment="Top"
-                                    VerticalScrollBarVisibility="Visible"/>
+                                    VerticalScrollBarVisibility="Auto" />
                             </Border>
                             <Grid HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,1,3,0" Background="Transparent">
                                 <Grid.ColumnDefinitions>
@@ -586,29 +730,19 @@
                         </Grid>
                     </Popup>
                     <StackPanel Grid.Row="2">
-                        <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Button
-                                Name="addSendListButton"
-                                Margin="3"
-                                Click="AddSendListButton_Click"
-                                Content="{DynamicResource QuickSendAdd}" />
-                            <Button
-                                Name="deleteSendListButton"
-                                Grid.Column="1"
-                                Margin="3"
-                                Click="DeleteSendListButton_Click"
-                                Content="{DynamicResource QuickSendRemoveLast}" />
-                        </Grid>
-                        <TextBlock
+                        <Button
+                            Name="addSendListButton"
+                            Height="34"
+                            Margin="3,8,3,3"
+                            Click="AddSendListButton_Click"
+                            Content="＋"
+                            FontSize="22"
                             FontWeight="Bold"
-                            Text="{DynamicResource QuickSendTip}"
-                            TextWrapping="Wrap" />
+                            Style="{StaticResource GlassButtonStyle}"
+                            ToolTip="{DynamicResource QuickSendAdd}" />
                         <Grid Margin="0,0,0,0">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
@@ -623,6 +757,12 @@
                                 Margin="3"
                                 Click="QuickSendExportButton_Click"
                                 Content="{DynamicResource QuickSendExport}" />
+                            <Button
+                                Name="QuickSendExportAllButton"
+                                Grid.Column="2"
+                                Margin="3"
+                                Click="QuickSendExportAllButton_Click"
+                                Content="{DynamicResource QuickSendExportAll}" />
                         </Grid>
                         <Grid Margin="0,0,0,0">
                             <Grid.ColumnDefinitions>
@@ -630,26 +770,26 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <Button
-                                Name="removeAllButton"
+                                Name="AddQuickSendPageButton"
                                 Grid.Column="0"
                                 Margin="3"
-                                Click="removeAllButton_Click"
-                                Content="{DynamicResource QuickSendRemoveAll}" />
+                                Click="AddQuickSendPageButton_Click"
+                                Content="{DynamicResource QuickSendAddPage}" />
                             <Button
-                                Name="importSSCOMButton"
+                                Name="DeleteQuickSendPageButton"
                                 Grid.Column="1"
                                 Margin="3"
-                                Click="ImportSSCOMButton_Click"
-                                Content="{DynamicResource QuickSendImportSSCOM}" />
+                                Click="DeleteQuickSendPageButton_Click"
+                                Content="{DynamicResource QuickSendDeletePage}" />
                         </Grid>
 
                     </StackPanel>
                 </Grid>
             </TabItem>
-            <TabItem Header="{DynamicResource LuaCard}">
+            <TabItem Name="ScriptTab" Header="{DynamicResource ScriptCard}">
                 <Grid>
                     <!--  脚本编辑界面  -->
-                    <Grid Name="luaScriptEditorGrid" Visibility="Visible">
+                    <Grid Name="scriptEditorGrid" Visibility="Visible">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="auto" />
                             <RowDefinition Height="auto" />
@@ -657,14 +797,14 @@
                         </Grid.RowDefinitions>
                         <WrapPanel Margin="0,0,0,5" Orientation="Horizontal">
                             <ComboBox
-                                Name="luaFileList"
+                                Name="scriptFileList"
                                 Width="150"
-                                SelectionChanged="LuaFileList_SelectionChanged" />
+                                SelectionChanged="ScriptFileList_SelectionChanged" />
                             <Button
                                 Name="newScriptButton"
                                 Margin="3,0,0,0"
                                 Click="NewScriptButton_Click"
-                                ToolTip="{DynamicResource LuaNewScript}">
+                                ToolTip="{DynamicResource ScriptNewScript}">
                                 <Grid>
                                     <fa:FontAwesome Foreground="LightSkyBlue" Icon="File" />
                                     <fa:FontAwesome Icon="FileCodeOutline" />
@@ -674,14 +814,14 @@
                                 Name="runScriptButton"
                                 Margin="2,0,0,0"
                                 Click="RunScriptButton_Click"
-                                ToolTip="{DynamicResource LuaRunScript}">
+                                ToolTip="{DynamicResource ScriptRunScript}">
                                 <fa:FontAwesome Foreground="DarkGreen" Icon="Play" />
                             </Button>
                             <Button
                                 Name="openScriptFolderButton"
                                 Margin="2,0,0,0"
                                 Click="OpenScriptFolderButton_Click"
-                                ToolTip="{DynamicResource LuaOpenFolder}">
+                                ToolTip="{DynamicResource ScriptOpenFolder}">
                                 <Grid>
                                     <fa:FontAwesome Foreground="Yellow" Icon="FolderOpen" />
                                     <fa:FontAwesome Icon="FolderOutlinepenOutline" />
@@ -691,50 +831,43 @@
                                 Name="refreshScriptListButton"
                                 Margin="2,0,0,0"
                                 Click="RefreshScriptListButton_Click"
-                                ToolTip="{DynamicResource LuaRefreshList}">
+                                ToolTip="{DynamicResource ScriptRefreshList}">
                                 <fa:FontAwesome Foreground="Green" Icon="Refresh" />
                             </Button>
                             <Button
                                 Name="apiDocumentButton"
                                 Margin="2,0,0,0"
                                 Click="ApiDocumentButton_Click"
-                                ToolTip="{DynamicResource LuaApiReference}">
+                                ToolTip="{DynamicResource ScriptApiReference}">
                                 <fa:FontAwesome Foreground="DarkSlateGray" Icon="Book" />
-                            </Button>
-                            <Button
-                                Name="scriptShareButton"
-                                Margin="2,0,0,0"
-                                Click="ScriptShareButton_Click"
-                                ToolTip="{DynamicResource LuaGetShare}">
-                                <fa:FontAwesome Foreground="DarkCyan" Icon="ShareAlt" />
                             </Button>
                         </WrapPanel>
                         <WrapPanel
-                            Name="newLuaFileWrapPanel"
+                            Name="newScriptFileWrapPanel"
                             Grid.Row="1"
                             Margin="3"
                             Visibility="Collapsed">
-                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource LuaFileName}" />
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource ScriptFileName}" />
                             <TextBox
-                                Name="newLuaFileNameTextBox"
+                                Name="newScriptFileNameTextBox"
                                 Width="90"
                                 Text="new script" />
                             <Button
-                                Name="newLuaFilebutton"
+                                Name="newScriptFileButton"
                                 Margin="3,0,0,0"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
-                                Click="NewLuaFilebutton_Click"
-                                ToolTip="{DynamicResource LuaConfirmCreate}">
+                                Click="NewScriptFileButton_Click"
+                                ToolTip="{DynamicResource ScriptConfirmCreate}">
                                 <fa:FontAwesome Foreground="Green" Icon="Check" />
                             </Button>
                             <Button
-                                Name="newLuaFileCancelbutton"
+                                Name="newScriptFileCancelButton"
                                 Margin="3,0,0,0"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
-                                Click="NewLuaFileCancelbutton_Click"
-                                ToolTip="{DynamicResource LuaCancel}">
+                                Click="NewScriptFileCancelButton_Click"
+                                ToolTip="{DynamicResource ScriptCancel}">
                                 <fa:FontAwesome Foreground="Red" Icon="Ban" />
                             </Button>
                         </WrapPanel>
@@ -751,16 +884,16 @@
                     <!--  脚本编辑界面END  -->
 
                     <!--  脚本运行日志界面  -->
-                    <Grid Name="luaLogShowGrid" Visibility="Collapsed">
+                    <Grid Name="scriptLogShowGrid" Visibility="Collapsed">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
                             <RowDefinition Height="auto" />
                         </Grid.RowDefinitions>
                         <TextBox
-                            Name="luaLogTextBox"
+                            Name="scriptLogTextBox"
                             VerticalContentAlignment="Top"
                             IsReadOnly="true"
-                            MouseLeave="luaLogTextBox_MouseLeave"
+                            MouseLeave="scriptLogTextBox_MouseLeave"
                             TextWrapping="Wrap"
                             VerticalScrollBarVisibility="Auto" />
                         <Grid Grid.Row="1">
@@ -771,35 +904,35 @@
                                 <ColumnDefinition Width="auto" />
                             </Grid.ColumnDefinitions>
                             <Button
-                                Name="stopLuaButton"
+                                Name="stopScriptButton"
                                 Margin="0,3,3,3"
-                                Click="StopLuaButton_Click"
+                                Click="StopScriptButton_Click"
                                 Foreground="DarkRed"
-                                ToolTip="{DynamicResource LuaStop}">
-                                <fa:FontAwesome Name="stopLuaOrExitIcon" Icon="Stop" />
+                                ToolTip="{DynamicResource ScriptStop}">
+                                <fa:FontAwesome Name="stopScriptOrExitIcon" Icon="Stop" />
                             </Button>
                             <Button
-                                Name="pauseLuaPrintButton"
+                                Name="pauseScriptPrintButton"
                                 Grid.Column="1"
                                 Margin="0,3,3,3"
-                                Click="PauseLuaPrintButton_Click"
+                                Click="PauseScriptPrintButton_Click"
                                 Foreground="ForestGreen"
-                                MouseRightButtonUp="pauseLuaPrintButton_MouseRightButtonUp"
-                                ToolTip="{DynamicResource LuaPause}">
-                                <fa:FontAwesome Name="pauseLuaPrintIcon" Icon="Pause" />
+                                MouseRightButtonUp="pauseScriptPrintButton_MouseRightButtonUp"
+                                ToolTip="{DynamicResource ScriptPause}">
+                                <fa:FontAwesome Name="pauseScriptPrintIcon" Icon="Pause" />
                             </Button>
                             <TextBox
-                                Name="runOneLineLuaTextBox"
+                                Name="runOneLineScriptTextBox"
                                 Grid.Column="2"
                                 Margin="0,3"
-                                KeyDown="RunOneLineLuaTextBox_KeyDown" />
+                                KeyDown="RunOneLineScriptTextBox_KeyDown" />
                             <Button
-                                Name="sendLuaScriptButton"
+                                Name="sendScriptCommandButton"
                                 Grid.Column="3"
                                 Margin="3,3,0,3"
-                                Click="SendLuaScriptButton_Click"
+                                Click="SendScriptCommandButton_Click"
                                 Foreground="DeepSkyBlue"
-                                ToolTip="{DynamicResource LuaSendScript}">
+                                ToolTip="{DynamicResource ScriptSendCommand}">
                                 <fa:FontAwesome Icon="ArrowUp" />
                             </Button>
                         </Grid>
@@ -807,60 +940,83 @@
                     <!--  脚本运行日志界面END  -->
                 </Grid>
             </TabItem>
-            <TabItem>
-                <TabItem.Header>
-                    <fa:FontAwesome Foreground="Brown" Icon="cubes" />
-                </TabItem.Header>
-                <Frame Name="OnlineScriptsFrame" NavigationUIVisibility="Hidden" />
-            </TabItem>
-            <TabItem Header="{DynamicResource ToolsTab}">
-                <TabControl>
-                    <TabItem Header="{DynamicResource TcpTabTitle}">
-                        <Frame Name="tcpTestFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource TcpLocalTabTitle}">
-                        <Frame Name="tcpLocalTestFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource UdpLocalTabTitle}">
-                        <Frame Name="udpLocalTestFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource TcpClientTitle}">
-                        <Frame Name="tcpClientFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource DataCalcToolTab}">
-                        <Frame Name="DataCalcFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource LogReplayToolTab}">
-                        <Frame Name="LogReplayFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource EncodingToolsTab}">
+            <TabItem Name="ToolsTab" Header="{DynamicResource ToolsTab}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Margin="0,0,0,10">
+                        <TextBlock
+                            Margin="2,0,8,0"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="{DynamicResource ToolsSelectLabel}" />
+                        <ComboBox
+                            Name="ToolsSelectorComboBox"
+                            MinWidth="220"
+                            MaxWidth="360"
+                            HorizontalAlignment="Left"
+                            SelectedIndex="0"
+                            SelectionChanged="ToolsSelectorComboBox_SelectionChanged">
+                            <ComboBoxItem Content="{DynamicResource EncodingToolsTab}" Tag="EncodingTools" />
+                            <ComboBoxItem Content="MQTT" Tag="Mqtt" />
+                            <ComboBoxItem Content="{DynamicResource SerialMonitorHeader}" Tag="SerialMonitor" />
+                            <ComboBoxItem Content="{DynamicResource LogReplayToolTab}" Tag="LogReplay" />
+                            <ComboBoxItem Content="{DynamicResource EncodingFixHeader}" Tag="EncodingFix" />
+                            <ComboBoxItem Content="{DynamicResource PlotHeader}" Tag="Plot" />
+                            <ComboBoxItem Content="WinUSB" Tag="WinUsb" />
+                            <ComboBoxItem Content="{DynamicResource HttpToolTab}" Tag="HttpTool" />
+                            <ComboBoxItem Content="{DynamicResource DataCalcToolTab}" Tag="DataCalc" />
+                            <ComboBoxItem Content="{DynamicResource TcpTabTitle}" Tag="TcpTest" />
+                            <ComboBoxItem Content="{DynamicResource TcpLocalTabTitle}" Tag="TcpLocal" />
+                            <ComboBoxItem Content="{DynamicResource UdpLocalTabTitle}" Tag="UdpLocal" />
+                            <ComboBoxItem Content="{DynamicResource TcpClientTitle}" Tag="TcpClient" />
+                        </ComboBox>
+                    </DockPanel>
+                    <Grid Grid.Row="1">
                         <Frame Name="EncodingToolsFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="MQTT">
-                        <Frame Name="MqttTestFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource EncodingFixHeader}">
-                        <Frame Name="EncodingFixFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource SerialMonitorHeader}">
-                        <Frame Name="SerialMonitorFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="{DynamicResource PlotHeader}">
-                        <Frame Name="PlotFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                    <TabItem Header="WinUSB">
-                        <Frame Name="WinUSBFrame" NavigationUIVisibility="Hidden" />
-                    </TabItem>
-                </TabControl>
+                        <Frame Name="MqttTestFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="SerialMonitorFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="LogReplayFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="EncodingFixFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="PlotFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="WinUSBFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Grid Name="HttpToolPanel" Visibility="Collapsed">
+                            <Button
+                                MinWidth="180"
+                                MinHeight="36"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Click="HttpToolWindowButton_Click"
+                                Content="{DynamicResource HttpToolOpenWindow}" />
+                        </Grid>
+                        <Grid Name="DataCalcPanel" Visibility="Collapsed">
+                            <Button
+                                MinWidth="180"
+                                MinHeight="36"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Click="DataCalcWindowButton_Click"
+                                Content="{DynamicResource DataCalcOpenWindow}" />
+                        </Grid>
+                        <Frame Name="tcpTestFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="tcpLocalTestFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="udpLocalTestFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                        <Frame Name="tcpClientFrame" NavigationUIVisibility="Hidden" Visibility="Collapsed" />
+                    </Grid>
+                </Grid>
             </TabItem>
-            <TabItem Header="{DynamicResource AboutCard}">
+            <TabItem Name="AboutTab" Header="{DynamicResource AboutCard}">
                 <Frame Name="aboutFrame" NavigationUIVisibility="Hidden" />
             </TabItem>
         </TabControl>
+        </Border>
 
         <Menu
             Grid.RowSpan="2"
             Grid.Column="3"
+            Margin="0,12,12,0"
             HorizontalAlignment="Right"
             VerticalAlignment="Top">
             <MenuItem ToolTip="{DynamicResource ChangeLanguage}">
@@ -877,8 +1033,5 @@
                     Tag="en-US" />
             </MenuItem>
         </Menu>
-
-        <!--  统计  -->
-        <WebBrowser Name="TongjiWebBrowser" Visibility="Collapsed" />
     </Grid>
 </Window>

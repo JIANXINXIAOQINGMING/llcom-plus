@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
@@ -34,6 +34,7 @@ namespace llcom.Model
         private string _runScript = "example";
         private bool _topmost = false;
         public List<List<ToSendData>> quickSendList = new List<List<ToSendData>>();
+        public List<string> quickListNames = new List<string>();
         private int _quickSendSelect = -1;
         private bool _bitDelay = true;
         private uint _maxLength = 10240;
@@ -90,27 +91,131 @@ namespace llcom.Model
         {
             get
             {
-                if (_quickSendSelect < 0 || _quickSendSelect >= 10)
-                    return new List<ToSendData>();
-                EnsureQuickSendListCount();
+                EnsureQuickSendListState();
                 return quickSendList[_quickSendSelect];
             }
             set
             {
-                if (_quickSendSelect < 0 || _quickSendSelect >= 10)
-                    return;
-                EnsureQuickSendListCount();
+                EnsureQuickSendListState();
                 quickSendList[_quickSendSelect] = value;
                 Save();
             }
         }
 
-        private void EnsureQuickSendListCount()
+        private void EnsureQuickSendListState()
         {
             if (quickSendList == null)
                 quickSendList = new List<List<ToSendData>>();
-            while (quickSendList.Count < 10)
+            if (quickSendList.Count == 0)
                 quickSendList.Add(new List<ToSendData>());
+
+            EnsureQuickListNames();
+
+            if (_quickSendSelect < 0 || _quickSendSelect >= quickSendList.Count)
+                _quickSendSelect = 0;
+        }
+
+        private void EnsureQuickListNames()
+        {
+            if (quickListNames == null)
+                quickListNames = new List<string>();
+
+            if (quickListNames.Count == 0)
+                quickListNames.AddRange(GetLegacyQuickListNames());
+
+            while (quickListNames.Count < quickSendList.Count)
+                quickListNames.Add(GetDefaultQuickListName(quickListNames.Count));
+
+            if (quickListNames.Count > quickSendList.Count)
+                quickListNames.RemoveRange(quickSendList.Count, quickListNames.Count - quickSendList.Count);
+
+            for (int i = 0; i < quickListNames.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(quickListNames[i]))
+                    quickListNames[i] = GetDefaultQuickListName(i);
+            }
+        }
+
+        private string GetDefaultQuickListName(int index)
+        {
+            return $"未命名{index}";
+        }
+
+        private List<string> GetLegacyQuickListNames()
+        {
+            return new List<string>
+            {
+                quickListName0,
+                quickListName1,
+                quickListName2,
+                quickListName3,
+                quickListName4,
+                quickListName5,
+                quickListName6,
+                quickListName7,
+                quickListName8,
+                quickListName9,
+            };
+        }
+
+        public List<List<ToSendData>> GetAllQuickSendLists()
+        {
+            EnsureQuickSendListState();
+            return quickSendList;
+        }
+
+        public void SetAllQuickSendLists(List<List<ToSendData>> data)
+        {
+            quickSendList = data ?? new List<List<ToSendData>>();
+            EnsureQuickSendListState();
+            Save();
+        }
+
+        public List<string> GetAllQuickListNames()
+        {
+            EnsureQuickSendListState();
+            return quickListNames.Take(quickSendList.Count).ToList();
+        }
+
+        public void SetAllQuickListNames(IList<string> names)
+        {
+            if (names != null)
+                quickListNames = names.ToList();
+            EnsureQuickSendListState();
+            Save();
+        }
+
+        public int GetQuickSendListCount()
+        {
+            EnsureQuickSendListState();
+            return quickSendList.Count;
+        }
+
+        public int AddQuickSendPage()
+        {
+            EnsureQuickSendListState();
+            quickSendList.Add(new List<ToSendData>());
+            quickListNames.Add(GetDefaultQuickListName(quickSendList.Count - 1));
+            _quickSendSelect = quickSendList.Count - 1;
+            Save();
+            return _quickSendSelect;
+        }
+
+        public bool RemoveQuickSendPage(int index)
+        {
+            EnsureQuickSendListState();
+            if (quickSendList.Count <= 1 || index < 0 || index >= quickSendList.Count)
+                return false;
+
+            quickSendList.RemoveAt(index);
+            if (index < quickListNames.Count)
+                quickListNames.RemoveAt(index);
+            if (_quickSendSelect >= quickSendList.Count)
+                _quickSendSelect = quickSendList.Count - 1;
+            if (_quickSendSelect < 0)
+                _quickSendSelect = 0;
+            Save();
+            return true;
         }
 
         /// <summary>
@@ -124,7 +229,8 @@ namespace llcom.Model
             }
             set
             {
-                _quickSendSelect = value < 0 || value >= 10 ? 0 : value;
+                EnsureQuickSendListState();
+                _quickSendSelect = value < 0 || value >= quickSendList.Count ? 0 : value;
                 Save();
             }
         }
@@ -622,58 +728,15 @@ namespace llcom.Model
 
         public string GetQuickListNameNow()
         {
-            return _quickSendSelect switch
-            {
-                0 => quickListName0,
-                1 => quickListName1,
-                2 => quickListName2,
-                3 => quickListName3,
-                4 => quickListName4,
-                5 => quickListName5,
-                6 => quickListName6,
-                7 => quickListName7,
-                8 => quickListName8,
-                9 => quickListName9,
-                _ => "??",
-            };
+            EnsureQuickSendListState();
+            return quickListNames[_quickSendSelect];
         }
+
         public void SetQuickListNameNow(string name)
         {
-            switch (_quickSendSelect)
-            {
-                case 0:
-                    quickListName0 = name;
-                    break;
-                case 1:
-                    quickListName1 = name;
-                    break;
-                case 2:
-                    quickListName2 = name;
-                    break;
-                case 3:
-                    quickListName3 = name;
-                    break;
-                case 4:
-                    quickListName4 = name;
-                    break;
-                case 5:
-                    quickListName5 = name;
-                    break;
-                case 6:
-                    quickListName6 = name;
-                    break;
-                case 7:
-                    quickListName7 = name;
-                    break;
-                case 8:
-                    quickListName8 = name;
-                    break;
-                case 9:
-                    quickListName9 = name;
-                    break;
-                default:
-                    break;
-            }
+            EnsureQuickSendListState();
+            quickListNames[_quickSendSelect] = string.IsNullOrWhiteSpace(name) ? GetDefaultQuickListName(_quickSendSelect) : name;
+            Save();
         }
 
 
@@ -698,9 +761,9 @@ namespace llcom.Model
         private int _udpServerPort = 2333;
         public int udpServerPort { get { return _udpServerPort; } set { _udpServerPort = value; Save(); } }
 
-        private bool _luaTestHex = false;
-        private bool _luaTestHexRev = false;
-        public bool luaTestHex { get { return _luaTestHex; } set { _luaTestHex = value; Save(); } }
-        public bool luaTestHexRev { get { return _luaTestHexRev; } set { _luaTestHexRev = value; Save(); } }
+        private bool _scriptTestHex = false;
+        private bool _scriptTestHexRev = false;
+        public bool scriptTestHex { get { return _scriptTestHex; } set { _scriptTestHex = value; Save(); } }
+        public bool scriptTestHexRev { get { return _scriptTestHexRev; } set { _scriptTestHexRev = value; Save(); } }
     }
 }

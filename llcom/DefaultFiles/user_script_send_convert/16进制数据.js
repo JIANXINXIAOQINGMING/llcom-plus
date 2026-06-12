@@ -1,0 +1,1 @@
+return hexToBytes(bytesToString(uartData));

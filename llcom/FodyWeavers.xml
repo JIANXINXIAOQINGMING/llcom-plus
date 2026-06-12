@@ -1,13 +1,11 @@
 <Weavers xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="FodyWeavers.xsd">
-  <Costura>
+  <Costura DisableCompression="true" LoadAtModuleInit="false">
     <Unmanaged32Assemblies>
-      xlua
       serial_monitor
     </Unmanaged32Assemblies>
     <Unmanaged64Assemblies>
-		xlua
-		serial_monitor
-	</Unmanaged64Assemblies>
+      serial_monitor
+    </Unmanaged64Assemblies>
   </Costura>
   <PropertyChanged />
 </Weavers>

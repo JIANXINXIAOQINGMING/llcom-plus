@@ -1,4 +1,4 @@
-using llcom.Tools;
+﻿using llcom.Tools;
 using ScottPlot.Drawing.Colormaps;
 using System;
 using System.Collections.Generic;
@@ -31,7 +31,9 @@ namespace llcom.Pages
     {
         public DataShowPage()
         {
-            InitializeComponent();
+            StartupProfiler.Mark("DataShowPage ctor enter");
+            StartupProfiler.Measure("DataShowPage.InitializeComponent", InitializeComponent);
+            StartupProfiler.Mark("DataShowPage ctor exit");
         }
 
         /// <summary>
@@ -39,45 +41,107 @@ namespace llcom.Pages
         /// </summary>
         public bool LockLog { get; set; } = false;
         private bool loaded = false;
+        private bool packedLogSelectionMode = false;
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
+            StartupProfiler.Mark("DataShowPage.Loaded enter");
             if (loaded)
                 return;
             loaded = true;
-            //添加待显示数据到缓冲区
-            Tools.Logger.DataShowTask += Logger_DataShowTask;
-            Tools.Logger.DataClearEvent += (xx,x) =>
+            StartupProfiler.Measure("DataShowPage.Loaded init", () =>
             {
-                MainList.Items.Clear();
-                MainTextBox.Clear();
-            };
-            LockIcon.DataContext = this;
-            UnLockIcon.DataContext = this;
-            UnLockText.DataContext = this;
-            RTSCheckBox.DataContext = this;
-            DTRCheckBox.DataContext = this;
-            Rts = false;
-            Dtr = true;
+                MainTextBox.LostFocus += MainTextBox_LostFocus;
+                //添加待显示数据到缓冲区
+                Tools.Logger.DataShowTask += Logger_DataShowTask;
+                Tools.Logger.DataClearEvent += (xx,x) =>
+                {
+                    MainList.Items.Clear();
+                    MainTextBox.Clear();
+                };
+                LockIcon.DataContext = this;
+                UnLockIcon.DataContext = this;
+                UnLockText.DataContext = this;
+                RTSCheckBox.DataContext = this;
+                DTRCheckBox.DataContext = this;
+                Rts = false;
+                Dtr = true;
 
-            MainList.DataContext = Tools.Global.setting;
-            MainTextBox.DataContext = Tools.Global.setting;
+                MainList.DataContext = Tools.Global.setting;
+                MainTextBox.DataContext = Tools.Global.setting;
 
-            HEXBox.DataContext = Tools.Global.setting;
-            HexSendCheckBox.DataContext = Tools.Global.setting;
-            this.ExtraEnterCheckBox.DataContext = Tools.Global.setting;
-            EnterSendCheckBox.DataContext = Tools.Global.setting;
-            DisableLogCheckBox.DataContext = Tools.Global.setting;
-            EnableSymbolCheckBox.DataContext = Tools.Global.setting;
-            SessionLogCheckBox.DataContext = Tools.Global.setting;
-            SessionLogFolderButton.DataContext = Tools.Global.setting;
+                HEXBox.DataContext = Tools.Global.setting;
+                HexSendCheckBox.DataContext = Tools.Global.setting;
+                this.ExtraEnterCheckBox.DataContext = Tools.Global.setting;
+                EnterSendCheckBox.DataContext = Tools.Global.setting;
+                DisableLogCheckBox.DataContext = Tools.Global.setting;
+                EnableSymbolCheckBox.DataContext = Tools.Global.setting;
+                SessionLogCheckBox.DataContext = Tools.Global.setting;
+                SessionLogFolderButton.DataContext = Tools.Global.setting;
 
-            lastPackShowMode = Tools.Global.setting.timeout >= 0;
-            MainListScrollViewer.Visibility = lastPackShowMode ? Visibility.Visible : Visibility.Collapsed;
-            MainTextBox.Visibility = lastPackShowMode ? Visibility.Collapsed : Visibility.Visible;
+                lastPackShowMode = Tools.Global.setting.timeout >= 0;
+                MainListScrollViewer.Visibility = lastPackShowMode ? Visibility.Visible : Visibility.Collapsed;
+                MainTextBox.Visibility = lastPackShowMode ? Visibility.Collapsed : Visibility.Visible;
+            });
+            StartupProfiler.Mark("DataShowPage.Loaded exit");
         }
 
         //记录一下上次是不是分包显示的
         bool lastPackShowMode = false;
+
+        public void SelectAllLog()
+        {
+            if (!lastPackShowMode)
+            {
+                MainTextBox.Focus();
+                MainTextBox.SelectAll();
+                return;
+            }
+
+            var text = BuildPackedLogText();
+            if (string.IsNullOrEmpty(text))
+                return;
+
+            packedLogSelectionMode = true;
+            MainTextBox.Text = text;
+            MainListScrollViewer.Visibility = Visibility.Collapsed;
+            MainTextBox.Visibility = Visibility.Visible;
+            MainTextBox.Focus();
+            MainTextBox.SelectAll();
+        }
+
+        private void MainTextBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (packedLogSelectionMode)
+                RestorePackedLogView();
+        }
+
+        private string BuildPackedLogText()
+        {
+            var text = new StringBuilder();
+            foreach (var item in MainList.Items.OfType<DataShow>())
+            {
+                text.Append(item.TimeText);
+                text.Append(item.ArrowText);
+                text.Append(item.DataText);
+                text.Append(item.RawTitle);
+                text.Append(item.RawText);
+                text.Append(item.HexText);
+                text.AppendLine();
+            }
+            return text.ToString();
+        }
+
+        private void RestorePackedLogView()
+        {
+            packedLogSelectionMode = false;
+            if (lastPackShowMode)
+            {
+                MainTextBox.Clear();
+                MainTextBox.Visibility = Visibility.Collapsed;
+                MainListScrollViewer.Visibility = Visibility.Visible;
+            }
+        }
+
         private void Logger_DataShowTask(object sender, Tools.DataShow e)
         {
             //先判断下要不要清空
@@ -87,6 +151,7 @@ namespace llcom.Pages
                 lastPackShowMode = needPack;
                 DoInvoke(() =>
                 {
+                    packedLogSelectionMode = false;
                     MainList.Items.Clear();
                     MainTextBox.Clear();
                     MainListScrollViewer.Visibility = needPack ? Visibility.Visible : Visibility.Collapsed;
@@ -122,6 +187,8 @@ namespace llcom.Pages
                 {
                     DoInvoke(() =>
                     {
+                        if (packedLogSelectionMode)
+                            RestorePackedLogView();
                         MainList.Items.Add(data);
                         if (!LockLog)
                             MainListScrollViewer.ScrollToEnd();
@@ -201,14 +268,14 @@ namespace llcom.Pages
                     {
                         var uartPara = new byte[0];
                         var uartSendRaw = new byte[0];
-                        temp = LuaEnv.LuaLoader.Run(
-                            $"{Tools.Global.setting.recvScript}.lua",
+                        temp = ScriptEnv.JavaScriptLoader.Run(
+                            $"{Tools.Global.setting.recvScript}.js",
                             new System.Collections.ArrayList { "uartData", temp, "uartPara", uartPara, "uartSendRaw", uartSendRaw },
                             "user_script_recv_convert/");
                     }
                     catch (Exception ex)
                     {
-                        Tools.MessageBox.Show($"receive convert lua script error\r\n" + ex.ToString());
+                        Tools.MessageBox.Show($"receive convert JavaScript script error\r\n" + ex.ToString());
                         return;
                     }
                     if (temp == null)

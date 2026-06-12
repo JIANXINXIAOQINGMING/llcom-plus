@@ -15,14 +15,31 @@ namespace llcom
     /// </summary>
     public partial class App : Application
     {
+        static App()
+        {
+            Tools.StartupProfiler.Begin();
+            Tools.StartupProfiler.Mark("App static ctor");
+            Tools.StartupProfiler.Mark("CosturaUtility.Initialize begin");
+            CosturaUtility.Initialize();
+            Tools.StartupProfiler.Mark("CosturaUtility.Initialize end");
+        }
+
+        public App()
+        {
+            Tools.StartupProfiler.Mark("App ctor");
+        }
+
         protected override void OnStartup(StartupEventArgs e)
         {
+            Tools.StartupProfiler.Mark("App.OnStartup enter");
             base.OnStartup(e);
+            Tools.StartupProfiler.Mark("App.OnStartup base completed");
 #if DEBUG
 #else
             AppDomain.CurrentDomain.UnhandledException += CurrentDomainOnUnhandledException;
             Application.Current.DispatcherUnhandledException += DispatcherOnUnhandledException;
 #endif
+            Tools.StartupProfiler.Mark("App.OnStartup exit");
         }
 
         private void DispatcherOnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs dispatcherUnhandledExceptionEventArgs)

@@ -19,7 +19,6 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Orientation="Horizontal">
                 <Button
@@ -28,13 +27,6 @@
                     Margin="0,0,6,0"
                     Click="SelectFileButton_Click"
                     Content="{DynamicResource DataCalcSelectFile}" />
-                <Button
-                    Name="SendFileDataButton"
-                    MinWidth="80"
-                    Margin="0,0,6,0"
-                    Click="SendFileDataButton_Click"
-                    Content="{DynamicResource DataCalcSendFile}"
-                    IsEnabled="False" />
             </StackPanel>
             <TextBox
                 Name="FilePathTextBox"
@@ -42,17 +34,11 @@
                 Margin="0,0,6,0"
                 IsReadOnly="True"
                 Text="{DynamicResource DataCalcNoFileSelected}" />
-            <TextBlock
-                Name="FileLengthTextBlock"
-                Grid.Column="2"
-                MinWidth="110"
-                VerticalAlignment="Center"
-                Text="0 bytes" />
         </Grid>
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="320" />
                 <ColumnDefinition Width="8" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
@@ -66,19 +52,15 @@
                     VerticalAlignment="Center"
                     FontWeight="Bold"
                     Text="{DynamicResource DataCalcManualInput}" />
-                <StackPanel HorizontalAlignment="Right" DockPanel.Dock="Right" Orientation="Horizontal">
-                    <CheckBox
-                        Name="HexInputCheckBox"
-                        Margin="0,0,8,0"
-                        VerticalAlignment="Center"
-                        Checked="ManualDataChanged"
-                        Content="{DynamicResource DataCalcHexInput}"
-                        Unchecked="ManualDataChanged" />
-                    <Button
-                        MinWidth="70"
-                        Click="CalculateManualButton_Click"
-                        Content="{DynamicResource DataCalcCalculate}" />
-                </StackPanel>
+                <CheckBox
+                    Name="HexInputCheckBox"
+                    Margin="8,0,0,0"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Checked="InputChanged"
+                    Content="{DynamicResource DataCalcHexInput}"
+                    DockPanel.Dock="Right"
+                    Unchecked="InputChanged" />
             </DockPanel>
             <TextBox
                 Name="ManualDataTextBox"
@@ -86,26 +68,85 @@
                 Grid.Column="0"
                 AcceptsReturn="True"
                 FontFamily="Consolas"
-                TextChanged="ManualDataChanged"
+                TextChanged="InputChanged"
                 TextWrapping="Wrap"
                 VerticalScrollBarVisibility="Auto" />
 
-            <DockPanel Grid.Column="2" Grid.Row="0" Margin="0,0,0,4">
+            <Grid Grid.Column="2" Grid.Row="0" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
                 <TextBlock
                     VerticalAlignment="Center"
                     FontWeight="Bold"
                     Text="{DynamicResource DataCalcResult}" />
-            </DockPanel>
-            <TextBox
-                Name="ResultTextBox"
+                <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
+                    <TextBlock
+                        Margin="0,0,4,0"
+                        VerticalAlignment="Center"
+                        Text="{DynamicResource DataCalcSource}" />
+                    <ComboBox
+                        Name="SourceComboBox"
+                        MinWidth="90"
+                        Margin="0,0,6,0"
+                        SelectedIndex="0"
+                        SelectionChanged="SourceComboBox_SelectionChanged">
+                        <ComboBoxItem Content="{DynamicResource DataCalcSourceManual}" />
+                        <ComboBoxItem Content="{DynamicResource DataCalcSourceFile}" />
+                    </ComboBox>
+                    <Button
+                        MinWidth="70"
+                        Click="SendSelectedDataButton_Click"
+                        Content="{DynamicResource DataCalcSendSelected}" />
+                </WrapPanel>
+            </Grid>
+            <ScrollViewer
                 Grid.Row="1"
                 Grid.Column="2"
-                AcceptsReturn="True"
-                FontFamily="Consolas"
-                IsReadOnly="True"
-                TextWrapping="NoWrap"
-                VerticalScrollBarVisibility="Auto"
-                HorizontalScrollBarVisibility="Auto" />
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Margin="0,3,8,3" VerticalAlignment="Center" Text="{DynamicResource DataCalcResultSource}" />
+                    <TextBox Name="SourceResultTextBox" Grid.Row="0" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+
+                    <TextBlock Grid.Row="1" Margin="0,3,8,3" VerticalAlignment="Center" Text="{DynamicResource DataCalcResultLength}" />
+                    <TextBox Name="LengthResultTextBox" Grid.Row="1" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+
+                    <TextBlock Grid.Row="2" Margin="0,3,8,3" VerticalAlignment="Center" Text="MD5" />
+                    <TextBox Name="Md5ResultTextBox" Grid.Row="2" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+
+                    <TextBlock Grid.Row="3" Margin="0,3,8,3" VerticalAlignment="Center" Text="SHA1" />
+                    <TextBox Name="Sha1ResultTextBox" Grid.Row="3" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+
+                    <TextBlock Grid.Row="4" Margin="0,3,8,3" VerticalAlignment="Center" Text="SHA256" />
+                    <TextBox Name="Sha256ResultTextBox" Grid.Row="4" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+
+                    <TextBlock Grid.Row="5" Margin="0,3,8,3" VerticalAlignment="Center" Text="SHA512" />
+                    <TextBox Name="Sha512ResultTextBox" Grid.Row="5" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+
+                    <TextBlock Grid.Row="6" Margin="0,3,8,3" VerticalAlignment="Center" Text="CRC16(Modbus)" />
+                    <TextBox Name="Crc16ResultTextBox" Grid.Row="6" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+
+                    <TextBlock Grid.Row="7" Margin="0,3,8,3" VerticalAlignment="Center" Text="CRC32" />
+                    <TextBox Name="Crc32ResultTextBox" Grid.Row="7" Grid.Column="1" Margin="0,2" FontFamily="Consolas" HorizontalScrollBarVisibility="Auto" IsReadOnly="True" TextWrapping="NoWrap" />
+                </Grid>
+            </ScrollViewer>
         </Grid>
     </Grid>
 </Page>

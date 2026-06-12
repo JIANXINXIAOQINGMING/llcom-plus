@@ -1,4 +1,4 @@
-using llcom.LuaEnv;
+﻿using llcom.ScriptEnv;
 using llcom.Model;
 using MQTTnet;
 using MQTTnet.Client;
@@ -100,7 +100,7 @@ namespace llcom.Pages
             mqttClient.UseApplicationMessageReceivedHandler(e =>
             {
                 //适配一下通用通道
-                LuaApis.SendChannelsReceived("mqtt", 
+                ScriptApis.SendChannelsReceived("mqtt", 
                     new
                     {
                         topic = e.ApplicationMessage.Topic,
@@ -117,16 +117,21 @@ namespace llcom.Pages
             });
 
             //适配一下通用通道
-            LuaApis.SendChannelsRegister("mqtt", (_, t) =>
+            ScriptApis.SendChannelsRegister("mqtt", (data, options) =>
             {
-                if (mqttClient.IsConnected && t != null)
+                if (mqttClient.IsConnected && options != null)
                 {
                     try
                     {
+                        var topic = ScriptApis.GetOption<string>(options, "topic");
+                        var payload = ScriptApis.GetOption<byte[]>(options, "payload", data);
+                        var qos = ScriptApis.GetOption<int>(options, "qos", 0);
+                        if (string.IsNullOrEmpty(topic))
+                            return false;
                         return Publish(
-                            t.Get<string>("topic"), 
-                            t.Get<byte[]>("payload"),
-                            t.Get<int>("qos"));
+                            topic,
+                            payload,
+                            qos);
                     }
                     catch
                     {

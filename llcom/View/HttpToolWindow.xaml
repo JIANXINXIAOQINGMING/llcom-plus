@@ -1,0 +1,323 @@
+﻿<Window
+    x:Class="llcom.HttpToolWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:adonisExtensions="clr-namespace:AdonisUI.Extensions;assembly=AdonisUI"
+    Title="{DynamicResource HttpToolWindowTitle}"
+    Width="1100"
+    Height="760"
+    MinWidth="920"
+    MinHeight="620"
+    Icon="pack://application:,,,/Assets/AppIcon.ico"
+    adonisExtensions:RippleExtension.FadeInDuration="0"
+    adonisExtensions:RippleExtension.FadeOutDuration="0"
+    Closing="Window_Closing"
+    WindowStartupLocation="CenterOwner">
+    <Window.Style>
+        <Style BasedOn="{StaticResource {x:Type Window}}" TargetType="Window" />
+    </Window.Style>
+    <Grid>
+        <Grid.Background>
+            <ImageBrush
+                ImageSource="pack://application:,,,/Assets/AppBackground.png"
+                Opacity="0.58"
+                Stretch="UniformToFill" />
+        </Grid.Background>
+        <Border Background="#24FFF8EC" />
+        <Grid Margin="16">
+            <Grid.Resources>
+                <Style BasedOn="{StaticResource {x:Type TextBox}}" TargetType="{x:Type TextBox}" />
+                <Style BasedOn="{StaticResource {x:Type DataGrid}}" TargetType="{x:Type DataGrid}" />
+                <Style BasedOn="{StaticResource {x:Type TabControl}}" TargetType="{x:Type TabControl}" />
+                <Style BasedOn="{StaticResource {x:Type TabItem}}" TargetType="{x:Type TabItem}" />
+                <Style BasedOn="{StaticResource {x:Type Button}}" TargetType="{x:Type Button}">
+                    <Setter Property="MinHeight" Value="30" />
+                </Style>
+            </Grid.Resources>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="2*" />
+                <RowDefinition Height="3*" />
+            </Grid.RowDefinitions>
+
+            <Border
+                Grid.Row="0"
+                Margin="0,0,0,12"
+                Padding="10"
+                Background="{StaticResource AppGlassPanelBackground}"
+                BorderBrush="{StaticResource AppGlassBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="130" />
+                        <ColumnDefinition Width="100" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="110" />
+                    </Grid.ColumnDefinitions>
+
+                    <ComboBox
+                        x:Name="MethodComboBox"
+                        Grid.Column="0"
+                        Height="36"
+                        Margin="0,0,8,0"
+                        SelectedIndex="0"
+                        VerticalContentAlignment="Center">
+                        <ComboBoxItem Content="GET" />
+                        <ComboBoxItem Content="POST" />
+                        <ComboBoxItem Content="PUT" />
+                        <ComboBoxItem Content="DELETE" />
+                        <ComboBoxItem Content="PATCH" />
+                        <ComboBoxItem Content="HEAD" />
+                    </ComboBox>
+
+                    <ComboBox
+                        x:Name="UrlSchemeComboBox"
+                        Grid.Column="1"
+                        Height="36"
+                        Margin="0,0,8,0"
+                        SelectedIndex="1"
+                        VerticalContentAlignment="Center">
+                        <ComboBoxItem Content="http://" />
+                        <ComboBoxItem Content="https://" />
+                    </ComboBox>
+
+                    <TextBox
+                        x:Name="UrlTextBox"
+                        Grid.Column="2"
+                        Height="36"
+                        Margin="0,0,8,0"
+                        VerticalContentAlignment="Center"
+                        FontSize="14"
+                        Text="postman-echo.com/get" />
+
+                    <Button
+                        x:Name="SendButton"
+                        Grid.Column="3"
+                        Height="36"
+                        Background="#0E9AA7"
+                        Click="SendButton_Click"
+                        Content="发送"
+                        FontWeight="SemiBold"
+                        Foreground="White" />
+                </Grid>
+            </Border>
+
+            <TabControl Grid.Row="1" Margin="0,0,0,12">
+                <TabItem Header="Headers">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="120" />
+                            </Grid.ColumnDefinitions>
+
+                            <ComboBox
+                                x:Name="HeaderPresetComboBox"
+                                Grid.Column="0"
+                                Height="34"
+                                Margin="0,0,8,0"
+                                SelectionChanged="HeaderPresetComboBox_SelectionChanged"
+                                VerticalContentAlignment="Center" />
+
+                            <TextBox
+                                x:Name="HeaderDefaultValueTextBox"
+                                Grid.Column="1"
+                                Height="34"
+                                Margin="0,0,8,0"
+                                VerticalContentAlignment="Center"
+                                FontFamily="Consolas"
+                                Text="application/json" />
+
+                            <Button
+                                Grid.Column="2"
+                                Height="34"
+                                Click="AddHeaderPresetButton_Click"
+                                Content="添加/更新" />
+                        </Grid>
+
+                        <TextBox
+                            x:Name="RequestHeadersTextBox"
+                            Grid.Row="1"
+                            AcceptsReturn="True"
+                            AcceptsTab="True"
+                            FontFamily="Consolas"
+                            FontSize="14"
+                            HorizontalScrollBarVisibility="Auto"
+                            Padding="10"
+                            Text="Accept: application/json"
+                            TextWrapping="NoWrap"
+                            VerticalScrollBarVisibility="Auto" />
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Body">
+                    <TabControl x:Name="BodyTypeTabControl">
+                        <TabItem Header="Raw">
+                            <TextBox
+                                x:Name="RequestBodyTextBox"
+                                AcceptsReturn="True"
+                                AcceptsTab="True"
+                                FontFamily="Consolas"
+                                FontSize="14"
+                                HorizontalScrollBarVisibility="Auto"
+                                Padding="10"
+                                Text="{}"
+                                TextWrapping="NoWrap"
+                                VerticalScrollBarVisibility="Auto" />
+                        </TabItem>
+
+                        <TabItem Header="Form">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Margin="0,0,0,8" Orientation="Horizontal">
+                                    <Button Width="110" Content="添加字段" Click="AddFormFieldButton_Click" />
+                                    <Button Width="110" Margin="8,0,0,0" Content="删除字段" Click="RemoveFormFieldButton_Click" />
+                                </StackPanel>
+
+                                <DataGrid
+                                    x:Name="FormFieldsDataGrid"
+                                    Grid.Row="1"
+                                    AutoGenerateColumns="False"
+                                    CanUserAddRows="True"
+                                    CanUserDeleteRows="True"
+                                    GridLinesVisibility="Horizontal"
+                                    HeadersVisibility="Column">
+                                    <DataGrid.Columns>
+                                        <DataGridCheckBoxColumn Width="60" Binding="{Binding IsEnabled}" Header="启用" />
+                                        <DataGridTextColumn Width="220" Binding="{Binding Key}" Header="Key" />
+                                        <DataGridTextColumn Width="*" Binding="{Binding Value}" Header="Value" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </TabItem>
+
+                        <TabItem Header="Multipart/File">
+                            <Grid Margin="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Margin="0,0,0,8" Orientation="Horizontal">
+                                    <Button Width="110" Content="添加字段" Click="AddFormFieldButton_Click" />
+                                    <Button Width="110" Margin="8,0,0,0" Content="选择文件" Click="ChooseFileButton_Click" />
+                                    <Button Width="110" Margin="8,0,0,0" Content="删除文件" Click="RemoveFileButton_Click" />
+                                </StackPanel>
+
+                                <Grid Grid.Row="1">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <GroupBox Grid.Row="0" Margin="0,0,0,8" Header="Form Fields">
+                                        <DataGrid
+                                            x:Name="MultipartFieldsDataGrid"
+                                            AutoGenerateColumns="False"
+                                            CanUserAddRows="True"
+                                            CanUserDeleteRows="True"
+                                            GridLinesVisibility="Horizontal"
+                                            HeadersVisibility="Column">
+                                            <DataGrid.Columns>
+                                                <DataGridCheckBoxColumn Width="60" Binding="{Binding IsEnabled}" Header="启用" />
+                                                <DataGridTextColumn Width="220" Binding="{Binding Key}" Header="Key" />
+                                                <DataGridTextColumn Width="*" Binding="{Binding Value}" Header="Value" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </GroupBox>
+
+                                    <GroupBox Grid.Row="1" Header="Files">
+                                        <DataGrid
+                                            x:Name="FilesDataGrid"
+                                            AutoGenerateColumns="False"
+                                            CanUserAddRows="False"
+                                            CanUserDeleteRows="True"
+                                            GridLinesVisibility="Horizontal"
+                                            HeadersVisibility="Column">
+                                            <DataGrid.Columns>
+                                                <DataGridCheckBoxColumn Width="60" Binding="{Binding IsEnabled}" Header="启用" />
+                                                <DataGridTextColumn Width="150" Binding="{Binding FieldName}" Header="字段名" />
+                                                <DataGridTextColumn Width="*" Binding="{Binding FilePath}" Header="文件路径" IsReadOnly="True" />
+                                                <DataGridTextColumn Width="210" Binding="{Binding ContentType}" Header="Content-Type" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </GroupBox>
+                                </Grid>
+                            </Grid>
+                        </TabItem>
+                    </TabControl>
+                </TabItem>
+            </TabControl>
+
+            <TabControl Grid.Row="2">
+                <TabItem Header="Response Body">
+                    <TextBox
+                        x:Name="ResponseBodyTextBox"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas"
+                        FontSize="14"
+                        HorizontalScrollBarVisibility="Auto"
+                        IsReadOnly="True"
+                        Padding="10"
+                        TextWrapping="NoWrap"
+                        VerticalScrollBarVisibility="Auto" />
+                </TabItem>
+
+                <TabItem Header="Response Headers">
+                    <TextBox
+                        x:Name="ResponseHeadersTextBox"
+                        AcceptsReturn="True"
+                        FontFamily="Consolas"
+                        FontSize="14"
+                        HorizontalScrollBarVisibility="Auto"
+                        IsReadOnly="True"
+                        Padding="10"
+                        TextWrapping="NoWrap"
+                        VerticalScrollBarVisibility="Auto" />
+                </TabItem>
+
+                <TabItem Header="Info">
+                    <Grid Margin="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="32" />
+                            <RowDefinition Height="32" />
+                            <RowDefinition Height="32" />
+                            <RowDefinition Height="32" />
+                            <RowDefinition Height="32" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Status Code" />
+                        <TextBlock x:Name="StatusCodeTextBlock" Grid.Row="0" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="Reason Phrase" />
+                        <TextBlock x:Name="ReasonPhraseTextBlock" Grid.Row="1" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="Elapsed Time" />
+                        <TextBlock x:Name="ElapsedTimeTextBlock" Grid.Row="2" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" FontWeight="SemiBold" Text="Request Method" />
+                        <TextBlock x:Name="RequestMethodTextBlock" Grid.Row="3" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" FontWeight="SemiBold" Text="Request Url" />
+                        <TextBlock x:Name="RequestUrlTextBlock" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" />
+                    </Grid>
+                </TabItem>
+            </TabControl>
+        </Grid>
+    </Grid>
+</Window>

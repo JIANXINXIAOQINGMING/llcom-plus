@@ -1,4 +1,4 @@
-using FontAwesome.WPF;
+﻿using FontAwesome.WPF;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 using ICSharpCode.AvalonEdit.Search;
@@ -29,14 +29,13 @@ using llcom.Model;
 using System.Text.RegularExpressions;
 using llcom.Tools;
 using ICSharpCode.AvalonEdit.Folding;
-using RestSharp;
 using System.Threading;
 using System.Windows.Interop;
 using System.Drawing;
 using ICSharpCode.AvalonEdit;
 using System.Runtime.InteropServices;
 using System.Windows.Controls.Primitives;
-using llcom.LuaEnv;
+using llcom.ScriptEnv;
 using System.Web.UI.WebControls.WebParts;
 using Color = System.Windows.Media.Color;
 
@@ -49,220 +48,311 @@ namespace llcom
     {
         public MainWindow()
         {
-            InitializeComponent();
-            Tools.Global.LoadSetting();
-            if (Tools.Global.setting.windowHeight != 0 &&
-                Tools.Global.setting.windowLeft > 0 &&
-                Tools.Global.setting.windowTop > 0 &&
-                Tools.Global.setting.windowTop < SystemParameters.FullPrimaryScreenHeight &&
-                Tools.Global.setting.windowLeft < SystemParameters.FullPrimaryScreenWidth)
+            StartupProfiler.Mark("MainWindow ctor enter");
+            StartupProfiler.Measure("MainWindow.InitializeComponent", InitializeComponent);
+            StartupProfiler.Measure("Global.LoadSetting", Tools.Global.LoadSetting);
+            StartupProfiler.Measure("MainWindow restore placement", () =>
             {
-                this.Left = Tools.Global.setting.windowLeft;
-                this.Top = Tools.Global.setting.windowTop;
-                this.Width = Tools.Global.setting.windowWidth;
-                this.Height = Tools.Global.setting.windowHeight;
-            }
+                if (Tools.Global.setting.windowHeight != 0 &&
+                    Tools.Global.setting.windowLeft > 0 &&
+                    Tools.Global.setting.windowTop > 0 &&
+                    Tools.Global.setting.windowTop < SystemParameters.FullPrimaryScreenHeight &&
+                    Tools.Global.setting.windowLeft < SystemParameters.FullPrimaryScreenWidth)
+                {
+                    this.Left = Tools.Global.setting.windowLeft;
+                    this.Top = Tools.Global.setting.windowTop;
+                    this.Width = Tools.Global.setting.windowWidth;
+                    this.Height = Tools.Global.setting.windowHeight;
+                }
+            });
+            StartupProfiler.Mark("MainWindow ctor exit");
         }
         ObservableCollection<ToSendData> toSendListItems = new ObservableCollection<ToSendData>();
         private bool forcusClosePort = true;
         private bool canSaveSendList = true;
         private bool isOpeningPort = false;
         private bool applyingSendSuggestion = false;
+        private bool lazyLoadReady = false;
+        private bool scriptEditorInitialized = false;
+        private Task runtimeFilesTask = null;
         private readonly object sessionSendStringLock = new object();
         private readonly Queue<string> sessionSendStringOverrides = new Queue<string>();
         public static string recvScriptBackup = "";
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            StartupProfiler.Mark("MainWindow.Loaded enter");
             //延迟启动，加快软件第一屏出现速度
             Task.Run(() =>
             {
+                StartupProfiler.Mark("MainWindow.Loaded dispatcher task queued");
                 this.Dispatcher.Invoke(new Action(delegate {
-                    //接收到、发送数据成功回调
-                    Tools.Global.uart.UartDataRecived += Uart_UartDataRecived;
-                    Tools.Global.uart.UartDataSent += Uart_UartDataSent;
-                    Tools.Global.uart.UartDataRawSent += Uart_UartDataRawSent;
-                    Tools.Global.SendRawDataRequest += Global_SendRawDataRequest;
+                    StartupProfiler.Mark("MainWindow.Loaded dispatcher block enter");
+                    StartupProfiler.Measure("Loaded register events", () =>
+                    {
+                        //接收到、发送数据成功回调
+                        Tools.Global.uart.UartDataRecived += Uart_UartDataRecived;
+                        Tools.Global.uart.UartDataSent += Uart_UartDataSent;
+                        Tools.Global.uart.UartDataRawSent += Uart_UartDataRawSent;
+                        Tools.Global.SendRawDataRequest += Global_SendRawDataRequest;
+                    });
 
                     //初始化所有数据
-                    Tools.Global.Initial();
+                    StartupProfiler.Measure("Global.Initial", Tools.Global.Initial);
+                    StartupProfiler.Mark("Global.PrepareRuntimeFiles task schedule");
+                    runtimeFilesTask = Task.Run(() =>
+                        StartupProfiler.Measure("Global.PrepareRuntimeFiles background", Tools.Global.PrepareRuntimeFiles));
 
-                    //重写关闭窗口代码
-                    this.Closing += MainWindow_Closing;
+                    StartupProfiler.Measure("Loaded window events and topmost", () =>
+                    {
+                        //重写关闭窗口代码
+                        this.Closing += MainWindow_Closing;
 
-                    //窗口置顶事件
-                    Tools.Global.setting.MainWindowTop += new EventHandler(topEvent);
-                    if (Tools.Global.setting.topmost)//设置窗口置顶
-                        this.Topmost = true;
+                        //窗口置顶事件
+                        Tools.Global.setting.MainWindowTop += new EventHandler(topEvent);
+                        if (Tools.Global.setting.topmost)//设置窗口置顶
+                            this.Topmost = true;
+                    });
 
                     //收发数据显示页面
-                    dataShowFrame.Navigate(new Uri("Pages/DataShowPage.xaml", UriKind.Relative));
+                    StartupProfiler.Measure("Navigate DataShowPage", () =>
+                        dataShowFrame.Navigate(new Uri("Pages/DataShowPage.xaml", UriKind.Relative)));
 
-                    //加载初始波特率
-                    var br = Tools.Global.setting.baudRate.ToString();
-                    if(baudRateComboBox.Items.Contains(br))
-                        baudRateComboBox.Text = Tools.Global.setting.baudRate.ToString();
-                    else
+                    StartupProfiler.Measure("Loaded baud rate init", () =>
                     {
-                        lastBaudRateSelectedIndex = baudRateComboBox.Items.Count - 1;//防止弹窗提示
-                        baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = br;
-                        baudRateComboBox.Text = br;
-                    }
-
-                    // 绑定事件监听,用于监听HID设备插拔
-                    (PresentationSource.FromVisual(this) as HwndSource)?.AddHook(WndProc);
-                    //刷新设备列表
-                    refreshPortList();
-
-                    //绑定数据
-                    this.toSendDataTextBox.DataContext = Tools.Global.setting;
-                    toSendList.ItemsSource = toSendListItems;
-                    this.sentCountTextBlock.DataContext = Tools.Global.setting;
-                    this.receivedCountTextBlock.DataContext = Tools.Global.setting;
-                    QuiclListName0.DataContext = Tools.Global.setting;
-                    QuiclListName1.DataContext = Tools.Global.setting;
-                    QuiclListName2.DataContext = Tools.Global.setting;
-                    QuiclListName3.DataContext = Tools.Global.setting;
-                    QuiclListName4.DataContext = Tools.Global.setting;
-                    QuiclListName5.DataContext = Tools.Global.setting;
-                    QuiclListName6.DataContext = Tools.Global.setting;
-                    QuiclListName7.DataContext = Tools.Global.setting;
-                    QuiclListName8.DataContext = Tools.Global.setting;
-                    QuiclListName9.DataContext = Tools.Global.setting;
-
-                    //初始化快捷发送栏的数据
-                    canSaveSendList = false;
-                    if (Global.setting.quickSendSelect == -1)
-                        Global.setting.quickSendSelect = 0;
-                    ToSendData.DataChanged += SaveSendList;
-                    LoadQuickSendList();
-                    canSaveSendList = true;
-
-
-                    //快速搜索
-                    SearchPanel.Install(textEditor.TextArea);
-
-                    var foldingManager = FoldingManager.Install(textEditor.TextArea);
-                    var foldingStrategy = new Model.LuaFolding();
-
-                    Task.Run(() =>
-                    {
-                        while (true)
+                        //加载初始波特率
+                        var br = Tools.Global.setting.baudRate.ToString();
+                        if(baudRateComboBox.Items.Contains(br))
+                            baudRateComboBox.Text = Tools.Global.setting.baudRate.ToString();
+                        else
                         {
-                            Task.Delay(1000).Wait();
-                            this.Dispatcher.Invoke(new Action(delegate
-                            {
-                                try
-                                {
-                                    foldingStrategy.UpdateFoldings(foldingManager, textEditor.Document);
-                                }
-                                catch { }
-                            }));
+                            lastBaudRateSelectedIndex = baudRateComboBox.Items.Count - 1;//防止弹窗提示
+                            baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = br;
+                            baudRateComboBox.Text = br;
                         }
                     });
 
-                    string name = System.Reflection.Assembly.GetExecutingAssembly().GetName().Name + ".Lua.xshd";
-                    System.Reflection.Assembly assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                    using (System.IO.Stream s = assembly.GetManifestResourceStream(name))
+                    StartupProfiler.Measure("Loaded device hook", () =>
                     {
-                        using (XmlTextReader reader = new XmlTextReader(s))
+                        // 绑定事件监听,用于监听HID设备插拔
+                        (PresentationSource.FromVisual(this) as HwndSource)?.AddHook(WndProc);
+                    });
+
+                    //刷新设备列表
+                    StartupProfiler.Measure("refreshPortList schedule", () => refreshPortList());
+
+                    StartupProfiler.Measure("Loaded bind data contexts", () =>
+                    {
+                        //绑定数据
+                        this.toSendDataTextBox.DataContext = Tools.Global.setting;
+                        toSendList.ItemsSource = toSendListItems;
+                        this.sentCountTextBlock.DataContext = Tools.Global.setting;
+                        this.receivedCountTextBlock.DataContext = Tools.Global.setting;
+                    });
+
+                    StartupProfiler.Measure("LoadQuickSendList", () =>
+                    {
+                        //初始化快捷发送栏的数据
+                        canSaveSendList = false;
+                        if (Global.setting.quickSendSelect == -1)
+                            Global.setting.quickSendSelect = 0;
+                        ToSendData.DataChanged += SaveSendList;
+                        LoadQuickSendList();
+                        canSaveSendList = true;
+                    });
+
+                    StartupProfiler.Measure("Loaded title and events", () =>
+                    {
+                        this.Title += $" - {System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString()}";
+
+                        //更换标题栏
+                        var title = "";
+                        title = this.Title;
+                        Tools.Global.ChangeTitleEvent += (n, s) =>
                         {
-                            var xshd = HighlightingLoader.LoadXshd(reader);
-                            textEditor.SyntaxHighlighting = HighlightingLoader.Load(xshd, HighlightingManager.Instance);
-                        }
-                    }
+                            this.Dispatcher.Invoke(() => this.Title = title + s);
+                        };
 
-                    //加载上次打开的文件
-                    loadLuaFile(Tools.Global.setting.runScript);
-
-                    //加载lua日志打印事件
-                    LuaEnv.LuaApis.PrintLuaLog += LuaApis_PrintLuaLog;
-                    //lua代码出错/结束运行事件
-                    LuaEnv.LuaRunEnv.LuaRunError += LuaRunEnv_LuaRunError;
-
-                    //在线脚本列表
-                    OnlineScriptsFrame.Navigate(new Uri("Pages/OnlineScriptsPage.xaml", UriKind.Relative));
-
-                    //关于页面
-                    aboutFrame.Navigate(new Uri("Pages/AboutPage.xaml", UriKind.Relative));
-
-                    //tcp测试页面
-                    tcpTestFrame.Navigate(new Uri("Pages/tcpTest.xaml", UriKind.Relative));
-
-                    //tcp客户端页面
-                    tcpClientFrame.Navigate(new Uri("Pages/SocketClientPage.xaml", UriKind.Relative));
-
-                    //数据计算和文件发送
-                    DataCalcFrame.Navigate(new Uri("Pages/DataCalcPage.xaml", UriKind.Relative));
-
-                    //日志回放
-                    LogReplayFrame.Navigate(new Uri("Pages/LogReplayPage.xaml", UriKind.Relative));
-
-                    //本地tcp服务器
-                    tcpLocalTestFrame.Navigate(new Uri("Pages/TcpLocalPage.xaml", UriKind.Relative));
-
-                    //本地udp服务器
-                    udpLocalTestFrame.Navigate(new Uri("Pages/UdpLocalPage.xaml", UriKind.Relative));
-
-                    //mqtt测试页面
-                    MqttTestFrame.Navigate(new Uri("Pages/MqttTestPage.xaml", UriKind.Relative));
-
-                    //编码转换工具页面
-                    EncodingToolsFrame.Navigate(new Uri("Pages/ConvertPage.xaml", UriKind.Relative));
-
-                    //乱码修复
-                    EncodingFixFrame.Navigate(new Uri("Pages/EncodingFixPage.xaml", UriKind.Relative));
-
-                    //串口监听
-                    SerialMonitorFrame.Navigate(new Uri("Pages/SerialMonitorPage.xaml", UriKind.Relative));
-
-                    //绘制曲线
-                    PlotFrame.Navigate(new Uri("Pages/PlotPage.xaml", UriKind.Relative));
-
-                    //WinUSB
-                    WinUSBFrame.Navigate(new Uri("Pages/WinUSBPage.xaml", UriKind.Relative));
-
-                    this.Title += $" - {System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString()}";
-
-                    TongjiWebBrowser.Source = new Uri(
-                            $"https://llcom.papapoi.com/tongji.html?{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version}"
-                        );
-
-                    new Thread(LuaLogPrintTask).Start();
+                        Tools.Global.RefreshScriptListEvent += (n, s) =>
+                        {
+                            this.Dispatcher.Invoke(() =>
+                            {
+                                if (scriptEditorInitialized)
+                                    RefreshScriptList();
+                            });
+                        };
+                    });
 
                     //加载完了，可以允许点击
+                    lazyLoadReady = true;
                     MainGrid.IsEnabled = true;
-
-                    //更换标题栏
-                    var title = "";
-                    title = this.Title;
-                    Tools.Global.ChangeTitleEvent += (n, s) =>
-                    {
-                        this.Dispatcher.Invoke(() => this.Title = title + s);
-                    };
-
-                    //热更，防止恶性bug，及时修复
-                    new Thread(() =>
-                    {
-                        try
-                        {
-                            Random r = new Random();//加上随机参数，确保获取的是最新数据
-                            var client = new RestClient("https://llcom.papapoi.com/hotfix.lua?" + r.Next());
-                            var request = new RestRequest();
-                            var response = client.Get(request);
-                            var lua = new LuaEnv.LuaEnv();
-                            lua.DoString(response.Content);
-                        }
-                        catch { }
-                    }).Start();
-
-                    Tools.Global.RefreshLuaScriptListEvent += (n, s) =>
-                    {
-                        this.Dispatcher.Invoke(() => RefreshScriptList());
-                    };
+                    StartupProfiler.Mark("MainWindow interactive");
+                    StartupProfiler.Mark("MainWindow.Loaded dispatcher block exit");
                 }));
+                StartupProfiler.Mark("MainWindow.Loaded dispatcher task finished");
             });
-            recvScriptBackup = Tools.Global.setting.recvScript;
-            if (string.IsNullOrEmpty(recvScriptBackup)) recvScriptBackup = "default";
+            StartupProfiler.Measure("Loaded recv script backup", () =>
+            {
+                recvScriptBackup = Tools.Global.setting.recvScript;
+                if (string.IsNullOrEmpty(recvScriptBackup)) recvScriptBackup = "default";
+            });
+            StartupProfiler.Mark("MainWindow.Loaded exit");
+        }
+
+        private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!lazyLoadReady)
+                return;
+            if (!ReferenceEquals(e.OriginalSource, MainTabControl))
+                return;
+
+            if (MainTabControl.SelectedItem == ScriptTab)
+                EnsureScriptEditorInitialized();
+            else if (MainTabControl.SelectedItem == ToolsTab)
+                LoadSelectedToolPage();
+            else if (MainTabControl.SelectedItem == AboutTab)
+                NavigateFrameOnce(aboutFrame, "Pages/AboutPage.xaml");
+        }
+
+        private void EnsureScriptEditorInitialized()
+        {
+            if (scriptEditorInitialized)
+                return;
+            scriptEditorInitialized = true;
+            WaitRuntimeFilesReady();
+
+            SearchPanel.Install(textEditor.TextArea);
+
+            textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinition("JavaScript");
+
+            loadScriptFile(Tools.Global.setting.runScript);
+
+            ScriptEnv.ScriptApis.PrintScriptLog += ScriptApis_PrintScriptLog;
+            ScriptEnv.JavaScriptRunEnv.ScriptRunError += JavaScriptRunEnv_ScriptRunError;
+            new Thread(ScriptLogPrintTask).Start();
+        }
+
+        private void ToolsSelectorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!lazyLoadReady)
+                return;
+            if (!ReferenceEquals(e.OriginalSource, ToolsSelectorComboBox))
+                return;
+
+            LoadSelectedToolPage();
+        }
+
+        private void LoadSelectedToolPage()
+        {
+            var selected = (ToolsSelectorComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "EncodingTools";
+            HideAllToolPages();
+
+            switch (selected)
+            {
+                case "Mqtt":
+                    ShowToolPage(MqttTestFrame);
+                    NavigateFrameOnce(MqttTestFrame, "Pages/MqttTestPage.xaml");
+                    break;
+                case "SerialMonitor":
+                    ShowToolPage(SerialMonitorFrame);
+                    NavigateFrameOnce(SerialMonitorFrame, "Pages/SerialMonitorPage.xaml");
+                    break;
+                case "LogReplay":
+                    ShowToolPage(LogReplayFrame);
+                    NavigateFrameOnce(LogReplayFrame, "Pages/LogReplayPage.xaml");
+                    break;
+                case "EncodingFix":
+                    ShowToolPage(EncodingFixFrame);
+                    NavigateFrameOnce(EncodingFixFrame, "Pages/EncodingFixPage.xaml");
+                    break;
+                case "Plot":
+                    ShowToolPage(PlotFrame);
+                    NavigateFrameOnce(PlotFrame, "Pages/PlotPage.xaml");
+                    break;
+                case "WinUsb":
+                    ShowToolPage(WinUSBFrame);
+                    NavigateFrameOnce(WinUSBFrame, "Pages/WinUSBPage.xaml");
+                    break;
+                case "HttpTool":
+                    ShowToolPage(HttpToolPanel);
+                    break;
+                case "DataCalc":
+                    ShowToolPage(DataCalcPanel);
+                    break;
+                case "TcpTest":
+                    ShowToolPage(tcpTestFrame);
+                    NavigateFrameOnce(tcpTestFrame, "Pages/tcpTest.xaml");
+                    break;
+                case "TcpLocal":
+                    ShowToolPage(tcpLocalTestFrame);
+                    NavigateFrameOnce(tcpLocalTestFrame, "Pages/TcpLocalPage.xaml");
+                    break;
+                case "UdpLocal":
+                    ShowToolPage(udpLocalTestFrame);
+                    NavigateFrameOnce(udpLocalTestFrame, "Pages/UdpLocalPage.xaml");
+                    break;
+                case "TcpClient":
+                    ShowToolPage(tcpClientFrame);
+                    NavigateFrameOnce(tcpClientFrame, "Pages/SocketClientPage.xaml");
+                    break;
+                default:
+                    ShowToolPage(EncodingToolsFrame);
+                    NavigateFrameOnce(EncodingToolsFrame, "Pages/ConvertPage.xaml");
+                    break;
+            }
+        }
+
+        private void HideAllToolPages()
+        {
+            foreach (var page in new FrameworkElement[]
+            {
+                EncodingToolsFrame,
+                MqttTestFrame,
+                SerialMonitorFrame,
+                LogReplayFrame,
+                EncodingFixFrame,
+                PlotFrame,
+                WinUSBFrame,
+                HttpToolPanel,
+                DataCalcPanel,
+                tcpTestFrame,
+                tcpLocalTestFrame,
+                udpLocalTestFrame,
+                tcpClientFrame
+            })
+            {
+                page.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void ShowToolPage(FrameworkElement page)
+        {
+            page.Visibility = Visibility.Visible;
+        }
+
+        private void NavigateFrameOnce(Frame frame, string path)
+        {
+            if (frame.Content == null)
+                StartupProfiler.Measure($"NavigateFrameOnce {path}", () =>
+                    frame.Navigate(new Uri(path, UriKind.Relative)));
+        }
+
+        private void WaitRuntimeFilesReady()
+        {
+            try
+            {
+                if (runtimeFilesTask == null)
+                    return;
+                if (runtimeFilesTask.IsCompleted)
+                {
+                    runtimeFilesTask.Wait();
+                    return;
+                }
+                StartupProfiler.Measure("WaitRuntimeFilesReady", () => runtimeFilesTask.Wait());
+            }
+            catch (AggregateException ex)
+            {
+                Tools.MessageBox.Show(ex.Flatten().InnerException?.Message ?? ex.Message);
+            }
         }
 
         private bool DoInvoke(Action action)
@@ -276,16 +366,19 @@ namespace llcom
         /// <summary>
         /// 加载快捷发送区数据
         /// </summary>
+        private bool quickListSelectorRefreshing = false;
+
         private void LoadQuickSendList()
         {
-            if (Tools.Global.setting.quickSend.Count == 0)
+            if (Tools.Global.setting.quickSend.Count == 0 &&
+                Tools.Global.setting.GetAllQuickSendLists().All(list => list == null || list.Count == 0))
             {
                 Tools.Global.setting.quickSend = new List<ToSendData>
                         {
                             new ToSendData{id = 1,text="example string",commit="右击更改此处文字",hex=false},
-                            new ToSendData{id = 2,text="lua可通过接口获取此处数据",hex=false},
+                            new ToSendData{id = 2,text="JavaScript可通过接口获取此处数据",hex=false},
                             new ToSendData{id = 3,text="aa 01 02 0d 0a",commit="Hex数据也能发",hex=true},
-                            new ToSendData{id = 4,text="此处数据会被lua处理",hex=false},
+                            new ToSendData{id = 4,text="此处数据会被JavaScript处理",hex=false},
                             new ToSendData{id = 5,text="右击序号可以更改这一行的位置",hex=false},
                             new ToSendData{id = 6,text="",hex=false},
                         };
@@ -297,7 +390,29 @@ namespace llcom
                 toSendListItems.Add(i);
             }
             CheckToSendListId();
-            QuickListPageTextBlock.Text = Global.setting.GetQuickListNameNow();
+            RefreshQuickSendPageSelector();
+        }
+
+        private void RefreshQuickSendPageSelector()
+        {
+            if (QuickListSelectComboBox == null)
+                return;
+
+            quickListSelectorRefreshing = true;
+            try
+            {
+                var names = Global.setting.GetAllQuickListNames()
+                    .Select((name, index) => $"{index + 1}. {name}")
+                    .ToList();
+                QuickListSelectComboBox.ItemsSource = null;
+                QuickListSelectComboBox.ItemsSource = names;
+                QuickListSelectComboBox.SelectedIndex = Global.setting.quickSendSelect;
+                DeleteQuickSendPageButton.IsEnabled = Global.setting.GetQuickSendListCount() > 1;
+            }
+            finally
+            {
+                quickListSelectorRefreshing = false;
+            }
         }
 
         private void Uart_UartDataSent(object sender, EventArgs e)
@@ -347,67 +462,78 @@ namespace llcom
         /// </summary>
         private void refreshPortList(string lastPort = null)
         {
+            StartupProfiler.Mark("refreshPortList enter");
             if (refreshLock)
+            {
+                StartupProfiler.Mark("refreshPortList skipped by lock");
                 return;
+            }
             refreshLock = true;
             serialPortsListComboBox.Items.Clear();
             List<string> strs = new List<string>();
             searchCount = 0;
             Task.Run(() =>
             {
-                while (!skipSearch)
-                //while (true)
+                StartupProfiler.Mark("refreshPortList worker enter");
+                StartupProfiler.Measure("refreshPortList WMI query", () =>
+                {
+                    while (!skipSearch)
+                    //while (true)
+                    {
+                        try
+                        {
+                            ManagementObjectSearcher searcher = new ManagementObjectSearcher("root\\CIMV2", "SELECT * FROM Win32_PnPEntity");
+                            Regex regExp = new Regex("\\(COM\\d+\\)");
+                            foreach (ManagementObject queryObj in searcher.Get())
+                            {
+                                if ((queryObj["Caption"] != null) && regExp.IsMatch(queryObj["Caption"].ToString()))
+                                {
+                                    strs.Add(queryObj["Caption"].ToString());
+                                }
+                            }
+                            break;
+                        }
+                        catch(Exception ex)
+                        {
+                            if (++searchCount >= 3) {
+                                skipSearch = true;
+                                Tools.MessageBox.Show(ex.Message);
+                            }
+                            else Task.Delay(500).Wait();
+                        }
+                        //MessageBox.Show("fail了");
+                    }
+                });
+
+                StartupProfiler.Measure("refreshPortList SerialPort.GetPortNames", () =>
                 {
                     try
                     {
-                        ManagementObjectSearcher searcher = new ManagementObjectSearcher("root\\CIMV2", "SELECT * FROM Win32_PnPEntity");
-                        Regex regExp = new Regex("\\(COM\\d+\\)");
-                        foreach (ManagementObject queryObj in searcher.Get())
+                        foreach (string p in SerialPort.GetPortNames())//加上缺少的com口
                         {
-                            if ((queryObj["Caption"] != null) && regExp.IsMatch(queryObj["Caption"].ToString()))
+                            //有些人遇到了微软库的bug，所以需要手动从0x00截断
+                            var pp = p;
+                            if (p.IndexOf("\0") > 0)
+                                pp = p.Substring(0, p.IndexOf("\0"));
+                            bool notMatch = true;
+                            foreach (string n in strs)
                             {
-                                strs.Add(queryObj["Caption"].ToString());
+                                if (n.Contains($"({pp})"))//如果和选中项目匹配
+                                {
+                                    notMatch = false;
+                                    break;
+                                }
                             }
+                            if (notMatch)
+                                strs.Add($"Serial Port {pp} ({pp})");//如果列表中没有，就自己加上
                         }
-                        break;
                     }
-                    catch(Exception ex) 
-                    {
-                        if (++searchCount >= 3) { 
-                            skipSearch = true;
-                            Tools.MessageBox.Show(ex.Message);
-                        }
-                        else Task.Delay(500).Wait();
-                    }
-                    //MessageBox.Show("fail了");
-                }
-
-                try
-                {
-                    foreach (string p in SerialPort.GetPortNames())//加上缺少的com口
-                    {
-                        //有些人遇到了微软库的bug，所以需要手动从0x00截断
-                        var pp = p;
-                        if (p.IndexOf("\0") > 0)
-                            pp = p.Substring(0, p.IndexOf("\0"));
-                        bool notMatch = true;
-                        foreach (string n in strs)
-                        {
-                            if (n.Contains($"({pp})"))//如果和选中项目匹配
-                            {
-                                notMatch = false;
-                                break;
-                            }
-                        }
-                        if (notMatch)
-                            strs.Add($"Serial Port {pp} ({pp})");//如果列表中没有，就自己加上
-                    }
-                }
-                catch{ }
-                finally { /*Tools.MessageBox.Show(String.Join("\n",SerialPort.GetPortNames()));*/ }
+                    catch{ }
+                    finally { /*Tools.MessageBox.Show(String.Join("\n",SerialPort.GetPortNames()));*/ }
+                });
 
 
-                this.Dispatcher.Invoke(new Action(delegate {
+                StartupProfiler.Measure("refreshPortList UI update", () => this.Dispatcher.Invoke(new Action(delegate {
                     foreach (string i in strs)
                         serialPortsListComboBox.Items.Add(i);
                     if (strs.Count >= 1)
@@ -456,32 +582,33 @@ namespace llcom
                             break;
                         }
                     }
-                }));
+                })));
+                StartupProfiler.Mark($"refreshPortList worker exit, ports={strs.Count}");
             });
         }
 
         private void RefreshScriptList()
         {
             //刷新文件列表
-            DirectoryInfo luaFileDir = new DirectoryInfo(Tools.Global.ProfilePath + "user_script_run/");
-            FileSystemInfo[] luaFiles = luaFileDir.GetFileSystemInfos();
+            DirectoryInfo scriptFileDir = new DirectoryInfo(Tools.Global.ProfilePath + "user_script_run/");
+            FileSystemInfo[] scriptFiles = scriptFileDir.GetFileSystemInfos();
             fileLoading = true;
-            luaFileList.Items.Clear();
-            for (int i = 0; i < luaFiles.Length; i++)
+            scriptFileList.Items.Clear();
+            for (int i = 0; i < scriptFiles.Length; i++)
             {
-                FileInfo file = luaFiles[i] as FileInfo;
+                FileInfo file = scriptFiles[i] as FileInfo;
                 //是文件
-                if (file != null && file.Name.ToLower().EndsWith(".lua"))
+                if (file != null && file.Name.ToLower().EndsWith(".js"))
                 {
                     string name = file.Name.Substring(0, file.Name.Length - 4);
-                    luaFileList.Items.Add(name);
+                    scriptFileList.Items.Add(name);
                     if (name== Tools.Global.setting.runScript)
                     {
-                        luaFileList.SelectedIndex = luaFileList.Items.Count - 1;
+                        scriptFileList.SelectedIndex = scriptFileList.Items.Count - 1;
                     }
                 }
             }
-            lastLuaFile = Tools.Global.setting.runScript;
+            lastScriptFile = Tools.Global.setting.runScript;
             fileLoading = false;
         }
 
@@ -555,8 +682,8 @@ namespace llcom
             Tools.Global.setting.windowWidth = this.Width;
             Tools.Global.setting.windowHeight = this.Height;
             //自动保存脚本
-            if (lastLuaFile != "")
-                saveLuaFile(lastLuaFile);
+            if (lastScriptFile != "")
+                saveScriptFile(lastScriptFile);
             Tools.Global.isMainWindowsClosed = true;
             foreach (Window win in App.Current.Windows)
             {
@@ -583,14 +710,36 @@ namespace llcom
             flowControlPage.Show();
         }
 
+        Window dataCalcWindow = new DataCalcWindow();
+        private void DataCalcWindowButton_Click(object sender, RoutedEventArgs e)
+        {
+            dataCalcWindow.Owner = this;
+            if (dataCalcWindow.WindowState == WindowState.Minimized)
+                dataCalcWindow.WindowState = WindowState.Normal;
+            dataCalcWindow.Show();
+            dataCalcWindow.Activate();
+        }
+
+        Window httpToolWindow = new HttpToolWindow();
+        private void HttpToolWindowButton_Click(object sender, RoutedEventArgs e)
+        {
+            httpToolWindow.Owner = this;
+            if (httpToolWindow.WindowState == WindowState.Minimized)
+                httpToolWindow.WindowState = WindowState.Normal;
+            httpToolWindow.Show();
+            httpToolWindow.Activate();
+        }
+
 
         private void ApiDocumentButton_Click(object sender, RoutedEventArgs e)
         {
-            System.Diagnostics.Process.Start(Tools.Global.apiDocumentUrl);
+            var localDoc = System.IO.Path.Combine(Tools.Global.AppPath, Tools.Global.apiDocumentUrl);
+            System.Diagnostics.Process.Start(File.Exists(localDoc) ? localDoc : Tools.Global.apiDocumentUrl);
         }
 
         private void OpenScriptFolderButton_Click(object sender, RoutedEventArgs e)
         {
+            WaitRuntimeFilesReady();
             try
             {
                 System.Diagnostics.Process.Start("explorer.exe", Tools.Global.GetTrueProfilePath() + "user_script_run");
@@ -790,8 +939,9 @@ namespace llcom
                 {
                     try
                     {
-                        dataConvert = LuaEnv.LuaLoader.Run(
-                            $"{Tools.Global.setting.sendScript}.lua",
+                        WaitRuntimeFilesReady();
+                        dataConvert = ScriptEnv.JavaScriptLoader.Run(
+                            $"{Tools.Global.setting.sendScript}.js",
                             new System.Collections.ArrayList
                             {
                                 "uartData",
@@ -804,6 +954,9 @@ namespace llcom
                         Tools.MessageBox.Show($"{TryFindResource("ErrorScript") as string ?? "?!"}\r\n" + ex.ToString());
                         return;
                     }
+
+                    if (dataConvert == null)
+                        return;
 
                     if (Tools.Global.setting.extraEnter)
                     {
@@ -844,6 +997,13 @@ namespace llcom
 
         private void ToSendDataTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (IsCtrlKeyDown() && e.Key == Key.A)
+            {
+                toSendDataTextBox.SelectAll();
+                e.Handled = true;
+                return;
+            }
+
             if (sendSuggestPopup.IsOpen && HandleSendSuggestionKey(e))
                 return;
 
@@ -1039,14 +1199,17 @@ namespace llcom
         private void AddSendListButton_Click(object sender, RoutedEventArgs e)
         {
             toSendListItems.Add(new ToSendData() { id = toSendListItems.Count + 1, text = "", hex = false , commit = TryFindResource("QuickSendButton") as string ?? "?!" });
+            SaveSendList(null, EventArgs.Empty);
         }
 
-        private void DeleteSendListButton_Click(object sender, RoutedEventArgs e)
+        private void RemoveSendListItemButton_Click(object sender, RoutedEventArgs e)
         {
-            if (toSendListItems.Count > 0)
-            {
-                toSendListItems.RemoveAt(toSendListItems.Count - 1);
-            }
+            var item = ((Button)sender).Tag as ToSendData;
+            if (item == null)
+                return;
+
+            toSendListItems.Remove(item);
+            CheckToSendListId();
             SaveSendList(null, EventArgs.Empty);
         }
 
@@ -1058,13 +1221,13 @@ namespace llcom
             if (!string.IsNullOrEmpty(data.recvScriptPath))
             {
                 //检查文件是否存在
-                if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{data.recvScriptPath}.lua"))
+                if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{data.recvScriptPath}.js"))
                 {
                     Tools.Global.setting.recvScript = "default";
                     data.recvScriptPath = "";
-                    if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.lua"))
+                    if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.js"))
                     {
-                        File.Create(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.lua").Close();
+                        File.Create(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.js").Close();
                     }
                 }
                 else
@@ -1129,74 +1292,74 @@ namespace llcom
 
         private void NewScriptButton_Click(object sender, RoutedEventArgs e)
         {
-            newLuaFileWrapPanel.Visibility = Visibility.Visible;
+            newScriptFileWrapPanel.Visibility = Visibility.Visible;
         }
 
         private void RunScriptButton_Click(object sender, RoutedEventArgs e)
         {
-            if (luaFileList.SelectedItem != null && !fileLoading)
+            if (scriptFileList.SelectedItem != null && !fileLoading)
             {
-                luaLogTextBox.Clear();
-                LuaEnv.LuaRunEnv.New($"user_script_run/{luaFileList.SelectedItem as string}.lua");
-                luaScriptEditorGrid.Visibility = Visibility.Collapsed;
-                luaLogShowGrid.Visibility = Visibility.Visible;
-                luaLogPrintable = true;
+                scriptLogTextBox.Clear();
+                ScriptEnv.JavaScriptRunEnv.New($"user_script_run/{scriptFileList.SelectedItem as string}.js");
+                scriptEditorGrid.Visibility = Visibility.Collapsed;
+                scriptLogShowGrid.Visibility = Visibility.Visible;
+                scriptLogPrintable = true;
             }
-            LuaEnv.LuaRunEnv.canRun = true;
+            ScriptEnv.JavaScriptRunEnv.canRun = true;
         }
 
-        private void NewLuaFilebutton_Click(object sender, RoutedEventArgs e)
+        private void NewScriptFileButton_Click(object sender, RoutedEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(newLuaFileNameTextBox.Text))
+            if (string.IsNullOrWhiteSpace(newScriptFileNameTextBox.Text))
             {
-                Tools.MessageBox.Show(TryFindResource("LuaNoName") as string ?? "?!");
+                Tools.MessageBox.Show(TryFindResource("ScriptNoName") as string ?? "?!");
                 return;
             }
-            if (File.Exists(Tools.Global.ProfilePath + $"user_script_run/{newLuaFileNameTextBox.Text}.lua"))
+            if (File.Exists(Tools.Global.ProfilePath + $"user_script_run/{newScriptFileNameTextBox.Text}.js"))
             {
-                Tools.MessageBox.Show(TryFindResource("LuaExist") as string ?? "?!");
+                Tools.MessageBox.Show(TryFindResource("ScriptExist") as string ?? "?!");
                 return;
             }
 
             try
             {
-                File.Create(Tools.Global.ProfilePath + $"user_script_run/{newLuaFileNameTextBox.Text}.lua").Close();
-                loadLuaFile(newLuaFileNameTextBox.Text);
+                File.Create(Tools.Global.ProfilePath + $"user_script_run/{newScriptFileNameTextBox.Text}.js").Close();
+                loadScriptFile(newScriptFileNameTextBox.Text);
             }
             catch
             {
-                Tools.MessageBox.Show(TryFindResource("LuaCreateFail") as string ?? "?!");
+                Tools.MessageBox.Show(TryFindResource("ScriptCreateFail") as string ?? "?!");
                 return;
             }
-            newLuaFileWrapPanel.Visibility = Visibility.Collapsed;
+            newScriptFileWrapPanel.Visibility = Visibility.Collapsed;
         }
 
-        private void NewLuaFileCancelbutton_Click(object sender, RoutedEventArgs e)
+        private void NewScriptFileCancelButton_Click(object sender, RoutedEventArgs e)
         {
-            newLuaFileWrapPanel.Visibility = Visibility.Collapsed;
+            newScriptFileWrapPanel.Visibility = Visibility.Collapsed;
         }
 
         //重载锁，防止逻辑卡死
         private static bool fileLoading = false;
         //上次打开文件名
-        private static string lastLuaFile = "";
+        private static string lastScriptFile = "";
         //最后打开文件的时间
-        private static DateTime lastLuaFileTime = DateTime.Now;
+        private static DateTime lastScriptFileTime = DateTime.Now;
         //最后修改文件的时间
-        private static DateTime lastLuaChangeTime = DateTime.Now;
+        private static DateTime lastScriptChangeTime = DateTime.Now;
         /// <summary>
-        /// 加载lua脚本文件
+        /// 加载脚本文件
         /// </summary>
-        /// <param name="fileName">文件名，不带.lua</param>
-        private void loadLuaFile(string fileName)
+        /// <param name="fileName">文件名，不带.js</param>
+        private void loadScriptFile(string fileName)
         {
             //检查文件是否存在
-            if (!File.Exists(Tools.Global.ProfilePath + $"user_script_run/{fileName}.lua"))
+            if (!File.Exists(Tools.Global.ProfilePath + $"user_script_run/{fileName}.js"))
             {
                 Tools.Global.setting.runScript = "example";
-                if (!File.Exists(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.lua"))
+                if (!File.Exists(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.js"))
                 {
-                    File.Create(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.lua").Close();
+                    File.Create(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.js").Close();
                 }
             }
             else
@@ -1207,7 +1370,7 @@ namespace llcom
             //文件内容显示出来
             try
             {
-                textEditor.Text = File.ReadAllText(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.lua");
+                textEditor.Text = File.ReadAllText(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.js");
             }
             catch
             {
@@ -1217,74 +1380,74 @@ namespace llcom
             }
             
             //记录最后时间
-            lastLuaFileTime = File.GetLastWriteTime(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.lua");
+            lastScriptFileTime = File.GetLastWriteTime(Tools.Global.ProfilePath + $"user_script_run/{Tools.Global.setting.runScript}.js");
             //加载文件,修改时间使用文件时间
-            lastLuaChangeTime = lastLuaFileTime;
+            lastScriptChangeTime = lastScriptFileTime;
 
             RefreshScriptList();
         }
 
         /// <summary>
-        /// 保存lua文件
+        /// 保存脚本文件
         /// </summary>
-        /// <param name="fileName">文件名，不带.lua</param>
-        private void saveLuaFile(string fileName)
+        /// <param name="fileName">文件名，不带.js</param>
+        private void saveScriptFile(string fileName)
         {
             try
             {
                 //如果修改时间大于文件时间才执行保存操作
-                if (lastLuaChangeTime > lastLuaFileTime)
+                if (lastScriptChangeTime > lastScriptFileTime)
                 {
-                    File.WriteAllText(Tools.Global.ProfilePath + $"user_script_run/{fileName}.lua", textEditor.Text);
+                    File.WriteAllText(Tools.Global.ProfilePath + $"user_script_run/{fileName}.js", textEditor.Text);
                     //记录最后时间
-                    lastLuaFileTime = File.GetLastWriteTime(Tools.Global.ProfilePath + $"user_script_run/{fileName}.lua");
+                    lastScriptFileTime = File.GetLastWriteTime(Tools.Global.ProfilePath + $"user_script_run/{fileName}.js");
                 }
             }
             catch { }
         }
 
-        private void LuaFileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void ScriptFileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (luaFileList.SelectedItem != null && !fileLoading)
+            if (scriptFileList.SelectedItem != null && !fileLoading)
             {
-                if (lastLuaFile != "")
-                    saveLuaFile(lastLuaFile);
-                string fileName = luaFileList.SelectedItem as string;
-                loadLuaFile(fileName);
+                if (lastScriptFile != "")
+                    saveScriptFile(lastScriptFile);
+                string fileName = scriptFileList.SelectedItem as string;
+                loadScriptFile(fileName);
             }
         }
         private void TextEditor_LostFocus(object sender, RoutedEventArgs e)
         {
             //自动保存脚本
-            if (lastLuaFile != "")
-                saveLuaFile(lastLuaFile);
+            if (lastScriptFile != "")
+                saveScriptFile(lastScriptFile);
         }
         private void Window_Deactivated(object sender, EventArgs e)
         {
             //窗口变为后台,可能在切换编辑器,自动保存脚本
-            if (lastLuaFile != "")
-                saveLuaFile(lastLuaFile);
+            if (lastScriptFile != "")
+                saveScriptFile(lastScriptFile);
         }
         private void Window_Activated(object sender, EventArgs e)
         {
-            if (lastLuaFile != "")
+            if (lastScriptFile != "")
             {
                 //当前文件最后时间
-                DateTime fileTime = File.GetLastWriteTime(Tools.Global.ProfilePath + $"user_script_run/{lastLuaFile}.lua");
-                if (fileTime > lastLuaFileTime)//代码在外部被修改
+                DateTime fileTime = File.GetLastWriteTime(Tools.Global.ProfilePath + $"user_script_run/{lastScriptFile}.js");
+                if (fileTime > lastScriptFileTime)//代码在外部被修改
                 {
-                    loadLuaFile(lastLuaFile);
+                    loadScriptFile(lastScriptFile);
                 }
             }
         }
 
         //是否可打印标记
-        private bool _luaLogPrintable = true;
-        private bool luaLogPrintable
+        private bool _scriptLogPrintable = true;
+        private bool scriptLogPrintable
         {
             get
             {
-                return _luaLogPrintable;
+                return _scriptLogPrintable;
             }
             set
             {
@@ -1292,88 +1455,88 @@ namespace llcom
                 {
                     if (value)
                     {
-                        pauseLuaPrintButton.ToolTip = TryFindResource("LuaPause") as string ?? "?!";
-                        pauseLuaPrintIcon.Icon = FontAwesomeIcon.Pause;
+                        pauseScriptPrintButton.ToolTip = TryFindResource("ScriptPause") as string ?? "?!";
+                        pauseScriptPrintIcon.Icon = FontAwesomeIcon.Pause;
                     }
                     else
                     {
-                        pauseLuaPrintButton.ToolTip = TryFindResource("LuaContinue") as string ?? "?!";
-                        pauseLuaPrintIcon.Icon = FontAwesomeIcon.Play;
+                        pauseScriptPrintButton.ToolTip = TryFindResource("ScriptContinue") as string ?? "?!";
+                        pauseScriptPrintIcon.Icon = FontAwesomeIcon.Play;
                     }
                 }));
-                _luaLogPrintable = value;
+                _scriptLogPrintable = value;
             }
         }
 
-        //lua日志打印次数
-        private int luaLogCount = 0;
+        //脚本日志打印次数
+        private int scriptLogCount = 0;
         /// <summary>
         /// 消息来的信号量
         /// </summary>
-        private EventWaitHandle luaWaitQueue = new AutoResetEvent(false);
-        private List<string> luaLogsBuff = new List<string>();
-        private void LuaApis_PrintLuaLog(object sender, EventArgs e)
+        private EventWaitHandle scriptWaitQueue = new AutoResetEvent(false);
+        private List<string> scriptLogsBuff = new List<string>();
+        private void ScriptApis_PrintScriptLog(object sender, EventArgs e)
         {
             if(sender is string && sender != null)
             { 
-                lock(luaLogsBuff)
+                lock(scriptLogsBuff)
                 {
-                    if (luaLogsBuff.Count > 500)
+                    if (scriptLogsBuff.Count > 500)
                     {
-                        luaLogsBuff.Clear();
-                        luaLogsBuff.Add("too many logs!");
+                        scriptLogsBuff.Clear();
+                        scriptLogsBuff.Add("too many logs!");
                         //延时0.5秒，防止卡住ui线程
                         Thread.Sleep(500);
                     }
                     else
-                        luaLogsBuff.Add(sender as string);
+                        scriptLogsBuff.Add(sender as string);
                 }
-                luaWaitQueue.Set();
+                scriptWaitQueue.Set();
             }
         }
 
-        private void LuaLogPrintTask()
+        private void ScriptLogPrintTask()
         {
-            luaWaitQueue.Reset();
+            scriptWaitQueue.Reset();
             Tools.Global.ProgramClosedEvent += (_, _) =>
             {
-                luaWaitQueue.Set();
+                scriptWaitQueue.Set();
             };
             while (true)
             {
-                luaWaitQueue.WaitOne();
+                scriptWaitQueue.WaitOne();
                 if (Tools.Global.isMainWindowsClosed)
                     return;
                 var logsb = new StringBuilder();
-                lock (luaLogsBuff)
+                lock (scriptLogsBuff)
                 {
-                    for(int i=0;i<luaLogsBuff.Count;i++)
+                    for(int i=0;i<scriptLogsBuff.Count;i++)
                     {
-                        logsb.AppendLine(luaLogsBuff[i]);
-                        luaLogCount++;
+                        logsb.AppendLine(scriptLogsBuff[i]);
+                        scriptLogCount++;
                     }
-                    luaLogsBuff.Clear();
+                    scriptLogsBuff.Clear();
                 }
 
-                if (!luaLogPrintable)
+                if (!scriptLogPrintable)
                     continue;
                 if (logsb.Length == 0)
                     continue;
                 var logs = logsb.ToString();
                 DoInvoke(()=>
                 {
-                    luaLogTextBox.IsEnabled = false;//确保文字不再被选中，防止wpf卡死
-                    if (luaLogCount >= 1000)
+                    scriptLogTextBox.IsEnabled = false;//确保文字不再被选中，防止wpf卡死
+                    if (scriptLogCount >= 1000)
                     {
-                        luaLogTextBox.Clear();
-                        luaLogTextBox.AppendText("Lua log too long, auto clear.\r\n" +
-                            "more logs see lua log file.\r\n");
-                        luaLogCount = 0;
+                        scriptLogTextBox.Clear();
+                        scriptLogTextBox.AppendText("JavaScript log too long, auto clear.\r\n" +
+                            "more logs see JavaScript log file.\r\n");
+                        scriptLogCount = 0;
                     }
-                    luaLogTextBox.AppendText(logs);
-                    luaLogTextBox.ScrollToEnd();
-                    if (!luaLogTextBox.IsMouseOver)
-                        luaLogTextBox.IsEnabled = true;
+                    scriptLogTextBox.AppendText(logs);
+                    scriptLogTextBox.ScrollToEnd();
+                    if (!scriptLogTextBox.IsMouseOver)
+                        scriptLogTextBox.IsEnabled = true;
                 });
                 //正常就延时10ms，防止卡住ui线程
                 Thread.Sleep(10);
@@ -1381,103 +1544,73 @@ namespace llcom
         }
 
 
-        private void luaLogTextBox_MouseLeave(object sender, MouseEventArgs e)
+        private void scriptLogTextBox_MouseLeave(object sender, MouseEventArgs e)
         {
-            luaLogTextBox.IsEnabled = true;
+            scriptLogTextBox.IsEnabled = true;
         }
 
-        private void StopLuaButton_Click(object sender, RoutedEventArgs e)
+        private void StopScriptButton_Click(object sender, RoutedEventArgs e)
         {
-            luaLogCount = 0;
-            lock(luaLogsBuff)
-                luaLogsBuff.Clear();
-            if (!LuaEnv.LuaRunEnv.isRunning)
+            scriptLogCount = 0;
+            lock(scriptLogsBuff)
+                scriptLogsBuff.Clear();
+            if (!ScriptEnv.JavaScriptRunEnv.isRunning)
             {
-                luaLogTextBox.Clear();
-                luaScriptEditorGrid.Visibility = Visibility.Visible;
-                luaLogShowGrid.Visibility = Visibility.Collapsed;
-                luaLogPrintable = true;
+                scriptLogTextBox.Clear();
+                scriptEditorGrid.Visibility = Visibility.Visible;
+                scriptLogShowGrid.Visibility = Visibility.Collapsed;
+                scriptLogPrintable = true;
                 
-                stopLuaOrExitIcon.Icon = FontAwesomeIcon.Stop;
-                stopLuaButton.ToolTip = TryFindResource("LuaStop") as string ?? "?!";
+                stopScriptOrExitIcon.Icon = FontAwesomeIcon.Stop;
+                stopScriptButton.ToolTip = TryFindResource("ScriptStop") as string ?? "?!";
             }
             else
             {
-                stopLuaOrExitIcon.Icon = FontAwesomeIcon.SignOut;
-                stopLuaButton.ToolTip = TryFindResource("LuaQuit") as string ?? "?!";
+                stopScriptOrExitIcon.Icon = FontAwesomeIcon.SignOut;
+                stopScriptButton.ToolTip = TryFindResource("ScriptQuit") as string ?? "?!";
             }
-            luaLogPrintable = true;
-            LuaEnv.LuaRunEnv.StopLua("");
+            scriptLogPrintable = true;
+            ScriptEnv.JavaScriptRunEnv.StopScript("");
 
-            pauseLuaPrintButton.ToolTip = TryFindResource("LuaOverload") as string ?? "?!";
-            pauseLuaPrintIcon.Icon = FontAwesomeIcon.Refresh;
+            pauseScriptPrintButton.ToolTip = TryFindResource("ScriptReload") as string ?? "?!";
+            pauseScriptPrintIcon.Icon = FontAwesomeIcon.Refresh;
         }
 
-        private void LuaRunEnv_LuaRunError(object sender, EventArgs e)
+        private void JavaScriptRunEnv_ScriptRunError(object sender, EventArgs e)
         {
-            luaLogPrintable = true;
+            scriptLogPrintable = true;
         }
 
-        private void PauseLuaPrintButton_Click(object sender, RoutedEventArgs e)
+        private void PauseScriptPrintButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!LuaEnv.LuaRunEnv.isRunning)
+            if (!ScriptEnv.JavaScriptRunEnv.isRunning)
             {
-                stopLuaOrExitIcon.Icon = FontAwesomeIcon.Stop;
-                stopLuaButton.ToolTip = TryFindResource("LuaStop") as string ?? "?!";
-                LuaEnv.LuaRunEnv.New($"user_script_run/{luaFileList.SelectedItem as string}.lua");
-                LuaEnv.LuaRunEnv.canRun = true;
-                luaLogPrintable = true;
+                stopScriptOrExitIcon.Icon = FontAwesomeIcon.Stop;
+                stopScriptButton.ToolTip = TryFindResource("ScriptStop") as string ?? "?!";
+                ScriptEnv.JavaScriptRunEnv.New($"user_script_run/{scriptFileList.SelectedItem as string}.js");
+                ScriptEnv.JavaScriptRunEnv.canRun = true;
+                scriptLogPrintable = true;
             }
             else {
-                luaLogPrintable = !luaLogPrintable;
+                scriptLogPrintable = !scriptLogPrintable;
             }
         }
 
-        private void SendLuaScriptButton_Click(object sender, RoutedEventArgs e)
+        private void SendScriptCommandButton_Click(object sender, RoutedEventArgs e)
         {
-            LuaEnv.LuaRunEnv.RunCommand(runOneLineLuaTextBox.Text);
-            //runOneLineLuaTextBox.Clear();
+            ScriptEnv.JavaScriptRunEnv.RunCommand(runOneLineScriptTextBox.Text);
+            //runOneLineScriptTextBox.Clear();
         }
 
-        private void RunOneLineLuaTextBox_KeyDown(object sender, KeyEventArgs e)
+        private void RunOneLineScriptTextBox_KeyDown(object sender, KeyEventArgs e)
         {
             if(e.Key == Key.Enter)
-                LuaEnv.LuaRunEnv.RunCommand(runOneLineLuaTextBox.Text);
-        }
-
-        private void ScriptShareButton_Click(object sender, RoutedEventArgs e)
-        {
-            System.Diagnostics.Process.Start("https://github.com/chenxuuu/llcom/blob/master/scripts");
+                ScriptEnv.JavaScriptRunEnv.RunCommand(runOneLineScriptTextBox.Text);
         }
 
         private void RefreshPortButton_Click(object sender, RoutedEventArgs e)
         {
             refreshPortList();
-        }
-
-        private void ImportSSCOMButton_Click(object sender, RoutedEventArgs e)
-        {
-            System.Windows.Forms.OpenFileDialog OpenFileDialog = new System.Windows.Forms.OpenFileDialog();
-            OpenFileDialog.Filter = TryFindResource("QuickSendSSCOMFile") as string ?? "?!";
-            if (OpenFileDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-            {
-                this.Dispatcher.Invoke(new Action(delegate
-                {
-                    canSaveSendList = false;
-                    foreach (var i in Tools.Global.ImportFromSSCOM(OpenFileDialog.FileName))
-                    {
-                        toSendListItems.Add(new ToSendData()
-                        {
-                            id = toSendListItems.Count + 1,
-                            text = i.text,
-                            hex = i.hex,
-                            commit = i.commit
-                        });
-                    }
-                    canSaveSendList = true;
-                    SaveSendList(0, EventArgs.Empty);//保存并刷新数据列表
-                }));
-            }
         }
 
         private void sentCountTextBlock_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -1536,10 +1669,60 @@ namespace llcom
 
         private void MenuItem_Click_QuickSendList(object sender, RoutedEventArgs e)
         {
-            canSaveSendList = false;
             int select = int.Parse((string)((MenuItem)sender).Tag);
+            SelectQuickSendPage(select);
+        }
+
+        private void QuickListSelectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (quickListSelectorRefreshing || QuickListSelectComboBox.SelectedIndex < 0)
+                return;
+
+            SelectQuickSendPage(QuickListSelectComboBox.SelectedIndex);
+        }
+
+        private void SelectQuickSendPage(int select)
+        {
+            if (select == Global.setting.quickSendSelect)
+                return;
+
+            SaveSendList(null, EventArgs.Empty);
+            canSaveSendList = false;
             toSendListItems.Clear();
             Global.setting.quickSendSelect = select;
+            LoadQuickSendList();
+            canSaveSendList = true;
+        }
+
+        private void AddQuickSendPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            SaveSendList(null, EventArgs.Empty);
+            canSaveSendList = false;
+            toSendListItems.Clear();
+            Global.setting.AddQuickSendPage();
+            LoadQuickSendList();
+            canSaveSendList = true;
+            QuickListSelectComboBox.Focus();
+        }
+
+        private void DeleteQuickSendPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (Global.setting.GetQuickSendListCount() <= 1)
+            {
+                Tools.MessageBox.Show(TryFindResource("QuickSendDeletePageBlocked") as string ?? "?!");
+                return;
+            }
+
+            var ret = Tools.InputDialog.OpenDialog(
+                TryFindResource("QuickSendDeletePageConfirmMsg") as string ?? "?!",
+                "",
+                TryFindResource("DeleteConfirmation") as string ?? "?!");
+            if (!ret.Item1 || ret.Item2 != "YES")
+                return;
+
+            canSaveSendList = false;
+            toSendListItems.Clear();
+            Global.setting.RemoveQuickSendPage(Global.setting.quickSendSelect);
             LoadQuickSendList();
             canSaveSendList = true;
         }
@@ -1550,11 +1733,46 @@ namespace llcom
             OpenFileDialog.Filter = TryFindResource("QuickSendLLCOMFile") as string ?? "?!";
             if (OpenFileDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
+                JToken token = null;
+                try
+                {
+                    token = JToken.Parse(File.ReadAllText(OpenFileDialog.FileName));
+                    if (token == null)
+                        throw new Exception(TryFindResource("QuickSendLoadError") as string ?? "?!");
+                }
+                catch (Exception err)
+                {
+                    Tools.MessageBox.Show(err.Message);
+                    return;
+                }
+
+                var allQuickSendToken = GetAllQuickSendListToken(token);
+                if (allQuickSendToken != null)
+                {
+                    var allData = allQuickSendToken.ToObject<List<List<ToSendData>>>();
+                    if (allData == null)
+                    {
+                        Tools.MessageBox.Show(TryFindResource("QuickSendLoadError") as string ?? "?!");
+                        return;
+                    }
+                    var allNames = (token as JObject)?["quickSendListNames"]?.ToObject<List<string>>();
+                    this.Dispatcher.Invoke(new Action(delegate
+                    {
+                        canSaveSendList = false;
+                        Tools.Global.setting.SetAllQuickSendLists(allData);
+                        Tools.Global.setting.SetAllQuickListNames(allNames);
+                        toSendListItems.Clear();
+                        LoadQuickSendList();
+                        canSaveSendList = true;
+                        Tools.MessageBox.Show(TryFindResource("QuickSendImportAllDone") as string ?? "?!");
+                    }));
+                    return;
+                }
+
                 List<ToSendData> data = null;
                 try
                 {
-                    data = JsonConvert.DeserializeObject<List<ToSendData>>(
-                        File.ReadAllText(OpenFileDialog.FileName));
+                    data = token.ToObject<List<ToSendData>>();
                     if (data == null)
                         throw new Exception(TryFindResource("QuickSendLoadError") as string ?? "?!");
                 }
@@ -1563,6 +1781,7 @@ namespace llcom
                     Tools.MessageBox.Show(err.Message);
                     return;
                 }
+
                 this.Dispatcher.Invoke(new Action(delegate
                 {
                     canSaveSendList = false;
@@ -1578,15 +1797,38 @@ namespace llcom
 
         private void QuickSendExportButton_Click(object sender, RoutedEventArgs e)
         {
+            ExportQuickSend(false);
+        }
+
+        private void QuickSendExportAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            ExportQuickSend(true);
+        }
+
+        private void ExportQuickSend(bool exportAll)
+        {
+            SaveSendList(null, EventArgs.Empty);
             System.Windows.Forms.SaveFileDialog SaveFileDialog = new System.Windows.Forms.SaveFileDialog();
-            SaveFileDialog.FileName = System.Text.RegularExpressions.Regex.Replace(QuickListPageTextBlock.Text, "[<>/\\|:\"?*]", "-");
+            var fileName = exportAll
+                ? TryFindResource("QuickSendExportAllFileName") as string ?? "all-quick-send-data"
+                : Global.setting.GetQuickListNameNow();
+            SaveFileDialog.FileName = System.Text.RegularExpressions.Regex.Replace(fileName, "[<>/\\|:\"?*]", "-");
             SaveFileDialog.Filter = TryFindResource("QuickSendLLCOMFile") as string ?? "?!";
             if (SaveFileDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
                 try
                 {
-                    File.WriteAllText(SaveFileDialog.FileName, JsonConvert.SerializeObject(toSendListItems));
-                    Tools.MessageBox.Show(TryFindResource("QuickSendSaveFileDone") as string ?? "?!");
+                    object data = exportAll
+                        ? (object)new
+                        {
+                            type = "llcom.quickSend.all",
+                            version = 1,
+                            quickSendList = Tools.Global.setting.GetAllQuickSendLists(),
+                            quickSendListNames = Tools.Global.setting.GetAllQuickListNames(),
+                        }
+                        : toSendListItems.ToList();
+                    File.WriteAllText(SaveFileDialog.FileName, JsonConvert.SerializeObject(data));
+                    Tools.MessageBox.Show(TryFindResource(exportAll ? "QuickSendSaveAllFileDone" : "QuickSendSaveFileDone") as string ?? "?!");
                 }
                 catch(Exception err)
                 {
@@ -1595,7 +1837,32 @@ namespace llcom
             }
         }
 
+        private static JToken GetAllQuickSendListToken(JToken token)
+        {
+            if (token is JObject obj && obj["quickSendList"] is JArray packageList)
+                return IsAllQuickSendListToken(packageList) ? packageList : null;
+            return IsAllQuickSendListToken(token) ? token : null;
+        }
+
+        private static bool IsAllQuickSendListToken(JToken token)
+        {
+            if (!(token is JArray array) || array.Count == 0)
+                return false;
+            return array.All(item => item is JArray);
+        }
+
+        private void QuickListSelectComboBox_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            e.Handled = true;
+            RenameQuickSendPage();
+        }
+
         private void QuickListNameStackPanel_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            RenameQuickSendPage();
+        }
+
+        private void RenameQuickSendPage()
         {
             Tuple<bool, string> ret = Tools.InputDialog.OpenDialog("↓↓↓↓↓↓",
                 Global.setting.GetQuickListNameNow(), TryFindResource("QuickSendListNameChangeTip") as string ?? "?!");
@@ -1604,30 +1871,17 @@ namespace llcom
                 return;
 
             Global.setting.SetQuickListNameNow(ret.Item2);
-            QuickListPageTextBlock.Text = ret.Item2;
+            RefreshQuickSendPageSelector();
         }
 
-        private void pauseLuaPrintButton_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        private void pauseScriptPrintButton_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
-            luaLogTextBox.Clear();
+            scriptLogTextBox.Clear();
         }
 
         private void textEditor_TextChanged(object sender, EventArgs e)
         {
-            lastLuaChangeTime = DateTime.Now;
-        }
-
-        private void removeAllButton_Click(object sender, RoutedEventArgs e)
-        {
-            var ret = Tools.InputDialog.OpenDialog(TryFindResource("DeleteConfirmationMsg") as string ?? "?!",
-                "", TryFindResource("DeleteConfirmation") as string ?? "?!");
-            bool r = ret.Item1;
-            string s = ret.Item2;
-            if (r && s == "YES")
-            {
-                toSendListItems.Clear();
-                SaveSendList(null, EventArgs.Empty);
-            }
+            lastScriptChangeTime = DateTime.Now;
         }
 
         private void uartDataFlowDocument_GotFocus(object sender, RoutedEventArgs e)
@@ -1655,23 +1909,46 @@ namespace llcom
 
         private void uartDataFlowDocument_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (!(Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl)) ||
-                !Tools.Global.setting.terminal)
+            if (!IsCtrlKeyDown() || !Tools.Global.setting.terminal)
                 return;
+
+            if (e.Key == Key.A)
+            {
+                SelectAllUartLog();
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key == Key.C || e.Key == Key.V)
+                return;
+
             if (e.Key >= Key.A && e.Key <= Key.Z && Tools.Global.uart.IsOpen())
                 try
                 {
                     Tools.Global.uart.SendData(new byte[] { (byte)((int)e.Key - (int)Key.A + 1) });
+                    e.Handled = true;
                 }
                 catch { }
         }
 
+        private bool IsCtrlKeyDown()
+        {
+            return (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        }
+
+        private void SelectAllUartLog()
+        {
+            if (dataShowFrame.Content is Pages.DataShowPage dataShowPage)
+                dataShowPage.SelectAllLog();
+        }
+
         private void ScriptIcon_Click(object sender, MouseButtonEventArgs e)
         {
+            WaitRuntimeFilesReady();
             // 点击📜图标时配置接收脚本
             TextBlock icon = sender as TextBlock;
             ToSendData data = icon.Tag as ToSendData;
-            recvScriptCombo.ItemsSource = Directory.GetFiles(Global.ProfilePath + "user_script_recv_convert", "*.lua")
+            recvScriptCombo.ItemsSource = Directory.GetFiles(Global.ProfilePath + "user_script_recv_convert", "*.js")
                                                    .Select(System.IO.Path.GetFileNameWithoutExtension).ToList();
             recvScriptPopup.PlacementTarget = icon;
             recvScriptCombo.Tag = data;
@@ -1682,7 +1959,7 @@ namespace llcom
 
             // 打开对话框，选择接收脚本
             //System.Windows.Forms.OpenFileDialog dialog = new System.Windows.Forms.OpenFileDialog();
-            //dialog.Filter = "Lua脚本文件 (*.lua)|*.lua|所有文件 (*.*)|*.*";
+            //dialog.Filter = "Lua脚本文件 (*.js)|*.js|所有文件 (*.*)|*.*";
             //dialog.InitialDirectory = System.IO.Path.Combine(Tools.Global.ProfilePath, "user_script_recv_convert");
 
             //if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
@@ -1750,7 +2027,7 @@ namespace llcom
         private void ScriptParaConfirm_Click(object sender, MouseButtonEventArgs e)
         {
             TextBlock icon = sender as TextBlock;
-            TextEditor t = icon.Tag as TextEditor;
+            TextBox t = icon.Tag as TextBox;
             ToSendData data = t.Tag as ToSendData;
 
             data.recvScriptPara = t.Text;

@@ -1,9 +1,7 @@
-using LibUsbDotNet.Info;
+﻿using LibUsbDotNet.Info;
 using LibUsbDotNet.LibUsb;
 using llcom.Model;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using RestSharp;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -19,6 +17,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Shapes;
+using Microsoft.Win32;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace llcom.Tools
@@ -26,8 +25,8 @@ namespace llcom.Tools
     class Global
     {
         public static event EventHandler ProgramClosedEvent;
-        //api接口文档网址
-        public static string apiDocumentUrl = "https://github.com/chenxuuu/llcom/blob/master/LuaApi.md";
+        //api接口文档
+        public static string apiDocumentUrl = "JavaScriptApi.md";
         //主窗口是否被关闭？
         private static bool _isMainWindowsClosed = false;
         public static bool isMainWindowsClosed
@@ -44,7 +43,7 @@ namespace llcom.Tools
                     uart.WaitUartReceive.Set();
                     Logger.StopSessionLog();
                     Logger.CloseUartLog();
-                    Logger.CloseLuaLog();
+                    Logger.CloseScriptLog();
                     if (File.Exists(ProfilePath + "lock"))
                         File.Delete(ProfilePath + "lock");
                     ProgramClosedEvent?.Invoke(null,EventArgs.Empty);
@@ -145,69 +144,80 @@ namespace llcom.Tools
         }
 
         /// <summary>
-        /// 刷新lua脚本列表
+        /// 刷新脚本列表
         /// </summary>
-        public static event EventHandler RefreshLuaScriptListEvent;
-        public static void RefreshLuaScriptList() => RefreshLuaScriptListEvent?.Invoke(null, null);
+        public static event EventHandler RefreshScriptListEvent;
+        public static void RefreshScriptList() => RefreshScriptListEvent?.Invoke(null, null);
 
         /// <summary>
         /// 加载配置文件
         /// </summary>
         public static void LoadSetting()
         {
-            if (IsMSIX())
+            StartupProfiler.Mark("Global.LoadSetting enter");
+            StartupProfiler.Measure("Global.LoadSetting profile path", () =>
             {
-                if (Directory.Exists(ProfilePath))
+                if (IsMSIX())
                 {
-                    //已经开过一次了，那就继续用之前的路径
+                    if (Directory.Exists(ProfilePath))
+                    {
+                        //已经开过一次了，那就继续用之前的路径
+                    }
+                    else
+                    {
+                        //appdata路径不可靠，用文档路径替代
+                        ProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\llcom\\";
+                        if (!Directory.Exists(ProfilePath))
+                            Directory.CreateDirectory(ProfilePath);
+                    }
                 }
                 else
                 {
-                    //appdata路径不可靠，用文档路径替代
-                    ProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\llcom\\";
-                    if (!Directory.Exists(ProfilePath))
-                        Directory.CreateDirectory(ProfilePath);
+                    ProfilePath = AppPath;//普通exe时，直接用软件路径
                 }
-            }
-            else
-            {
-                ProfilePath = AppPath;//普通exe时，直接用软件路径
-            }
+            });
             //配置文件
             if (File.Exists(ProfilePath + "settings.json"))
             {
-                try
+                StartupProfiler.Measure("Global.LoadSetting read settings.json", () =>
                 {
-                    //cost 309ms
-                    setting = JsonConvert.DeserializeObject<Model.Settings>(File.ReadAllText(ProfilePath + "settings.json"));
-                    if (setting == null)
-                        throw new Exception("settings.json is empty");
-                    setting.SentCount = 0;
-                    setting.ReceivedCount = 0;
-                    setting.DisableLog = false;
-                }
-                catch
-                {
-                    Tools.MessageBox.Show($"配置文件加载失败！\r\n" +
-                        $"如果是配置文件损坏，可前往{ProfilePath}settings.json.bakup查找备份文件\r\n" +
-                        $"并使用该文件替换{ProfilePath}settings.json文件恢复配置");
-                    Environment.Exit(1);
-                }
+                    try
+                    {
+                        //cost 309ms
+                        setting = JsonConvert.DeserializeObject<Model.Settings>(File.ReadAllText(ProfilePath + "settings.json"));
+                        if (setting == null)
+                            throw new Exception("settings.json is empty");
+                        setting.SentCount = 0;
+                        setting.ReceivedCount = 0;
+                        setting.DisableLog = false;
+                    }
+                    catch
+                    {
+                        Tools.MessageBox.Show($"配置文件加载失败！\r\n" +
+                            $"如果是配置文件损坏，可前往{ProfilePath}settings.json.bakup查找备份文件\r\n" +
+                            $"并使用该文件替换{ProfilePath}settings.json文件恢复配置");
+                        Environment.Exit(1);
+                    }
+                });
             }
             else
             {
-                if (Directory.GetFiles(ProfilePath).Length > 10)
+                StartupProfiler.Measure("Global.LoadSetting create default settings", () =>
                 {
-                    var r = Tools.InputDialog.OpenDialog("检测到当前文件夹有其他文件\r\n" +
-                        "建议新建一个文件夹给llcom，并将llcom.exe放入其中\r\n" +
-                        "不然当前文件夹会显得很乱哦~\r\n" +
-                        "是否想要继续运行呢？", null, "温馨提示");
-                    if (!r.Item1)
-                        Environment.Exit(1);
-                }
-                setting = new Model.Settings();
+                    if (Directory.GetFiles(ProfilePath).Length > 10)
+                    {
+                        var r = Tools.InputDialog.OpenDialog("检测到当前文件夹有其他文件\r\n" +
+                            "建议新建一个文件夹给llcom，并将llcom.exe放入其中\r\n" +
+                            "不然当前文件夹会显得很乱哦~\r\n" +
+                            "是否想要继续运行呢？", null, "温馨提示");
+                        if (!r.Item1)
+                            Environment.Exit(1);
+                    }
+                    setting = new Model.Settings();
+                });
             }
-            LoadLanguageFile(setting.language);
+            StartupProfiler.Measure("Global.LoadSetting language", () => LoadLanguageFile(setting.language));
+            StartupProfiler.Mark("Global.LoadSetting exit");
         }
 
         /// <summary>
@@ -215,124 +225,155 @@ namespace llcom.Tools
         /// </summary>
         public static void Initial()
         {
-            //检查.net版本
-            var currentVersion = Walterlv.NdpInfo.GetCurrentVersionName();
-            try
+            StartupProfiler.Mark("Global.Initial enter");
+            StartupProfiler.Measure("Global.Initial .NET version check", () =>
             {
-                if (currentVersion.StartsWith("4."))
+                //检查.net版本
+                var currentVersion = GetDotNetFrameworkVersionName();
+                try
                 {
-                    var sv = int.Parse(currentVersion.Substring(2, 1));
-                    if (sv < 6)
+                    if (!IsDotNetFramework48OrLater())
                         throw new Exception();
                 }
-                else
+                catch
                 {
-                    throw new Exception();
+                    Tools.MessageBox.Show($"本软件仅支持.net framework 4.8以上版本，该计算机上的最高版本为{currentVersion}\r\n" +
+                        $"你可以选择继续使用，但若运行途中遇到bug，将不会上报给开发者。\r\n" +
+                        $"建议升级到最新.net framework版本");
+                    ReportBug = false;
                 }
-            }
-            catch
-            {
-                Tools.MessageBox.Show($"本软件仅支持.net framework 4.6.2以上版本，该计算机上的最高版本为{currentVersion}\r\n" +
-                    $"你可以选择继续使用，但若运行途中遇到bug，将不会上报给开发者。\r\n" +
-                    $"建议升级到最新.net framework版本");
-                ReportBug = false;
-            }
-            //文件名不能改！
-            if (FileName.ToUpper() != "LLCOM.EXE")
-            {
-                Tools.MessageBox.Show("啊呀呀，软件文件名被改了。。。\r\n" +
-                    "为了保证软件功能的正常运行，请将exe名改回llcom.exe");
-                Environment.Exit(1);
-            }
-            //C:\Users\chenx\AppData\Local\Temp\7zO05433053\user_script_run
-            if (AppPath.ToUpper().Contains(@"\APPDATA\LOCAL\TEMP\") ||
-                AppPath.ToUpper().Contains(@"\WINDOWS\TEMP\"))
-            {
-                Tools.MessageBox.Show("请勿在压缩包内直接打开本软件。");
-                Environment.Exit(1);
-            }
+            });
 
-            if (IsMSIX())//商店软件的文件路径需要手动新建文件夹
+            StartupProfiler.Measure("Global.Initial app path checks", () =>
             {
-                if (!Directory.Exists(ProfilePath))
+                //文件名不能改！
+                if (FileName.ToUpper() != "LLCOM.EXE")
                 {
-                    Directory.CreateDirectory(ProfilePath);
+                    Tools.MessageBox.Show("啊呀呀，软件文件名被改了。。。\r\n" +
+                        "为了保证软件功能的正常运行，请将exe名改回llcom.exe");
+                    Environment.Exit(1);
                 }
-                //升级的时候不会自动升级核心脚本，所以先强制删掉再释放，确保是最新的
-                if (Directory.Exists(ProfilePath + "core_script"))
-                    Directory.Delete(ProfilePath + "core_script", true);
-            }
+                //C:\Users\chenx\AppData\Local\Temp\7zO05433053\user_script_run
+                if (AppPath.ToUpper().Contains(@"\APPDATA\LOCAL\TEMP\") ||
+                    AppPath.ToUpper().Contains(@"\WINDOWS\TEMP\"))
+                {
+                    Tools.MessageBox.Show("请勿在压缩包内直接打开本软件。");
+                    Environment.Exit(1);
+                }
 
-            //检测多开
-            string processName = Process.GetCurrentProcess().ProcessName;
-            Process[] processes = Process.GetProcessesByName(processName);
-            //如果该数组长度大于1，说明多次运行
-            if (processes.Length > 1 && File.Exists(ProfilePath + "lock"))
+                if (IsMSIX())//商店软件的文件路径需要手动新建文件夹
+                {
+                    if (!Directory.Exists(ProfilePath))
+                    {
+                        Directory.CreateDirectory(ProfilePath);
+                    }
+                }
+            });
+
+            StartupProfiler.Measure("Global.Initial process lock", () =>
             {
-                Tools.MessageBox.Show("不支持同文件夹多开！\r\n如需多开，请在多个文件夹分别存放llcom.exe后，分别运行。");
-                Environment.Exit(1);
-            }
-            File.Create(ProfilePath + "lock").Close();
+                //检测多开
+                string processName = Process.GetCurrentProcess().ProcessName;
+                Process[] processes = Process.GetProcessesByName(processName);
+                //如果该数组长度大于1，说明多次运行
+                if (processes.Length > 1 && File.Exists(ProfilePath + "lock"))
+                {
+                    Tools.MessageBox.Show("不支持同文件夹多开！\r\n如需多开，请在多个文件夹分别存放llcom.exe后，分别运行。");
+                    Environment.Exit(1);
+                }
+                File.Create(ProfilePath + "lock").Close();
+            });
+
+            StartupProfiler.Measure("Global.Initial uart config", () =>
+            {
+                uart.serial.BaudRate = setting.baudRate;
+                uart.serial.Parity = (Parity)setting.parity;
+                uart.serial.DataBits = setting.dataBits;
+                uart.serial.StopBits = (StopBits)setting.stopBit;
+                uart.ApplyFlowControl();
+                uart.UartDataRecived += Uart_UartDataRecived;
+                uart.UartDataSent += Uart_UartDataSent;
+                uart.UartDataRawSent += Uart_UartDataRawSent;
+            });
+            StartupProfiler.Mark("Global.Initial exit");
+        }
+
+        public static void PrepareRuntimeFiles()
+        {
+            StartupProfiler.Mark("Global.PrepareRuntimeFiles enter");
             try
             {
-                if (!Directory.Exists(ProfilePath + "core_script"))
+                StartupProfiler.Measure("PrepareRuntimeFiles core scripts", () =>
                 {
-                    Directory.CreateDirectory(ProfilePath + "core_script");
-                }
-                CreateFile("DefaultFiles/core_script/head.lua", ProfilePath + "core_script/head.lua", true);
-                CreateFile("DefaultFiles/core_script/JSON.lua", ProfilePath + "core_script/JSON.lua", false);
-                CreateFile("DefaultFiles/core_script/log.lua", ProfilePath + "core_script/log.lua", false);
-                CreateFile("DefaultFiles/core_script/strings.lua", ProfilePath + "core_script/strings.lua", false);
-                CreateFile("DefaultFiles/core_script/sys.lua", ProfilePath + "core_script/sys.lua", true);
+                    if (IsMSIX() && Directory.Exists(ProfilePath + "core_script"))
+                        Directory.Delete(ProfilePath + "core_script", true);
 
-                if (!Directory.Exists(ProfilePath + "logs"))
-                    Directory.CreateDirectory(ProfilePath + "logs");
-                if (!Directory.Exists(ProfilePath + "user_script_run"))
+                    if (!Directory.Exists(ProfilePath + "core_script"))
+                    {
+                        Directory.CreateDirectory(ProfilePath + "core_script");
+                    }
+                });
+
+                StartupProfiler.Measure("PrepareRuntimeFiles logs folder", () =>
                 {
-                    Directory.CreateDirectory(ProfilePath + "user_script_run");
-                    CreateFile("DefaultFiles/user_script_run/AT控制TCP连接-快发模式.lua", ProfilePath + "user_script_run/AT控制TCP连接-快发模式.lua");
-                    CreateFile("DefaultFiles/user_script_run/AT控制TCP连接-慢发模式.lua", ProfilePath + "user_script_run/AT控制TCP连接-慢发模式.lua");
-                    CreateFile("DefaultFiles/user_script_run/example.lua", ProfilePath + "user_script_run/example.lua");
-                    CreateFile("DefaultFiles/user_script_run/循环发送快捷发送区数据.lua", ProfilePath + "user_script_run/循环发送快捷发送区数据.lua");
-                }
-                //通用消息通道的demo
-                if (!File.Exists(ProfilePath + "user_script_run/channel-demo.lua"))
-                    CreateFile("DefaultFiles/user_script_run/channel-demo.lua", ProfilePath + "user_script_run/channel-demo.lua");
+                    if (!Directory.Exists(ProfilePath + "logs"))
+                        Directory.CreateDirectory(ProfilePath + "logs");
+                });
 
-                if (!Directory.Exists(ProfilePath + "user_script_run/requires"))
-                    Directory.CreateDirectory(ProfilePath + "user_script_run/requires");
-                if (!Directory.Exists(ProfilePath + "user_script_run/logs"))
-                    Directory.CreateDirectory(ProfilePath + "user_script_run/logs");
-
-                if (!Directory.Exists(ProfilePath + "user_script_send_convert"))
+                StartupProfiler.Measure("PrepareRuntimeFiles user_script_run", () =>
                 {
-                    Directory.CreateDirectory(ProfilePath + "user_script_send_convert");
-                    CreateFile("DefaultFiles/user_script_send_convert/checksum.lua", ProfilePath + "user_script_send_convert/checksum.lua");
-                    CreateFile("DefaultFiles/user_script_send_convert/16进制数据.lua", ProfilePath + "user_script_send_convert/16进制数据.lua");
-                    CreateFile("DefaultFiles/user_script_send_convert/GPS NMEA.lua", ProfilePath + "user_script_send_convert/GPS NMEA.lua");
-                    CreateFile("DefaultFiles/user_script_send_convert/加上换行回车.lua", ProfilePath + "user_script_send_convert/加上换行回车.lua");
-                    CreateFile("DefaultFiles/user_script_send_convert/解析换行回车的转义字符.lua", ProfilePath + "user_script_send_convert/解析换行回车的转义字符.lua");
-                    CreateFile("DefaultFiles/user_script_send_convert/default.lua", ProfilePath + "user_script_send_convert/default.lua");
-                }
-                if (!Directory.Exists(ProfilePath + "user_script_recv_convert"))
+                    if (!Directory.Exists(ProfilePath + "user_script_run"))
+                    {
+                        Directory.CreateDirectory(ProfilePath + "user_script_run");
+                    }
+                    CreateFileIfMissing("DefaultFiles/user_script_run/AT控制TCP连接-快发模式.js", ProfilePath + "user_script_run/AT控制TCP连接-快发模式.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_run/AT控制TCP连接-慢发模式.js", ProfilePath + "user_script_run/AT控制TCP连接-慢发模式.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_run/example.js", ProfilePath + "user_script_run/example.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_run/循环发送快捷发送区数据.js", ProfilePath + "user_script_run/循环发送快捷发送区数据.js");
+                    //通用消息通道的demo
+                    CreateFileIfMissing("DefaultFiles/user_script_run/channel-demo.js", ProfilePath + "user_script_run/channel-demo.js");
+
+                    if (!Directory.Exists(ProfilePath + "user_script_run/requires"))
+                        Directory.CreateDirectory(ProfilePath + "user_script_run/requires");
+                    if (!Directory.Exists(ProfilePath + "user_script_run/logs"))
+                        Directory.CreateDirectory(ProfilePath + "user_script_run/logs");
+                });
+
+                StartupProfiler.Measure("PrepareRuntimeFiles user_script_send_convert", () =>
                 {
-                    Directory.CreateDirectory(ProfilePath + "user_script_recv_convert");
-                }
-                if (!File.Exists(ProfilePath + "user_script_recv_convert/default.lua"))
-                    CreateFile("DefaultFiles/user_script_recv_convert/default.lua", ProfilePath + "user_script_recv_convert/default.lua");
-                if (!File.Exists(ProfilePath + "user_script_recv_convert/绘制曲线.lua"))
-                    CreateFile("DefaultFiles/user_script_recv_convert/绘制曲线.lua", ProfilePath + "user_script_recv_convert/绘制曲线.lua");
-                if (!File.Exists(ProfilePath + "user_script_recv_convert/绘制曲线-多条.lua"))
-                    CreateFile("DefaultFiles/user_script_recv_convert/绘制曲线-多条.lua", ProfilePath + "user_script_recv_convert/绘制曲线-多条.lua");
-                if (!File.Exists(ProfilePath + "user_script_recv_convert/绘制曲线-解析结构体.lua"))
-                    CreateFile("DefaultFiles/user_script_recv_convert/绘制曲线-解析结构体.lua", ProfilePath + "user_script_recv_convert/绘制曲线-解析结构体.lua");
+                    if (!Directory.Exists(ProfilePath + "user_script_send_convert"))
+                    {
+                        Directory.CreateDirectory(ProfilePath + "user_script_send_convert");
+                    }
+                    CreateFileIfMissing("DefaultFiles/user_script_send_convert/checksum.js", ProfilePath + "user_script_send_convert/checksum.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_send_convert/16进制数据.js", ProfilePath + "user_script_send_convert/16进制数据.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_send_convert/GPS NMEA.js", ProfilePath + "user_script_send_convert/GPS NMEA.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_send_convert/加上换行回车.js", ProfilePath + "user_script_send_convert/加上换行回车.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_send_convert/解析换行回车的转义字符.js", ProfilePath + "user_script_send_convert/解析换行回车的转义字符.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_send_convert/default.js", ProfilePath + "user_script_send_convert/default.js");
+                });
 
-                CreateFile("DefaultFiles/LICENSE", ProfilePath + "LICENSE", false);
+                StartupProfiler.Measure("PrepareRuntimeFiles user_script_recv_convert", () =>
+                {
+                    if (!Directory.Exists(ProfilePath + "user_script_recv_convert"))
+                    {
+                        Directory.CreateDirectory(ProfilePath + "user_script_recv_convert");
+                    }
+                    CreateFileIfMissing("DefaultFiles/user_script_recv_convert/default.js", ProfilePath + "user_script_recv_convert/default.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_recv_convert/绘制曲线.js", ProfilePath + "user_script_recv_convert/绘制曲线.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_recv_convert/绘制曲线-多条.js", ProfilePath + "user_script_recv_convert/绘制曲线-多条.js");
+                    CreateFileIfMissing("DefaultFiles/user_script_recv_convert/绘制曲线-解析结构体.js", ProfilePath + "user_script_recv_convert/绘制曲线-解析结构体.js");
+                });
 
-                if (IntPtr.Size == 8)
-                    CreateFile("DefaultFiles/libusb-1.0-x64.dll", ProfilePath + "libusb-1.0", false);
-                else
-                    CreateFile("DefaultFiles/libusb-1.0-x86.dll", ProfilePath + "libusb-1.0", false);
+                StartupProfiler.Measure("PrepareRuntimeFiles license and libusb", () =>
+                {
+                    CreateFile("DefaultFiles/LICENSE", ProfilePath + "LICENSE", false);
+
+                    if (IntPtr.Size == 8)
+                        CreateFile("DefaultFiles/libusb-1.0-x64.dll", ProfilePath + "libusb-1.0", false);
+                    else
+                        CreateFile("DefaultFiles/libusb-1.0-x86.dll", ProfilePath + "libusb-1.0", false);
+                });
             }
             catch (Exception e)
             {
@@ -340,24 +381,17 @@ namespace llcom.Tools
                 Environment.Exit(1);
             }
 
-            //加载配置文件改成单独拎出来了
-
-            //备份一下文件好了（心理安慰）
-            if (File.Exists(ProfilePath + "settings.json"))
+            StartupProfiler.Measure("PrepareRuntimeFiles settings backup", () =>
             {
-                if (File.Exists(ProfilePath + "settings.json.bakup"))
-                    File.Delete(ProfilePath + "settings.json.bakup");
-                File.Copy(ProfilePath + "settings.json", ProfilePath + "settings.json.bakup");
-            }
-
-            uart.serial.BaudRate = setting.baudRate;
-            uart.serial.Parity = (Parity)setting.parity;
-            uart.serial.DataBits = setting.dataBits;
-            uart.serial.StopBits = (StopBits)setting.stopBit;
-            uart.ApplyFlowControl();
-            uart.UartDataRecived += Uart_UartDataRecived;
-            uart.UartDataSent += Uart_UartDataSent;
-            uart.UartDataRawSent += Uart_UartDataRawSent;
+                //备份一下文件好了（心理安慰）
+                if (File.Exists(ProfilePath + "settings.json"))
+                {
+                    if (File.Exists(ProfilePath + "settings.json.bakup"))
+                        File.Delete(ProfilePath + "settings.json.bakup");
+                    File.Copy(ProfilePath + "settings.json", ProfilePath + "settings.json.bakup");
+                }
+            });
+            StartupProfiler.Mark("Global.PrepareRuntimeFiles exit");
         }
 
         /// <summary>
@@ -460,6 +494,63 @@ namespace llcom.Tools
                 default:
                     return $"\\x{data:X2}";
             }
+        }
+
+        private static bool IsDotNetFramework48OrLater()
+        {
+            return GetDotNetFrameworkReleaseKey() >= 528040;
+        }
+
+        private static string GetDotNetFrameworkVersionName()
+        {
+            var releaseKey = GetDotNetFrameworkReleaseKey();
+            if (releaseKey <= 0)
+                return Environment.Version.ToString();
+            return GetDotNetFrameworkVersionName(releaseKey);
+        }
+
+        private static int GetDotNetFrameworkReleaseKey()
+        {
+            try
+            {
+                using (var key = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32)
+                    .OpenSubKey(@"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full"))
+                {
+                    var release = key?.GetValue("Release");
+                    return release is int ? (int)release : 0;
+                }
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static string GetDotNetFrameworkVersionName(int releaseKey)
+        {
+            if (releaseKey >= 533320)
+                return "4.8.1";
+            if (releaseKey >= 528040)
+                return "4.8";
+            if (releaseKey >= 461808)
+                return "4.7.2";
+            if (releaseKey >= 461308)
+                return "4.7.1";
+            if (releaseKey >= 460798)
+                return "4.7";
+            if (releaseKey >= 394802)
+                return "4.6.2";
+            if (releaseKey >= 394254)
+                return "4.6.1";
+            if (releaseKey >= 393295)
+                return "4.6";
+            if (releaseKey >= 379893)
+                return "4.5.2";
+            if (releaseKey >= 378675)
+                return "4.5.1";
+            if (releaseKey >= 378389)
+                return "4.5";
+            return $"unknown release {releaseKey}";
         }
 
         /// <summary>
@@ -622,6 +713,11 @@ namespace llcom.Tools
                 File.WriteAllBytes(outPath, GetAssetsFileContent(insidePath));
         }
 
+        public static void CreateFileIfMissing(string insidePath, string outPath)
+        {
+            CreateFile(insidePath, outPath, false);
+        }
+
         /// <summary>
         /// 更换语言文件
         /// </summary>
@@ -643,78 +739,6 @@ namespace llcom.Tools
                 };
             }
 
-        }
-
-        private static string GitHubToken = null;
-        /// <summary>
-        /// 获取
-        /// </summary>
-        /// <param name="callback"></param>
-        /// <returns></returns>
-        public static List<OnlineScript> GetOnlineScripts(Action<int,int> callback = null)
-        {
-            if(GitHubToken == null)
-            {
-                try
-                {
-                    var client = new RestClient("https://llcom.papapoi.com/token.txt");
-                    var request = new RestRequest();
-                    request.Timeout = 10000;
-                    var response = client.Get(request);
-                    GitHubToken = response.Content;
-                }
-                catch
-                {
-                    return null;
-                }
-            }
-            //请求函数
-            var req = (string after) =>
-            {
-                var client = new RestClient();
-                client.BaseUrl = new Uri("https://api.github.com/graphql");
-                var request = new RestRequest(RestSharp.Method.POST);
-                request.AddHeader("user-agent", "llcom");
-                request.AddHeader("Authorization", $"bearer {GitHubToken}");
-                request.AddParameter("application/json", 
-                    "{\r\n  \"query\": \"query {repository(owner: \\\"chenxuuu\\\", name: \\\"llcom\\\") {discussions(categoryId:\\\"DIC_kwDOCtNzks4CSz35\\\"," +
-                    (after == null ? "" : $"after: \"{after}\"") + "first: 100" +
-                    ") {totalCount,pageInfo {startCursor,endCursor,hasNextPage,hasPreviousPage},nodes {body,url}}}}\"\r\n}", ParameterType.RequestBody);
-                var response = client.Execute(request);
-                var j = JsonConvert.DeserializeObject<JObject>(response.Content);
-                var bodys = from i in j["data"]["repository"]["discussions"]["nodes"]
-                            select ((string)i["body"],(string)i["url"]);
-                return (
-                    bodys.ToList(),
-                    (int)j["data"]["repository"]["discussions"]["totalCount"],
-                    (string)j["data"]["repository"]["discussions"]["pageInfo"]["endCursor"],
-                    (bool)j["data"]["repository"]["discussions"]["pageInfo"]["hasNextPage"]
-                );
-            };
-
-            string lastPage = null;
-            var scripts = new List<OnlineScript>();
-            var pages = 0;
-            while(true)
-            {
-                var (data, total, endCursor, hasNextPage) = req(lastPage);
-                foreach (var (s,u) in data)
-                {
-                    try
-                    {
-                        var n = new OnlineScript(s);
-                        n.Url = u;
-                        scripts.Add(n);
-                    }
-                    catch { }
-                }
-                callback?.Invoke(pages, total/100);//回调，上报进度
-                if (!hasNextPage)
-                    break;
-                pages++;
-                lastPage = endCursor;
-            }
-            return scripts;
         }
 
     }

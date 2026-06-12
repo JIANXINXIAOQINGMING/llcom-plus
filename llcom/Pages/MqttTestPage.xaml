@@ -55,7 +55,7 @@
                     <ListBox
                         Name="subListBox"
                         Grid.Row="2"
-                        Background="LightGray">
+                        Background="{StaticResource AppGlassInputBackground}">
                         <ListBoxItem Content="{DynamicResource MQTTNotConnect}" />
                     </ListBox>
                     <TextBox

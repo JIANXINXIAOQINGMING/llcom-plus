@@ -223,7 +223,8 @@
             VerticalAlignment="Bottom"
             Click="SaveLogButton_Click"
             ToolTip="{DynamicResource SaveLogButton}"
-            Visibility="{Binding Path=IsMouseOver, ElementName=mainGrid, Converter={StaticResource boolVisibeConverter}}" BorderBrush="Black">
+            Visibility="{Binding Path=IsMouseOver, ElementName=mainGrid, Converter={StaticResource boolVisibeConverter}}"
+            BorderBrush="{StaticResource AppGlassBorderBrush}">
             <fa:FontAwesome Icon="Save" HorizontalAlignment="Center" FontSize="12"/>
         </Button>
     </Grid>

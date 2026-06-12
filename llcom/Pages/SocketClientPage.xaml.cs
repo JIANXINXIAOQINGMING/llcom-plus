@@ -1,4 +1,4 @@
-﻿using llcom.LuaEnv;
+﻿using llcom.ScriptEnv;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -68,7 +68,7 @@ namespace llcom.Pages
             };
 
             //适配一下通用通道
-            LuaApis.SendChannelsRegister("socket-client", (data, _) =>
+            ScriptApis.SendChannelsRegister("socket-client", (data, _) =>
             {
                 if (socketNow != null && data != null)
                 {
@@ -80,7 +80,7 @@ namespace llcom.Pages
             //通用通道收到消息
             DataRecived += (_, data) =>
             {
-                LuaApis.SendChannelsReceived("socket-client", data);
+                ScriptApis.SendChannelsReceived("socket-client", data);
             };
         }
 

@@ -12,6 +12,481 @@
                 <ResourceDictionary Source="pack://application:,,,/AdonisUI;component/ColorSchemes/Light.xaml" />
                 <ResourceDictionary Source="pack://application:,,,/AdonisUI.ClassicTheme;component/Resources.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <SolidColorBrush x:Key="AppGlassPanelBackground" Color="#E8FFFFFF" />
+            <SolidColorBrush x:Key="AppGlassInputBackground" Color="#F4FFFFFF" />
+            <SolidColorBrush x:Key="AppGlassControlBackground" Color="#EAF6FBFF" />
+            <SolidColorBrush x:Key="AppGlassControlHoverBackground" Color="#FAFFFFFF" />
+            <SolidColorBrush x:Key="AppGlassControlPressedBackground" Color="#DDEEF7FF" />
+            <SolidColorBrush x:Key="AppGlassBorderBrush" Color="#8FB7CAD9" />
+            <SolidColorBrush x:Key="AppGlassFocusBorderBrush" Color="#6A9FC4E8" />
+            <SolidColorBrush x:Key="AppGlassTextBrush" Color="#1B1D20" />
+            <SolidColorBrush x:Key="AppGlassMutedBrush" Color="#66737D" />
+            <SolidColorBrush x:Key="AppAccentBrush" Color="#0E9AA7" />
+            <SolidColorBrush x:Key="AppAccentSoftBrush" Color="#DDF8FBFF" />
+
+            <Style TargetType="{x:Type Button}">
+                <Setter Property="Background" Value="{StaticResource AppGlassControlBackground}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Foreground" Value="{StaticResource AppGlassTextBrush}" />
+                <Setter Property="Padding" Value="9,4" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Button}">
+                            <Border
+                                x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
+                                <ContentPresenter
+                                    Margin="{TemplateBinding Padding}"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    RecognizesAccessKey="True" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Chrome" Property="Opacity" Value="0.48" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="{StaticResource AppGlassControlHoverBackground}" />
+                        <Setter Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Setter Property="Background" Value="{StaticResource AppGlassControlPressedBackground}" />
+                    </Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True">
+                        <Setter Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style TargetType="{x:Type TextBox}">
+                <Setter Property="Background" Value="{StaticResource AppGlassInputBackground}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="6,4" />
+                <Setter Property="Foreground" Value="{StaticResource AppGlassTextBrush}" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TextBox}">
+                            <Border
+                                x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
+                                <ScrollViewer
+                                    x:Name="PART_ContentHost"
+                                    Margin="{TemplateBinding Padding}" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Chrome" Property="Opacity" Value="0.55" />
+                                </Trigger>
+                                <Trigger Property="IsReadOnly" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="#E7F7F8FA" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="{x:Type ComboBox}">
+                <Setter Property="Background" Value="{StaticResource AppGlassInputBackground}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Foreground" Value="{StaticResource AppGlassTextBrush}" />
+                <Setter Property="Padding" Value="8,4" />
+                <Setter Property="MinHeight" Value="28" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ComboBox}">
+                            <Grid>
+                                <ToggleButton
+                                    x:Name="DropDownToggle"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    ClickMode="Press"
+                                    Focusable="False"
+                                    IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                            <Border
+                                                x:Name="Chrome"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="7">
+                                                <Path
+                                                    Width="8"
+                                                    Height="5"
+                                                    Margin="0,0,10,0"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Data="M 0 0 L 4 5 L 8 0 Z"
+                                                    Fill="{StaticResource AppGlassTextBrush}"
+                                                    Stretch="Fill" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Chrome" Property="Background" Value="{StaticResource AppGlassControlHoverBackground}" />
+                                                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="Chrome" Property="Background" Value="{StaticResource AppAccentSoftBrush}" />
+                                                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsEnabled" Value="False">
+                                                    <Setter TargetName="Chrome" Property="Opacity" Value="0.5" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+                                <ContentPresenter
+                                    x:Name="ContentSite"
+                                    Margin="{TemplateBinding Padding}"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding SelectionBoxItem}"
+                                    ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                    ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                    IsHitTestVisible="False" />
+                                <TextBox
+                                    x:Name="PART_EditableTextBox"
+                                    Margin="6,2,28,2"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Focusable="True"
+                                    IsReadOnly="{TemplateBinding IsReadOnly}"
+                                    Visibility="Hidden" />
+                                <Popup
+                                    x:Name="PART_Popup"
+                                    AllowsTransparency="True"
+                                    Focusable="False"
+                                    IsOpen="{TemplateBinding IsDropDownOpen}"
+                                    Placement="Bottom"
+                                    PopupAnimation="Fade">
+                                    <Border
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        Padding="3"
+                                        Background="#FAFFFFFF"
+                                        BorderBrush="{StaticResource AppGlassBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8">
+                                        <ScrollViewer CanContentScroll="True" SnapsToDevicePixels="True">
+                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
+                                        </ScrollViewer>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                    <Setter TargetName="DropDownToggle" Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsEditable" Value="True">
+                                    <Setter TargetName="ContentSite" Property="Visibility" Value="Hidden" />
+                                    <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.55" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="{x:Type ComboBoxItem}">
+                <Setter Property="Padding" Value="8,5" />
+                <Setter Property="Foreground" Value="{StaticResource AppGlassTextBrush}" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                            <Border
+                                x:Name="Chrome"
+                                Margin="1"
+                                Padding="{TemplateBinding Padding}"
+                                Background="Transparent"
+                                CornerRadius="6">
+                                <ContentPresenter />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsHighlighted" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="{StaticResource AppAccentSoftBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="#C9EFF7FA" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="{x:Type CheckBox}">
+                <Setter Property="Foreground" Value="{StaticResource AppGlassTextBrush}" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type CheckBox}">
+                            <BulletDecorator Background="Transparent">
+                                <BulletDecorator.Bullet>
+                                    <Border
+                                        x:Name="Box"
+                                        Width="18"
+                                        Height="18"
+                                        Background="{StaticResource AppGlassControlBackground}"
+                                        BorderBrush="{StaticResource AppGlassBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4">
+                                        <Path
+                                            x:Name="CheckMark"
+                                            Width="10"
+                                            Height="8"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Data="M 1 4 L 4 7 L 9 1"
+                                            Stroke="{StaticResource AppAccentBrush}"
+                                            StrokeEndLineCap="Round"
+                                            StrokeLineJoin="Round"
+                                            StrokeStartLineCap="Round"
+                                            StrokeThickness="2.2"
+                                            Visibility="Collapsed" />
+                                    </Border>
+                                </BulletDecorator.Bullet>
+                                <ContentPresenter
+                                    Margin="6,0,0,0"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    RecognizesAccessKey="True" />
+                            </BulletDecorator>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Box" Property="Background" Value="{StaticResource AppAccentSoftBrush}" />
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+                                    <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="{x:Type ListBox}">
+                <Setter Property="Background" Value="{StaticResource AppGlassInputBackground}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBox}">
+                            <Border
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                                <ScrollViewer Padding="3" Focusable="False">
+                                    <ItemsPresenter />
+                                </ScrollViewer>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="{x:Type DataGrid}">
+                <Setter Property="Background" Value="{StaticResource AppGlassInputBackground}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="HorizontalGridLinesBrush" Value="#5FB7CAD9" />
+                <Setter Property="VerticalGridLinesBrush" Value="#35B7CAD9" />
+                <Setter Property="RowBackground" Value="#DFFFFFFF" />
+                <Setter Property="AlternatingRowBackground" Value="#CFF7FBFF" />
+            </Style>
+            <Style TargetType="{x:Type DataGridColumnHeader}">
+                <Setter Property="Background" Value="{StaticResource AppGlassControlBackground}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="0,0,1,1" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Padding" Value="8,5" />
+            </Style>
+            <Style TargetType="{x:Type GroupBox}">
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="Background" Value="{StaticResource AppGlassPanelBackground}" />
+                <Setter Property="Padding" Value="10" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type GroupBox}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border
+                                    Grid.RowSpan="2"
+                                    Margin="0,8,0,0"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="9" />
+                                <Border
+                                    Margin="12,0,0,0"
+                                    Padding="6,0"
+                                    HorizontalAlignment="Left"
+                                    Background="#FAFFFFFF"
+                                    CornerRadius="6">
+                                    <ContentPresenter
+                                        ContentSource="Header"
+                                        RecognizesAccessKey="True" />
+                                </Border>
+                                <ContentPresenter
+                                    Grid.Row="1"
+                                    Margin="{TemplateBinding Padding}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="{x:Type TabControl}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TabControl}">
+                            <Grid KeyboardNavigation.TabNavigation="Local">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border
+                                    Grid.Row="0"
+                                    Margin="0,0,0,8"
+                                    Padding="4"
+                                    Background="#38FFFFFF"
+                                    BorderBrush="#55FFFFFF"
+                                    BorderThickness="1"
+                                    CornerRadius="12">
+                                    <TabPanel
+                                        IsItemsHost="True"
+                                        KeyboardNavigation.TabIndex="1"
+                                        Panel.ZIndex="1" />
+                                </Border>
+                                <ContentPresenter
+                                    x:Name="PART_SelectedContentHost"
+                                    Grid.Row="1"
+                                    ContentSource="SelectedContent"
+                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="{x:Type TabItem}">
+                <Setter Property="Background" Value="{StaticResource AppGlassControlBackground}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Foreground" Value="{StaticResource AppGlassTextBrush}" />
+                <Setter Property="Padding" Value="12,6" />
+                <Setter Property="Margin" Value="1" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TabItem}">
+                            <Border
+                                x:Name="Chrome"
+                                MinHeight="31"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="9">
+                                <ContentPresenter
+                                    Margin="{TemplateBinding Padding}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    ContentSource="Header"
+                                    RecognizesAccessKey="True" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="{StaticResource AppGlassControlHoverBackground}" />
+                                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AppGlassFocusBorderBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="#FAFFFFFF" />
+                                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="{x:Type StatusBar}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+            </Style>
+            <Style TargetType="{x:Type StatusBarItem}">
+                <Setter Property="Padding" Value="3,0" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type StatusBarItem}">
+                            <ContentPresenter
+                                Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="{x:Type Separator}">
+                <Setter Property="Opacity" Value="0" />
+                <Setter Property="Width" Value="10" />
+                <Setter Property="Margin" Value="2,0" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Separator}">
+                            <Border Background="Transparent" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

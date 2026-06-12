@@ -11,22 +11,37 @@
       d:DesignHeight="440" d:DesignWidth="400"
       Title="ConvertPage"
       Loaded="Page_Loaded">
-    <Grid>
+    <Grid Margin="4">
         <Grid.RowDefinitions>
-            <RowDefinition Height="auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="86"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="auto"/>
-            <RowDefinition Height="4*"/>
         </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
-        <TextBlock Text="{DynamicResource EncodingToolsJobs}" Margin="2" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-        <ComboBox Name="ConvertNamesComBox" Grid.Row="0" Grid.Column="1"/>
-        <Border Grid.Row="1" Grid.RowSpan="2" Margin="2" BorderBrush="LightGray" BorderThickness="1">
-            <ListBox Name="ConvertJobsListBox" ScrollViewer.CanContentScroll="True" Background="White">
+        <Grid Grid.Row="0" Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Text="{DynamicResource EncodingToolsJobs}" />
+            <ComboBox
+                Name="ConvertNamesComBox"
+                Grid.Column="1"
+                MinWidth="180" />
+        </Grid>
+        <Border
+            Grid.Row="1"
+            Margin="0,0,0,6"
+            BorderBrush="{StaticResource AppGlassBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+            <ListBox
+                Name="ConvertJobsListBox"
+                Background="{StaticResource AppGlassInputBackground}"
+                ScrollViewer.CanContentScroll="True">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <TextBlock Text="{Binding}"/>
@@ -34,11 +49,64 @@
                 </ItemsControl.ItemTemplate>
             </ListBox>
         </Border>
-        <Button Name="ConvertButton" Margin="2" Content="{DynamicResource EncodingToolsAddJob}" Grid.Column="1" Grid.Row="1" Click="ConvertButton_Click"/>
-        <Button Name="ConvertClearButton" Margin="2" Content="{DynamicResource EncodingToolsDeleteJob}" Grid.Column="1" Grid.Row="2" Click="ConvertClearButton_Click"/>
-        <TextBlock Text="{DynamicResource EncodingToolsRowData}" Margin="2" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Row="3" Grid.Column="0"/>
-        <TextBlock Text="{DynamicResource EncodingToolsResultData}" Margin="2" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Row="3" Grid.Column="1"/>
-        <TextBox Name="RawTextBox" Grid.Row="4" VerticalContentAlignment="Top" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Margin="2" FontFamily="Consolas" TextChanged="RawTextBox_TextChanged"/>
-        <TextBox Name="ResultTextBox" Grid.Row="4" Grid.Column="1" Margin="2" IsReadOnly="true" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" TextWrapping="Wrap"  FontFamily="Consolas"/>
+        <Grid Grid.Row="2" Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Button
+                Name="ConvertButton"
+                Margin="0,0,3,0"
+                Click="ConvertButton_Click"
+                Content="{DynamicResource EncodingToolsAddJob}" />
+            <Button
+                Name="ConvertClearButton"
+                Grid.Column="1"
+                Margin="3,0,0,0"
+                Click="ConvertClearButton_Click"
+                Content="{DynamicResource EncodingToolsDeleteJob}" />
+        </Grid>
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <TextBlock
+                Grid.Row="0"
+                Grid.Column="0"
+                Margin="0,0,0,4"
+                HorizontalAlignment="Center"
+                Text="{DynamicResource EncodingToolsRowData}" />
+            <TextBlock
+                Grid.Row="0"
+                Grid.Column="2"
+                Margin="0,0,0,4"
+                HorizontalAlignment="Center"
+                Text="{DynamicResource EncodingToolsResultData}" />
+            <TextBox
+                Name="RawTextBox"
+                Grid.Row="1"
+                Grid.Column="0"
+                AcceptsReturn="True"
+                FontFamily="Consolas"
+                TextChanged="RawTextBox_TextChanged"
+                TextWrapping="Wrap"
+                VerticalContentAlignment="Top"
+                VerticalScrollBarVisibility="Auto" />
+            <TextBox
+                Name="ResultTextBox"
+                Grid.Row="1"
+                Grid.Column="2"
+                FontFamily="Consolas"
+                IsReadOnly="true"
+                TextWrapping="Wrap"
+                VerticalContentAlignment="Top"
+                VerticalScrollBarVisibility="Auto" />
+        </Grid>
     </Grid>
 </Page>

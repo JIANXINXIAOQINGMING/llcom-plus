@@ -1,4 +1,4 @@
-using llcom.LuaEnv;
+﻿using llcom.ScriptEnv;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -63,7 +63,7 @@ namespace llcom.Model
             new Thread(ReadData).Start();
 
             //适配一下通用通道
-            LuaApis.SendChannelsRegister("uart", (data, _) => 
+            ScriptApis.SendChannelsRegister("uart", (data, _) => 
             {
                 if (IsOpen() && data != null)
                 {
@@ -349,7 +349,7 @@ namespace llcom.Model
                     {
                         var r = result.ToArray();
                         UartDataRecived(r, EventArgs.Empty);//回调事件
-                        LuaApis.SendChannelsReceived("uart", r);
+                        ScriptApis.SendChannelsReceived("uart", r);
                     }
                     catch { }
             }

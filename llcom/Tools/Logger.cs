@@ -59,7 +59,7 @@ namespace llcom.Tools
 
 
         private static Serilog.Core.Logger uartLogFile = null;
-        private static Serilog.Core.Logger luaLogFile = null;
+        private static Serilog.Core.Logger scriptLogFile = null;
 
         /// <summary>
         /// 初始化串口日志文件
@@ -289,11 +289,11 @@ namespace llcom.Tools
         }
 
         /// <summary>
-        /// 初始化lua日志文件
+        /// 初始化脚本日志文件
         /// </summary>
-        public static void InitLuaLog()
+        public static void InitScriptLog()
         {
-            luaLogFile = new LoggerConfiguration()
+            scriptLogFile = new LoggerConfiguration()
                 .MinimumLevel.Debug()
                 .WriteTo.Console()
                 .WriteTo.File(Tools.Global.ProfilePath + "user_script_run/logs/log.txt",
@@ -304,23 +304,23 @@ namespace llcom.Tools
                 .CreateLogger();
         }
 
-        public static void CloseLuaLog()
+        public static void CloseScriptLog()
         {
-            if (luaLogFile == null)
+            if (scriptLogFile == null)
                 return;
-            luaLogFile.Dispose();
-            luaLogFile = null;
+            scriptLogFile.Dispose();
+            scriptLogFile = null;
         }
 
         /// <summary>
-        /// 写入一条lua日志
+        /// 写入一条脚本日志
         /// </summary>
         /// <param name="l"></param>
-        public static void AddLuaLog(string l)
+        public static void AddScriptLog(string l)
         {
-            if (luaLogFile == null)
-                InitLuaLog();
-            luaLogFile.Information(l);
+            if (scriptLogFile == null)
+                InitScriptLog();
+            scriptLogFile.Information(l);
         }
     }
 

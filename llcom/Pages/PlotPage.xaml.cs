@@ -85,7 +85,7 @@ namespace llcom.Pages
                 }
             }).Start();
 
-            LuaEnv.LuaApis.LinePlotAdd += (s, e) => AddPoint(e.N, e.Line);
+            ScriptEnv.ScriptApis.LinePlotAdd += (s, e) => AddPoint(e.N, e.Line);
         }
 
         private void ClearButton_Click(object sender, RoutedEventArgs e)

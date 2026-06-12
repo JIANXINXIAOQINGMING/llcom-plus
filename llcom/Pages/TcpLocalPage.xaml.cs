@@ -18,7 +18,7 @@ using System.Threading;
 using CoAP.Server;
 using System.Diagnostics;
 using static llcom.Pages.SocketClientPage;
-using llcom.LuaEnv;
+using llcom.ScriptEnv;
 using System.Xml.Linq;
 
 namespace llcom.Pages
@@ -56,7 +56,7 @@ namespace llcom.Pages
             };
 
             //适配一下通用通道
-            LuaApis.SendChannelsRegister("tcp-server", (data, _) =>
+            ScriptApis.SendChannelsRegister("tcp-server", (data, _) =>
             {
                 if (Server != null && data != null)
                 {
@@ -68,7 +68,7 @@ namespace llcom.Pages
             //通用通道收到消息
             DataRecived += (name, data) =>
             {
-                LuaApis.SendChannelsReceived("tcp-server", 
+                ScriptApis.SendChannelsReceived("tcp-server", 
                     new
                     {
                         from = (string)name,
@@ -165,7 +165,7 @@ namespace llcom.Pages
                     }
                     catch { }
                     ShowData($"☠ {name}");
-                    LuaApis.SendChannelsReceived("tcp-server",
+                    ScriptApis.SendChannelsReceived("tcp-server",
                         new
                         {
                             from = "disconnected",
@@ -208,7 +208,7 @@ namespace llcom.Pages
                 {
                     Socket client = listener.EndAcceptSocket(ar);//必须有这一句，不然新的请求没反应
                     ShowData($"😀 {GetClientName(client)}"); 
-                    LuaApis.SendChannelsReceived("tcp-server",
+                    ScriptApis.SendChannelsReceived("tcp-server",
                         new
                         {
                             from = "connected",
@@ -254,7 +254,7 @@ namespace llcom.Pages
                         c.Close();
                         c.Dispose();
                         ShowData($"☠ {name}");
-                        LuaApis.SendChannelsReceived("tcp-server",
+                        ScriptApis.SendChannelsReceived("tcp-server",
                             new
                             {
                                 from = "disconnected",
