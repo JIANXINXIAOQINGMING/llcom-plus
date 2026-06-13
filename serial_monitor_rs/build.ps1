@@ -9,8 +9,8 @@
 #   .\build.ps1 -Arch All -Config Debug
 #
 # Outputs:
-#   x64  →  ..\llcom\costura64\serial_monitor.dll
-#   x86  →  ..\llcom\costura32\serial_monitor.dll
+#   x64  →  ..\llcom plus\costura64\serial_monitor.dll
+#   x86  →  ..\llcom plus\costura32\serial_monitor.dll
 
 param(
     [string]$Config = "Release",
@@ -52,7 +52,7 @@ function Build-For {
         throw "Build succeeded but DLL not found at: $dllSrc"
     }
 
-    $dst = Join-Path $scriptDir "..\llcom\$dstDir\serial_monitor.dll"
+    $dst = Join-Path $scriptDir "..\llcom plus\$dstDir\serial_monitor.dll"
     Copy-Item -Force $dllSrc $dst
     Write-Host "  Copied → $dst  ($([int]((Get-Item $dst).Length/1024)) KB)"
 }

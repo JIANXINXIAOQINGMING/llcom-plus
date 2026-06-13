@@ -1,6 +1,6 @@
-# LLCOM JavaScript API
+# llcom plus JavaScript API
 
-LLCOM now uses JavaScript scripts through Jint.
+llcom plus now uses JavaScript scripts through Jint.
 
 ## Data Conversion Scripts
 

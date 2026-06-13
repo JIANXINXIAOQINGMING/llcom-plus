@@ -9,11 +9,11 @@
 //!
 //! # Architecture
 //!
-//! llcom.exe calls MonitorComm(pid, port, cb).
+//! llcom plus.exe calls MonitorComm(pid, port, cb).
 //! This DLL:
 //!   1. Creates a named-pipe server.
-//!   2. Writes the pipe name into shared-memory "Local\llcom_smv2_session".
-//!   3. Extracts serial_monitor_hook.dll (embedded) to %TEMP%\llcom_smv2\.
+//!   2. Writes the pipe name into shared-memory "Local\llcom_plus_smv2_session".
+//!   3. Extracts serial_monitor_hook.dll (embedded) to %TEMP%\llcom_plus_smv2\.
 //!   4. Injects the hook DLL into the target process via CreateRemoteThread+LoadLibraryW.
 //!   5. Runs a worker thread that reads Udata messages from the pipe and
 //!      calls the C# callback for each one.
@@ -84,7 +84,7 @@ type CallbackFn = unsafe extern "system" fn(*const c_void) -> i32;
 
 // ── Names shared with serial_monitor_hook ─────────────────────────────────────
 
-const SHMEM_NAME: PCWSTR = windows::core::w!("Local\\llcom_smv2_session");
+const SHMEM_NAME: PCWSTR = windows::core::w!("Local\\llcom_plus_smv2_session");
 
 // ── Send+Sync HANDLE wrapper ──────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@ fn session_mtx() -> &'static Mutex<Option<Session>> {
 
 fn hook_dll_path() -> PathBuf {
     let mut p = std::env::temp_dir();
-    p.push("llcom_smv2");
+    p.push("llcom_plus_smv2");
     let _ = std::fs::create_dir_all(&p);
     p.push("serial_monitor_hook.dll");
     p
@@ -437,7 +437,7 @@ pub unsafe extern "system" fn MonitorComm(
     UnMonitorComm();
 
     let our_pid = GetCurrentProcessId();
-    let pipe_name = format!("\\\\.\\pipe\\llcom_smv2_{}", our_pid);
+    let pipe_name = format!("\\\\.\\pipe\\llcom_plus_smv2_{}", our_pid);
 
     let pipe = match create_pipe_server(&pipe_name) { Some(h) => h, None => return 0 };
     let shmem = match create_shmem(&pipe_name) {

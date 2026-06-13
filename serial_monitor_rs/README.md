@@ -2,21 +2,21 @@
 
 Rust rewrite of the closed-source `serial_monitor.dll` used by [llcom](https://github.com/chenxuuu/llcom).
 
-Maintains full API compatibility with the original DLL so it drops in as a replacement in `llcom/costura64/`.
+Maintains full API compatibility with the original DLL so it drops in as a replacement in `llcom plus/costura64/`.
 
 ---
 
 ## Architecture
 
 ```
-llcom.exe
+llcom plus.exe
   │
   │  MonitorComm(pid, port, callback)
   ▼
 serial_monitor.dll  (this crate)
-  │  creates named pipe \\.\pipe\llcom_smv2_<our_pid>
-  │  writes pipe name to shared memory Local\llcom_smv2_session
-  │  extracts serial_monitor_hook.dll to %TEMP%\llcom_smv2\
+  │  creates named pipe \\.\pipe\llcom_plus_smv2_<our_pid>
+  │  writes pipe name to shared memory Local\llcom_plus_smv2_session
+  │  extracts serial_monitor_hook.dll to %TEMP%\llcom_plus_smv2\
   │  injects hook DLL into target process via CreateRemoteThread+LoadLibraryW
   │  worker thread polls pipe and calls C# callback for each Udata packet
   ▼
@@ -56,7 +56,7 @@ cd serial_monitor_rs
 .\build.ps1
 ```
 
-This builds `serial_monitor.dll` (x64 release) and copies it to `llcom/costura64/serial_monitor.dll`.
+This builds `serial_monitor.dll` (x64 release) and copies it to `llcom plus/costura64/serial_monitor.dll`.
 
 ### Manual build
 
@@ -107,21 +107,21 @@ public struct Udata {
 
 用 Rust 重写的 `serial_monitor.dll`，替换 [llcom](https://github.com/chenxuuu/llcom) 原先使用的同名闭源 DLL。
 
-保持与原 DLL 完全相同的导出接口，可直接覆盖 `llcom/costura64/` 目录下的旧文件。
+保持与原 DLL 完全相同的导出接口，可直接覆盖 `llcom plus/costura64/` 目录下的旧文件。
 
 ---
 
 ## 整体架构
 
 ```
-llcom.exe
+llcom plus.exe
   │
   │  MonitorComm(pid, port, callback)
   ▼
 serial_monitor.dll  （本项目）
-  │  创建命名管道 \\.\pipe\llcom_smv2_<自身pid>
-  │  将管道名写入共享内存 Local\llcom_smv2_session
-  │  将 serial_monitor_hook.dll 解压到 %TEMP%\llcom_smv2\
+  │  创建命名管道 \\.\pipe\llcom_plus_smv2_<自身pid>
+  │  将管道名写入共享内存 Local\llcom_plus_smv2_session
+  │  将 serial_monitor_hook.dll 解压到 %TEMP%\llcom_plus_smv2\
   │  通过 CreateRemoteThread+LoadLibraryW 将 Hook DLL 注入目标进程
   │  工作线程轮询管道，每收到一个 Udata 数据包就调用 C# 回调
   ▼
@@ -161,7 +161,7 @@ cd serial_monitor_rs
 .\build.ps1
 ```
 
-脚本会依次编译 Hook DLL 和主 DLL（x64 release），并将 `serial_monitor.dll` 复制到 `llcom/costura64/`。
+脚本会依次编译 Hook DLL 和主 DLL（x64 release），并将 `serial_monitor.dll` 复制到 `llcom plus/costura64/`。
 
 ### 手动编译
 
@@ -222,9 +222,9 @@ public struct Udata {
 
 ---
 
-## How llcom integrates it
+## How llcom plus integrates it
 
-`llcom/FodyWeavers.xml` embeds the DLL via Costura:
+`llcom plus/FodyWeavers.xml` embeds the DLL via Costura:
 
 ```xml
 <Costura>
@@ -232,6 +232,6 @@ public struct Udata {
 </Costura>
 ```
 
-`llcom/llcom.csproj` lists `costura64/serial_monitor.dll` as an `EmbeddedResource`.
+`llcom plus/llcom plus.csproj` lists `costura64/serial_monitor.dll` as an `EmbeddedResource`.
 
-After building, copy `serial_monitor.dll` to `llcom/costura64/` and rebuild the C# project.
+After building, copy `serial_monitor.dll` to `llcom plus/costura64/` and rebuild the C# project.

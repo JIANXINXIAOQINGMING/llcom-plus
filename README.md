@@ -1,4 +1,4 @@
-# LLCOM
+# llcom plus
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-6-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
@@ -7,7 +7,7 @@
 
 <p align="center">
     <br>
-    <img src="./llcom/llcom.ico" width="150"/>
+    <img src="./llcom plus/Assets/AppIcon.ico" width="150"/>
     <br>
 </p>
 
@@ -154,4 +154,4 @@ This project follows the [all-contributors](htts://github.com/all-contributors/a
 
 ## 特别感谢
 
-[![icon-resharper](/image/icon-resharper.svg)](https://www.jetbrains.com/?from=LLCOM)
+[![icon-resharper](/image/icon-resharper.svg)](https://www.jetbrains.com/?from=llcom plus)

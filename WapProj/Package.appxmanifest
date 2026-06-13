@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -7,12 +7,12 @@
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="800948F61A16.llcom"
+    Name="800948F61A16.llcomplus"
     Publisher="CN=33E7C5B3-A6A5-4489-B89F-4038AA5CC34B"
     Version="1.0.0.3" />
 
   <Properties>
-    <DisplayName>llcom</DisplayName>
+    <DisplayName>llcom plus</DisplayName>
     <PublisherDisplayName>晨旭</PublisherDisplayName>
     <Logo>Images\StoreLogo.png</Logo>
   </Properties>
@@ -31,8 +31,8 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="llcom"
-        Description="LLCOM串口工具，能跑Lua的调试工具。"
+        DisplayName="llcom plus"
+        Description="llcom plus串口工具，能跑JavaScript脚本的调试工具。"
         BackgroundColor="transparent"
         Square150x150Logo="Images\Square150x150Logo.png"
         Square44x44Logo="Images\Square44x44Logo.png">

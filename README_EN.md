@@ -1,6 +1,6 @@
-# LLCOM
+# llcom plus
 
-![icon](/llcom/llcom.ico)
+![icon](/llcom plus/Assets/AppIcon.ico)
 
 [![Build status](https://ci.appveyor.com/api/projects/status/telji5j8r0v5001c?svg=true)](https://ci.appveyor.com/project/chenxuuu/llcom)
 [![MIT](https://img.shields.io/static/v1.svg?label=license&message=Apache+2&color=blue)](https://github.com/chenxuuu/llcom/blob/master/LICENSE)
@@ -104,4 +104,4 @@ you can read [JavaScriptApi.md](JavaScriptApi.md)
 
 ## Special Thanks
 
-[![icon-resharper](/image/icon-resharper.svg)](https://www.jetbrains.com/?from=LLCOM)
+[![icon-resharper](/image/icon-resharper.svg)](https://www.jetbrains.com/?from=llcom plus)

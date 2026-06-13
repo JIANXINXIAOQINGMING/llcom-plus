@@ -1,0 +1,114 @@
+<UserControl
+    x:Class="llcom_plus.Pages.DataCalcFileSendView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    d:DesignHeight="450"
+    d:DesignWidth="820"
+    mc:Ignorable="d">
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button
+                Name="SelectFileButton"
+                MinWidth="90"
+                Height="32"
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Click="SelectFileButton_Click"
+                Content="{DynamicResource DataCalcSelectFile}" />
+            <TextBox
+                Name="FilePathTextBox"
+                Grid.Column="1"
+                Height="32"
+                VerticalContentAlignment="Center"
+                FontFamily="Consolas"
+                IsReadOnly="True"
+                Text="{DynamicResource DataCalcNoFileSelected}" />
+        </Grid>
+
+        <Grid
+            Grid.Row="1"
+            Margin="0,14,0,14"
+            VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="130" />
+                <ColumnDefinition Width="20" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="22" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                FontWeight="SemiBold"
+                Text="{DynamicResource DataCalcSource}" />
+            <ComboBox
+                Name="SourceComboBox"
+                Grid.Column="2"
+                Width="130"
+                Height="32"
+                VerticalContentAlignment="Center"
+                SelectedIndex="0">
+                <ComboBoxItem Content="{DynamicResource DataCalcSourceManual}" />
+                <ComboBoxItem Content="{DynamicResource DataCalcSourceFile}" />
+            </ComboBox>
+            <CheckBox
+                Name="HexInputCheckBox"
+                Grid.Column="4"
+                Height="32"
+                VerticalAlignment="Center"
+                VerticalContentAlignment="Center"
+                Content="{DynamicResource DataCalcHexInput}" />
+            <Button
+                Name="SendSelectedDataButton"
+                Grid.Column="6"
+                MinWidth="100"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="SendSelectedDataButton_Click"
+                Content="{DynamicResource DataCalcSendSelected}" />
+            <Button
+                Name="CalculateDataButton"
+                Grid.Column="8"
+                MinWidth="90"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="CalculateDataButton_Click"
+                Content="{DynamicResource DataCalcCalculate}" />
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <TextBlock
+                Margin="0,0,0,8"
+                FontWeight="SemiBold"
+                Text="{DynamicResource DataCalcManualInput}" />
+            <TextBox
+                Name="ManualDataTextBox"
+                Grid.Row="1"
+                AcceptsReturn="True"
+                FontFamily="Consolas"
+                TextWrapping="Wrap"
+                VerticalScrollBarVisibility="Auto" />
+        </Grid>
+    </Grid>
+</UserControl>

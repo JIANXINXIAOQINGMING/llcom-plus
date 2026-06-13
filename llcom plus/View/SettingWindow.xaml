@@ -1,0 +1,393 @@
+<Window
+    x:Class="llcom_plus.SettingWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:adonisExtensions="clr-namespace:AdonisUI.Extensions;assembly=AdonisUI"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:fa="http://schemas.fontawesome.io/icons/"
+    xmlns:local="clr-namespace:llcom_plus"
+    xmlns:local_page="clr-namespace:llcom_plus.Pages"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="{DynamicResource SettingTitle}"
+    Width="450"
+    Height="490"
+    adonisExtensions:RippleExtension.FadeInDuration="0"
+    adonisExtensions:RippleExtension.FadeOutDuration="0"
+    Loaded="Window_Loaded"
+    WindowStartupLocation="CenterScreen"
+    mc:Ignorable="d">
+    <Window.Style>
+        <Style BasedOn="{StaticResource {x:Type Window}}" TargetType="Window" />
+    </Window.Style>
+    <Window.Resources>
+        <local_page:boolVisibe x:Key="boolVisibeConverter" />
+    </Window.Resources>
+    <Grid>
+        <TabControl>
+            <TabItem Header="{DynamicResource SettingBasic}">
+                <ScrollViewer>
+                    <StackPanel Margin="10,0,0,0">
+                        <CheckBox
+                            Margin="5"
+                            Content="{DynamicResource SettingAutoReconnect}"
+                            IsChecked="{Binding autoReconnect}" />
+                        <Button
+                            Name="OpenLogButton"
+                            Margin="5"
+                            Click="OpenLogButton_Click"
+                            Content="{DynamicResource SettingOpenLogFolder}" />
+                        <WrapPanel Margin="5">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingShowFormat}" />
+                            <ComboBox
+                                Name="showHexComboBox"
+                                Width="170"
+                                SelectedIndex="{Binding showHexFormat}">
+                                <ComboBoxItem Content="{DynamicResource SettingShowBoth}" />
+                                <ComboBoxItem Content="{DynamicResource SettingShoText}" />
+                                <ComboBoxItem Content="{DynamicResource SettingShowHexOnly}" />
+                            </ComboBox>
+                        </WrapPanel>
+                        <CheckBox
+                            Margin="5"
+                            Content="{DynamicResource SettingShowSend}"
+                            IsChecked="{Binding showSend}" />
+                        <CheckBox
+                            Margin="5"
+                            Content="{DynamicResource SettingShowSendRaw}"
+                            IsChecked="{Binding showSendRaw}" />
+                        <CheckBox
+                            Margin="5"
+                            Content="{DynamicResource SettingKeepTop}"
+                            IsChecked="{Binding topmost}" />
+                        <StackPanel Margin="5" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingUartTimeout}" />
+                            <TextBox MinWidth="50" Text="{Binding timeout, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock
+                                Margin="3,0"
+                                VerticalAlignment="Center"
+                                Text="{DynamicResource SettingMs}" />
+                        </StackPanel>
+                        <CheckBox
+                            Margin="5"
+                            Content="{DynamicResource SettingSplitByEmpty}"
+                            IsChecked="{Binding bitDelay}" />
+                        <CheckBox
+                            Margin="5"
+                            Content="{DynamicResource SettingTerminal}"
+                            IsChecked="{Binding terminal}" />
+                        <WrapPanel Margin="5">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingDataBits}" />
+                            <ComboBox
+                                Name="dataBitsComboBox"
+                                Width="50"
+                                SelectionChanged="DataBitsComboBox_SelectionChanged">
+                                <ComboBoxItem Content="5" Tag="5" />
+                                <ComboBoxItem Content="6" Tag="6" />
+                                <ComboBoxItem Content="7" Tag="7" />
+                                <ComboBoxItem Content="8" Tag="8" />
+                            </ComboBox>
+                        </WrapPanel>
+                        <WrapPanel Margin="5">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingStopBit}" />
+                            <ComboBox
+                                Name="stopBitComboBox"
+                                Width="50"
+                                SelectionChanged="StopBitComboBox_SelectionChanged">
+                                <ComboBoxItem Content="1" />
+                                <ComboBoxItem Content="2" />
+                                <ComboBoxItem Content="1.5" />
+                            </ComboBox>
+                        </WrapPanel>
+                        <WrapPanel Margin="5">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingParity}" />
+                            <ComboBox
+                                Name="dataCheckComboBox"
+                                Width="70"
+                                SelectionChanged="DataCheckComboBox_SelectionChanged">
+                                <ComboBoxItem Content="{DynamicResource SettingParityNone}" />
+                                <ComboBoxItem Content="{DynamicResource SettingParityOdd}" />
+                                <ComboBoxItem Content="{DynamicResource SettingParityEven}" />
+                                <ComboBoxItem Content="{DynamicResource SettingParityMark}" />
+                                <ComboBoxItem Content="{DynamicResource SettingParitySpace}" />
+                            </ComboBox>
+                        </WrapPanel>
+                        <WrapPanel Margin="5">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource Encoding}" />
+                            <ComboBox
+                                Name="encodingComboBox"
+                                Width="auto"
+                                SelectionChanged="encodingComboBox_SelectionChanged" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="{DynamicResource SettingSendScript}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="auto" />
+                        <RowDefinition Height="auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="auto" />
+                    </Grid.RowDefinitions>
+                    <WrapPanel Margin="0,0,0,5" Orientation="Horizontal">
+                        <ComboBox
+                            Name="scriptFileList"
+                            Width="250"
+                            SelectionChanged="ScriptFileList_SelectionChanged" />
+                        <Button
+                            Name="newScriptButton"
+                            Margin="3,0,0,0"
+                            Click="NewScriptButton_Click"
+                            ToolTip="{DynamicResource ScriptNewScript}">
+                            <Grid>
+                                <fa:FontAwesome Foreground="LightSkyBlue" Icon="File" />
+                                <fa:FontAwesome Icon="FileCodeOutline" />
+                            </Grid>
+                        </Button>
+                        <Button
+                            Name="testScriptButton"
+                            Margin="3,0,0,0"
+                            Click="TestScriptButton_Click"
+                            ToolTip="{DynamicResource SettingScriptTestScript}">
+                            <fa:FontAwesome Foreground="DarkGreen" Icon="Play" />
+                        </Button>
+                        <Button
+                            Name="openScriptFolderButton"
+                            Margin="3,0,0,0"
+                            Click="OpenScriptFolderButton_Click"
+                            ToolTip="{DynamicResource ScriptOpenFolder}">
+                            <Grid>
+                                <fa:FontAwesome Foreground="Yellow" Icon="FolderOpen" />
+                                <fa:FontAwesome Icon="FolderOutlinepenOutline" />
+                            </Grid>
+                        </Button>
+                        <Button
+                            Name="apiDocumentButton"
+                            Margin="3,0,0,0"
+                            Click="ApiDocumentButton_Click"
+                            ToolTip="{DynamicResource ScriptApiReference}">
+                            <fa:FontAwesome Foreground="DarkSlateGray" Icon="Book" />
+                        </Button>
+                    </WrapPanel>
+                    <WrapPanel
+                        Name="newScriptFileWrapPanel"
+                        Grid.Row="1"
+                        Margin="3"
+                        Visibility="Collapsed">
+                        <TextBlock VerticalAlignment="Center" Text="{DynamicResource ScriptFileName}" />
+                        <TextBox
+                            Name="newScriptFileNameTextBox"
+                            Width="90"
+                            Text="new script" />
+                        <Button
+                            Name="newScriptFileButton"
+                            Margin="3,0,0,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Click="NewScriptFileButton_Click"
+                            ToolTip="{DynamicResource ScriptConfirmCreate}">
+                            <fa:FontAwesome Foreground="Green" Icon="Check" />
+                        </Button>
+                        <Button
+                            Name="newScriptFileCancelButton"
+                            Margin="3,0,0,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Click="NewScriptFileCancelButton_Click"
+                            ToolTip="{DynamicResource ScriptCancel}">
+                            <fa:FontAwesome Foreground="Red" Icon="Ban" />
+                        </Button>
+                    </WrapPanel>
+                    <WrapPanel
+                        Name="scriptTestWrapPanel"
+                        Grid.Row="1"
+                        Margin="3"
+                        Visibility="Collapsed">
+                        <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingScriptTestInput}" />
+                        <TextBox
+                            Name="scriptTestTextBox"
+                            Margin="3,0,0,0"
+                            Width="155"
+                            Text="uart data" />
+                        <CheckBox
+                            Name="scriptTestHexCheck"
+                            Margin="3,0,0,0"
+                            Content="HEX"
+                            IsChecked="{Binding scriptTestHex}"/>
+                        <Button
+                            Name="scriptTestButton"
+                            Margin="3,0,0,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Click="ScriptTestButton_Click"
+                            ToolTip="{DynamicResource SettingScriptTestButton}">
+                            <Grid>
+                                <fa:FontAwesome Foreground="LightBlue" Icon="PaperPlane" />
+                                <fa:FontAwesome Foreground="Black" Icon="PaperPlaneOutline" />
+                            </Grid>
+                        </Button>
+                        <Button
+                            Name="scriptTestCancelButton"
+                            Margin="3,0,0,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Click="ScriptTestCancelButton_Click"
+                            ToolTip="{DynamicResource ScriptCancel}">
+                            <fa:FontAwesome Foreground="Red" Icon="Ban" />
+                        </Button>
+                    </WrapPanel>
+                    <avalonEdit:TextEditor
+                        xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
+                        Name="textEditor"
+                        Grid.Row="2"
+                        FontFamily="Consolas"
+                        FontSize="10pt"
+                        LostFocus="TextEditor_LostFocus"
+                        ShowLineNumbers="True" />
+                    <WrapPanel Grid.Row="3" Margin="5">
+                        <TextBlock Text="{DynamicResource SettingScriptText1}" TextWrapping="Wrap" />
+                        <TextBlock Text="{DynamicResource SettingScriptText2}" TextWrapping="Wrap" />
+                        <TextBlock Text="{DynamicResource SettingScriptText3}" TextWrapping="Wrap" />
+                    </WrapPanel>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="{DynamicResource SettingRecvScript}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="auto" />
+                        <RowDefinition Height="auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="auto" />
+                    </Grid.RowDefinitions>
+                    <WrapPanel Margin="0,0,0,5" Orientation="Horizontal">
+                        <ComboBox
+                            Name="scriptFileListRev"
+                            Width="250"
+                            SelectionChanged="scriptFileListRev_SelectionChanged" />
+                        <Button
+                            Name="newScriptButtonRev"
+                            Margin="3,0,0,0"
+                            Click="newScriptButtonRev_Click"
+                            ToolTip="{DynamicResource ScriptNewScript}">
+                            <Grid>
+                                <fa:FontAwesome Foreground="LightSkyBlue" Icon="File" />
+                                <fa:FontAwesome Icon="FileCodeOutline" />
+                            </Grid>
+                        </Button>
+                        <Button
+                            Name="testScriptButtonRev"
+                            Margin="3,0,0,0"
+                            Click="testScriptButtonRev_Click"
+                            ToolTip="{DynamicResource SettingScriptTestScript}">
+                            <fa:FontAwesome Foreground="DarkGreen" Icon="Play" />
+                        </Button>
+                        <Button
+                            Name="openScriptFolderButtonRev"
+                            Margin="3,0,0,0"
+                            Click="openScriptFolderButtonRev_Click"
+                            ToolTip="{DynamicResource ScriptOpenFolder}">
+                            <Grid>
+                                <fa:FontAwesome Foreground="Yellow" Icon="FolderOpen" />
+                                <fa:FontAwesome Icon="FolderOutlinepenOutline" />
+                            </Grid>
+                        </Button>
+                        <Button
+                            Name="apiDocumentButtonRev"
+                            Margin="3,0,0,0"
+                            Click="ApiDocumentButton_Click"
+                            ToolTip="{DynamicResource ScriptApiReference}">
+                            <fa:FontAwesome Foreground="DarkSlateGray" Icon="Book" />
+                        </Button>
+                    </WrapPanel>
+                    <WrapPanel
+                        Name="newScriptFileWrapPanelRev"
+                        Grid.Row="1"
+                        Margin="3"
+                        Visibility="Collapsed">
+                        <TextBlock VerticalAlignment="Center" Text="{DynamicResource ScriptFileName}" />
+                        <TextBox
+                            Name="newScriptFileNameTextBoxRev"
+                            Width="90"
+                            Text="new script" />
+                        <Button
+                            Name="newScriptFileButtonRev"
+                            Margin="3,0,0,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Click="newScriptFileButtonRev_Click"
+                            ToolTip="{DynamicResource ScriptConfirmCreate}">
+                            <fa:FontAwesome Foreground="Green" Icon="Check" />
+                        </Button>
+                        <Button
+                            Name="newScriptFileCancelButtonRev"
+                            Margin="3,0,0,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Click="newScriptFileCancelButtonRev_Click"
+                            ToolTip="{DynamicResource ScriptCancel}">
+                            <fa:FontAwesome Foreground="Red" Icon="Ban" />
+                        </Button>
+                    </WrapPanel>
+                    <Grid Grid.Row="1" Visibility="{Binding ElementName=scriptTestWrapPanelRev, Path=Visibility}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="auto" />
+                        </Grid.RowDefinitions>
+                        <WrapPanel
+                            Name="scriptTestWrapPanelRev"
+                            Grid.Row="0"
+                            Margin="3"
+                            Visibility="Collapsed">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingScriptTestInput}" />
+                            <TextBox
+                                Name="scriptTestTextBoxRev"
+                                Margin="3,0,0,0"
+                                Width="155"
+                                Text="uart data" />
+                            <CheckBox
+                                Name="scriptTestHexCheckRev"
+                                Margin="3,0,0,0"
+                                Content="HEX"
+                                IsChecked="{Binding scriptTestHexRev}"/>
+                            <Button
+                                Name="scriptTestButtonRev"
+                                Margin="3,0,0,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Click="scriptTestButtonRev_Click"
+                                ToolTip="{DynamicResource SettingScriptTestButton}">
+                                <Grid>
+                                    <fa:FontAwesome Foreground="LightBlue" Icon="PaperPlane" />
+                                    <fa:FontAwesome Foreground="Black" Icon="PaperPlaneOutline" />
+                                </Grid>
+                            </Button>
+                            <Button
+                                Name="scriptTestCancelButtonRev"
+                                Margin="3,0,0,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Click="scriptTestCancelButtonRev_Click"
+                                ToolTip="{DynamicResource ScriptCancel}">
+                                <fa:FontAwesome Foreground="Red" Icon="Ban" />
+                            </Button>
+                        </WrapPanel>
+                    </Grid>
+                    <avalonEdit:TextEditor
+                        xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
+                        Name="textEditorRev"
+                        Grid.Row="2"
+                        FontFamily="Consolas"
+                        FontSize="10pt"
+                        LostFocus="textEditorRev_LostFocus"
+                        ShowLineNumbers="True" />
+                    <WrapPanel Grid.Row="3" Margin="5">
+                        <TextBlock Text="{DynamicResource SettingScriptText1Recv}" TextWrapping="Wrap" />
+                        <TextBlock Text="{DynamicResource SettingScriptText2Recv}" TextWrapping="Wrap" />
+                        <TextBlock Text="{DynamicResource SettingScriptText3}" TextWrapping="Wrap" />
+                    </WrapPanel>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>

@@ -2,7 +2,7 @@
 //! and forwards COM port data back to the host (serial_monitor.dll) via a named pipe.
 //!
 //! The host writes a UTF-16 pipe name to named shared memory
-//! (`Local\llcom_smv2_session`) before injecting this DLL.
+//! (`Local\llcom_plus_smv2_session`) before injecting this DLL.
 //! DllMain reads that name, connects to the pipe, and installs the hooks.
 //!
 //! Supports both x86_64 (via `retour` inline hooks) and x86 (via manual 5-byte
@@ -32,7 +32,7 @@ const STATE_DISCONNECT: u8 = 2;
 const STATE_RECEIVE: u8    = 3;
 const STATE_SEND: u8       = 4;
 
-const SHMEM_NAME: PCWSTR = w!("Local\\llcom_smv2_session");
+const SHMEM_NAME: PCWSTR = w!("Local\\llcom_plus_smv2_session");
 
 // ── Wire structure (must match C# Udata, Pack=1) ─────────────────────────────
 
