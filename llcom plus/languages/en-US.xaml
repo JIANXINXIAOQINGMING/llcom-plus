@@ -67,6 +67,8 @@
     <system:String x:Key="QuickSendChangeIdButton">Enter where you want to insert(empty means delete this line)</system:String>
     <system:String x:Key="QuickSendChangeIdTitle">Change index of this line</system:String>
     <system:String x:Key="QuickSendChangeList">Change to another quick send list</system:String>
+    <system:String x:Key="CollapseRightTools">Collapse right tools</system:String>
+    <system:String x:Key="ExpandRightTools">Expand right tools</system:String>
     <system:String x:Key="ScriptCard">Run script</system:String>
     <system:String x:Key="ScriptNewScript">New script</system:String>
     <system:String x:Key="ScriptRunScript">Run script</system:String>
@@ -161,14 +163,7 @@
     <system:String x:Key="ChangeLanguage">语言/Language</system:String>
     <system:String x:Key="DarkMode">Dark mode</system:String>
     <system:String x:Key="LightMode">Light mode</system:String>
-    <system:String x:Key="TcpTabTitle">Socket Public Server</system:String>
-    <system:String x:Key="TcpLocalTabTitle">TCP Local Server</system:String>
-    <system:String x:Key="UdpLocalTabTitle">UDP Local Server</system:String>
     <system:String x:Key="TcpClientTitle">Socket Client</system:String>
-    <system:String x:Key="CreateTcpButton">Tset TCP</system:String>
-    <system:String x:Key="CreateTcpSSLButton">Tset TCP SSL</system:String>
-    <system:String x:Key="CreateUdpButton">Test UDP</system:String>
-    <system:String x:Key="CreateTcpIpv6Button">Test TCP (ipv6)</system:String>
     <system:String x:Key="DisconnectButton">Disconnect</system:String>
     <system:String x:Key="ConnectButton">Connect</system:String>
     <system:String x:Key="TcpReconnect">Auto Reconnect</system:String>
@@ -178,7 +173,6 @@
     <system:String x:Key="TcpServerProtocol">Protocol</system:String>
     <system:String x:Key="ToSendDataTextBlock">To send data:</system:String>
     <system:String x:Key="NetSendDataButton">Send</system:String>
-    <system:String x:Key="KickClientButton">Kick Client</system:String>
     <system:String x:Key="AddExtraEnter">send data add an extra enter</system:String>
     <system:String x:Key="AddExtraEnterTip">before this, the JavaScript send script will still process the data</system:String>
     <system:String x:Key="EnterSendMode">Enter/Newline</system:String>
@@ -275,8 +269,6 @@
     <system:String x:Key="PlotClear">Clear</system:String>
     <system:String x:Key="PlotTheme">Theme</system:String>
     <system:String x:Key="RefreshIpList">Refresh IP</system:String>
-    <system:String x:Key="StartListen">Start listen</system:String>
-    <system:String x:Key="StopListen">Stop listen</system:String>
     <system:String x:Key="RefreshDevices">Refresh</system:String>
     <system:String x:Key="ReadEndpoint">Read endpoint</system:String>
     <system:String x:Key="WriteEndpoint">Write endpoint</system:String>

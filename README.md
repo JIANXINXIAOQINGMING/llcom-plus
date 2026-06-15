@@ -45,7 +45,7 @@ CI快照版：[Github Action](https://nightly.link/chenxuuu/llcom/workflows/buil
 - 可选文字编码格式
 - 终端功能，直接敲键盘发送数据（包含ctrl+字母键）
 - 可单独隐藏发送数据
-- 集成TCP、UDP、SSL测试服务端/客户端功能，并且支持IPV6
+- 集成TCP、UDP、SSL socket客户端功能，并且支持IPV6
 - 集成各种编码互转功能
 - 集成乱码恢复功能
 - 集成mqtt测试功能

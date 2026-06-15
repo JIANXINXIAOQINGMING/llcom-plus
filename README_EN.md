@@ -29,7 +29,7 @@ Appveyor snapshot version: [Appveyor Artifacts](https://ci.appveyor.com/project/
 - Data you want to send can be processed with your own JavaScript scripts.
 - Quick send bar on the right.
 - JavaScript scripts can be run independently with timers and common message channels.
-- TCP, UDP, SSL test server and client. Also support IPV6.
+- TCP, UDP, SSL socket client. Also support IPV6.
 - mqtt client test
 - Encoding converter
 - Garbled code fix

@@ -241,8 +241,8 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="23*" MinWidth="430" />
             <ColumnDefinition Width="125*"/>
-            <ColumnDefinition Width="auto" />
-            <ColumnDefinition Width="1040" MinWidth="980" />
+            <ColumnDefinition x:Name="RightToolsToggleColumn" Width="Auto" />
+            <ColumnDefinition x:Name="RightToolsColumn" Width="1040" MinWidth="980" />
         </Grid.ColumnDefinitions>
         <Border
             Grid.RowSpan="3"
@@ -516,15 +516,37 @@
 
         <!--  中间改变分割大小的东西  -->
         <GridSplitter
+            x:Name="RightToolsGridSplitter"
             Grid.RowSpan="2"
             Grid.Column="2"
             Width="8"
             Margin="0,10,0,8"
-            HorizontalAlignment="Stretch"
+            HorizontalAlignment="Center"
+            ResizeBehavior="PreviousAndNext"
+            ResizeDirection="Columns"
             Background="#66FFFFFF" />
+        <Button
+            x:Name="RightToolsToggleButton"
+            Grid.RowSpan="2"
+            Grid.Column="2"
+            Width="28"
+            Height="76"
+            Margin="0,10,0,8"
+            Padding="0"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Click="RightToolsToggleButton_Click"
+            Panel.ZIndex="2"
+            Style="{StaticResource GlassButtonStyle}"
+            ToolTip="{DynamicResource CollapseRightTools}">
+            <fa:FontAwesome
+                x:Name="RightToolsToggleIcon"
+                Icon="AngleDoubleRight" />
+        </Button>
 
         <!--  右侧脚本、快捷发送  -->
         <Border
+            x:Name="RightToolsPanel"
             Grid.RowSpan="2"
             Grid.Column="3"
             MinWidth="660"
@@ -1036,6 +1058,7 @@
         </Border>
 
         <StackPanel
+            x:Name="RightTopActions"
             Grid.Column="3"
             Margin="0,18,20,0"
             HorizontalAlignment="Right"

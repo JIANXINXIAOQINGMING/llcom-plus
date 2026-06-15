@@ -6,7 +6,7 @@
     MinWidth="760"
     MinHeight="520"
     adonisExtensions:RippleExtension.FadeInDuration="0"
-    adonisExtensions:RippleExtension.FadeOutDuration="0" Height="770">
+    adonisExtensions:RippleExtension.FadeOutDuration="0">
     <Grid>
         <Grid.Background>
             <ImageBrush
@@ -323,34 +323,38 @@
                 </TabItem>
 
                 <TabItem Header="Info" Margin="0,0,-12,-1">
-                    <Grid Margin="16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="150" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="32" />
-                            <RowDefinition Height="32" />
-                            <RowDefinition Height="32" />
-                            <RowDefinition Height="32" />
-                            <RowDefinition Height="32" />
-                        </Grid.RowDefinitions>
+                    <ScrollViewer
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Status Code" />
-                        <TextBlock x:Name="StatusCodeTextBlock" Grid.Row="0" Grid.Column="1" />
+                            <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Status Code" />
+                            <TextBlock x:Name="StatusCodeTextBlock" Grid.Row="0" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="Reason Phrase" />
-                        <TextBlock x:Name="ReasonPhraseTextBlock" Grid.Row="1" Grid.Column="1" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Reason Phrase" />
+                            <TextBlock x:Name="ReasonPhraseTextBlock" Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="Elapsed Time" />
-                        <TextBlock x:Name="ElapsedTimeTextBlock" Grid.Row="2" Grid.Column="1" />
+                            <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Elapsed Time" />
+                            <TextBlock x:Name="ElapsedTimeTextBlock" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="3" Grid.Column="0" FontWeight="SemiBold" Text="Request Method" />
-                        <TextBlock x:Name="RequestMethodTextBlock" Grid.Row="3" Grid.Column="1" />
+                            <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Request Method" />
+                            <TextBlock x:Name="RequestMethodTextBlock" Grid.Row="3" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="4" Grid.Column="0" FontWeight="SemiBold" Text="Request Url" />
-                        <TextBlock x:Name="RequestUrlTextBlock" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" />
-                    </Grid>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,12,0" FontWeight="SemiBold" Text="Request Url" />
+                            <TextBlock x:Name="RequestUrlTextBlock" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" />
+                        </Grid>
+                    </ScrollViewer>
                 </TabItem>
             </TabControl>
         </Grid>

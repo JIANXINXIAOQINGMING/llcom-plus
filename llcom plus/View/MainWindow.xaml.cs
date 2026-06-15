@@ -48,6 +48,8 @@ namespace llcom_plus
     {
         private const double PreferredWindowWidth = 1660;
         private const double PreferredWindowHeight = 820;
+        private const double ExpandedRightToolsMinWidth = 980;
+        private const double ExpandedRightToolsDefaultWidth = 1040;
 
         public MainWindow()
         {
@@ -87,6 +89,8 @@ namespace llcom_plus
         private readonly Queue<string> sessionSendStringOverrides = new Queue<string>();
         private readonly List<ToolModule> toolModules = new List<ToolModule>();
         private bool toolsInitialized = false;
+        private bool rightToolsCollapsed = false;
+        private double expandedRightToolsWidth = ExpandedRightToolsDefaultWidth;
         public static string recvScriptBackup = "";
 
         private sealed class ToolModule
@@ -293,9 +297,6 @@ namespace llcom_plus
             AddFrameTool("WinUsb", "WinUSB", "Pages/WinUSBPage.xaml");
             AddContentTool("HttpTool", GetResourceText("HttpToolTab", "HTTP工具"), () => new HttpToolWindow());
             AddContentTool("DataCalc", GetResourceText("DataCalcToolTab", "数据计算/文件发送"), () => new Pages.DataCalcFileSendView());
-            AddFrameTool("TcpTest", GetResourceText("TcpTabTitle", "socket公共服务端"), "Pages/tcpTest.xaml");
-            AddFrameTool("TcpLocal", GetResourceText("TcpLocalTabTitle", "本机TCP服务端"), "Pages/TcpLocalPage.xaml");
-            AddFrameTool("UdpLocal", GetResourceText("UdpLocalTabTitle", "本机UDP服务端"), "Pages/UdpLocalPage.xaml");
             AddFrameTool("TcpClient", GetResourceText("TcpClientTitle", "socket客户端"), "Pages/SocketClientPage.xaml");
         }
 
@@ -358,6 +359,40 @@ namespace llcom_plus
                 return;
 
             ToolContentHost.Content = module.GetContent();
+        }
+
+        private void RightToolsToggleButton_Click(object sender, RoutedEventArgs e)
+        {
+            SetRightToolsCollapsed(!rightToolsCollapsed);
+        }
+
+        private void SetRightToolsCollapsed(bool collapsed)
+        {
+            if (collapsed)
+            {
+                if (RightToolsColumn.ActualWidth > 1)
+                    expandedRightToolsWidth = RightToolsColumn.ActualWidth;
+
+                RightToolsPanel.Visibility = Visibility.Collapsed;
+                RightTopActions.Visibility = Visibility.Collapsed;
+                RightToolsGridSplitter.Visibility = Visibility.Collapsed;
+                RightToolsColumn.MinWidth = 0;
+                RightToolsColumn.Width = new GridLength(0);
+                RightToolsToggleIcon.Icon = FontAwesomeIcon.AngleDoubleLeft;
+                RightToolsToggleButton.ToolTip = GetResourceText("ExpandRightTools", "展开右侧工具");
+            }
+            else
+            {
+                RightToolsColumn.MinWidth = ExpandedRightToolsMinWidth;
+                RightToolsColumn.Width = new GridLength(Math.Max(ExpandedRightToolsMinWidth, expandedRightToolsWidth));
+                RightToolsPanel.Visibility = Visibility.Visible;
+                RightTopActions.Visibility = Visibility.Visible;
+                RightToolsGridSplitter.Visibility = Visibility.Visible;
+                RightToolsToggleIcon.Icon = FontAwesomeIcon.AngleDoubleRight;
+                RightToolsToggleButton.ToolTip = GetResourceText("CollapseRightTools", "收起右侧工具");
+            }
+
+            rightToolsCollapsed = collapsed;
         }
 
         private void NavigateFrameOnce(Frame frame, string path)

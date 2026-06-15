@@ -51,4 +51,4 @@ apiSetCb("uart", function(data) {
 });
 ```
 
-Channels include `uart`, `mqtt`, `socket-client`, `tcp-server`, `netlab`, and `winusb`.
+Channels include `uart`, `mqtt`, `socket-client`, and `winusb`.

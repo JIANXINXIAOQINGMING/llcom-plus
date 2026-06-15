@@ -228,9 +228,6 @@
     <Reference Include="System.Xaml">
       <RequiredTargetFramework>4.0</RequiredTargetFramework>
     </Reference>
-    <Reference Include="websocket-sharp, Version=1.0.2.59611, Culture=neutral, PublicKeyToken=5660b08a1845a91e, processorArchitecture=MSIL">
-      <HintPath>..\packages\WebSocketSharp.1.0.3-rc11\lib\websocket-sharp.dll</HintPath>
-    </Reference>
     <Reference Include="WindowsBase" />
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
@@ -268,15 +265,6 @@
     </Compile>
     <Compile Include="Pages\SocketClientPage.xaml.cs">
       <DependentUpon>SocketClientPage.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="Pages\TcpLocalPage.xaml.cs">
-      <DependentUpon>TcpLocalPage.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="Pages\tcpTest.xaml.cs">
-      <DependentUpon>tcpTest.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="Pages\UdpLocalPage.xaml.cs">
-      <DependentUpon>UdpLocalPage.xaml</DependentUpon>
     </Compile>
     <Compile Include="Pages\WinUSBPage.xaml.cs">
       <DependentUpon>WinUSBPage.xaml</DependentUpon>
@@ -359,18 +347,6 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="Pages\SocketClientPage.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-    <Page Include="Pages\TcpLocalPage.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-    <Page Include="Pages\tcpTest.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-    <Page Include="Pages\UdpLocalPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
