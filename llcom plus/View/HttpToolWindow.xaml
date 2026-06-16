@@ -122,12 +122,12 @@
                         Margin="0,0,8,0"
                         SelectedIndex="0"
                         VerticalContentAlignment="Center">
-                        <ComboBoxItem Content="GET" />
-                        <ComboBoxItem Content="POST" />
-                        <ComboBoxItem Content="PUT" />
-                        <ComboBoxItem Content="DELETE" />
-                        <ComboBoxItem Content="PATCH" />
-                        <ComboBoxItem Content="HEAD" />
+                        <ComboBoxItem Content="{DynamicResource HttpMethodGet}" Tag="GET" />
+                        <ComboBoxItem Content="{DynamicResource HttpMethodPost}" Tag="POST" />
+                        <ComboBoxItem Content="{DynamicResource HttpMethodPut}" Tag="PUT" />
+                        <ComboBoxItem Content="{DynamicResource HttpMethodDelete}" Tag="DELETE" />
+                        <ComboBoxItem Content="{DynamicResource HttpMethodPatch}" Tag="PATCH" />
+                        <ComboBoxItem Content="{DynamicResource HttpMethodHead}" Tag="HEAD" />
                     </ComboBox>
 
                     <ComboBox
@@ -137,8 +137,8 @@
                         Margin="0,0,8,0"
                         SelectedIndex="1"
                         VerticalContentAlignment="Center">
-                        <ComboBoxItem Content="http://" />
-                        <ComboBoxItem Content="https://" />
+                        <ComboBoxItem Content="{DynamicResource HttpSchemeHttp}" Tag="http://" />
+                        <ComboBoxItem Content="{DynamicResource HttpSchemeHttps}" Tag="https://" />
                     </ComboBox>
 
                     <TextBox
@@ -156,14 +156,14 @@
                         Height="36"
                         Background="#0E9AA7"
                         Click="SendButton_Click"
-                        Content="发送"
+                        Content="{DynamicResource HttpSend}"
                         FontWeight="SemiBold"
                         Foreground="White" />
                 </Grid>
             </Border>
 
             <TabControl Grid.Row="1" Margin="0,0,0,12">
-                <TabItem Header="Headers" Margin="0,0,-5,0">
+                <TabItem Header="{DynamicResource HttpHeadersTab}" Margin="0,0,-5,0">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -198,7 +198,7 @@
                                 Grid.Column="2"
                                 Height="34"
                                 Click="AddHeaderPresetButton_Click"
-                                Content="添加/更新" />
+                                Content="{DynamicResource HttpAddOrUpdateHeader}" />
                         </Grid>
 
                         <TextBox
@@ -216,9 +216,9 @@
                     </Grid>
                 </TabItem>
 
-                <TabItem Header="Body" Margin="0,0,-21,0">
+                <TabItem Header="{DynamicResource HttpBodyTab}" Margin="0,0,-21,0">
                     <TabControl x:Name="BodyTypeTabControl">
-                        <TabItem Header="Raw" Margin="0,0,-8,0">
+                        <TabItem Header="{DynamicResource HttpRawTab}" Margin="0,0,-8,0">
                             <TextBox
                                 x:Name="RequestBodyTextBox"
                                 AcceptsReturn="True"
@@ -232,7 +232,7 @@
                                 VerticalScrollBarVisibility="Auto" />
                         </TabItem>
 
-                        <TabItem Header="Form" Margin="0,0,-9,0">
+                        <TabItem Header="{DynamicResource HttpFormTab}" Margin="0,0,-9,0">
                             <Grid Margin="8">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -245,7 +245,7 @@
                                     Margin="0,0,0,10"
                                     HorizontalAlignment="Left"
                                     Click="OpenFormFieldsDialogButton_Click"
-                                    Content="编辑表单字段" />
+                                    Content="{DynamicResource HttpEditFormFields}" />
 
                                 <Border
                                     Grid.Row="1"
@@ -262,7 +262,7 @@
                             </Grid>
                         </TabItem>
 
-                        <TabItem Header="Multipart/File" Margin="0,0,-4,0">
+                        <TabItem Header="{DynamicResource HttpMultipartTab}" Margin="0,0,-4,0">
                             <Grid Margin="8">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -275,7 +275,7 @@
                                     Margin="0,0,0,10"
                                     HorizontalAlignment="Left"
                                     Click="OpenMultipartEditorDialogButton_Click"
-                                    Content="编辑表单和文件" />
+                                    Content="{DynamicResource HttpEditFormAndFiles}" />
 
                                 <Border
                                     Grid.Row="1"
@@ -293,10 +293,138 @@
                         </TabItem>
                     </TabControl>
                 </TabItem>
+
+                <TabItem Header="{DynamicResource HttpTlsTab}" Margin="17,0,-29,0">
+                    <ScrollViewer
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+                        <Grid x:Name="HttpTlsSettingsGrid" Margin="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsAuthMode}" />
+                            <ComboBox
+                                Grid.Row="0"
+                                Grid.Column="1"
+                                Margin="0,0,12,8"
+                                SelectedIndex="{Binding tcpClientSslAuthMode}"
+                                VerticalContentAlignment="Center">
+                                <ComboBoxItem Content="{DynamicResource TlsAuthNone}" />
+                                <ComboBoxItem Content="{DynamicResource TlsAuthOneWay}" />
+                                <ComboBoxItem Content="{DynamicResource TlsAuthMutual}" />
+                            </ComboBox>
+
+                            <TextBlock Grid.Row="0" Grid.Column="2" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsProtocolVersion}" />
+                            <ComboBox
+                                Grid.Row="0"
+                                Grid.Column="3"
+                                Margin="0,0,0,8"
+                                SelectedIndex="{Binding tcpClientSslProtocolType}"
+                                VerticalContentAlignment="Center">
+                                <ComboBoxItem Content="{DynamicResource TlsProtocolAuto}" />
+                                <ComboBoxItem Content="{DynamicResource TlsProtocolTls10}" />
+                                <ComboBoxItem Content="{DynamicResource TlsProtocolTls11}" />
+                                <ComboBoxItem Content="{DynamicResource TlsProtocolTls12}" />
+                                <ComboBoxItem Content="{DynamicResource TlsProtocolTls13}" />
+                            </ComboBox>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsTargetHost}" />
+                            <TextBox
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                Margin="0,0,12,8"
+                                ToolTip="{DynamicResource TlsTargetHostTipHttp}"
+                                Text="{Binding tcpClientSslTargetHost, UpdateSourceTrigger=PropertyChanged}" />
+                            <CheckBox
+                                Grid.Row="1"
+                                Grid.Column="2"
+                                Grid.ColumnSpan="2"
+                                Margin="0,0,0,8"
+                                VerticalAlignment="Center"
+                                Content="{DynamicResource TlsCheckRevocation}"
+                                IsChecked="{Binding tcpClientSslCheckRevocation}" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsTrustedCa}" />
+                            <TextBox
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="3"
+                                Margin="0,0,0,8"
+                                Text="{Binding tcpClientSslCaCertPath, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsClientCert}" />
+                            <TextBox
+                                Grid.Row="3"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="3"
+                                Margin="0,0,0,8"
+                                Text="{Binding tcpClientSslClientCertPath, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsClientKey}" />
+                            <TextBox
+                                Grid.Row="4"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="3"
+                                Margin="0,0,0,8"
+                                Text="{Binding tcpClientSslClientKeyPath, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsCertPassword}" />
+                            <TextBox
+                                Grid.Row="5"
+                                Grid.Column="1"
+                                Margin="0,0,12,8"
+                                Text="{Binding tcpClientSslClientCertPassword, UpdateSourceTrigger=PropertyChanged}" />
+                            <CheckBox
+                                Grid.Row="5"
+                                Grid.Column="2"
+                                Grid.ColumnSpan="2"
+                                Margin="0,0,0,8"
+                                VerticalAlignment="Center"
+                                Content="{DynamicResource TlsPrintDetails}"
+                                IsChecked="{Binding tcpClientSslPrintDetails}" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsCipherSuites}" />
+                            <ComboBox
+                                x:Name="HttpCipherSuitesPicker"
+                                Grid.Row="6"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="3"
+                                Margin="0,0,0,8"
+                                IsEditable="True"
+                                IsReadOnly="True"
+                                IsTextSearchEnabled="False"
+                                MaxDropDownHeight="320"
+                                StaysOpenOnEdit="True"
+                                ToolTip="{DynamicResource TlsCipherSuitesTip}" />
+
+                            <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,0,8,0" VerticalAlignment="Center" Text="{DynamicResource TlsOpenSslPath}" />
+                            <TextBox
+                                Grid.Row="7"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="3"
+                                ToolTip="{DynamicResource TlsOpenSslPathTip}"
+                                Text="{Binding openSslPath, UpdateSourceTrigger=PropertyChanged}" />
+                        </Grid>
+                    </ScrollViewer>
+                </TabItem>
             </TabControl>
 
             <TabControl Grid.Row="2" Margin="0,10,0,0">
-                <TabItem Header="Response Body" Margin="0,0,-9,-1">
+                <TabItem Header="{DynamicResource HttpResponseBodyTab}" Margin="0,0,-9,-1">
                     <TextBox
                         x:Name="ResponseBodyTextBox"
                         AcceptsReturn="True"
@@ -309,7 +437,7 @@
                         VerticalScrollBarVisibility="Auto" />
                 </TabItem>
 
-                <TabItem Header="Response Headers" Margin="0,0,-7,-1">
+                <TabItem Header="{DynamicResource HttpResponseHeadersTab}" Margin="0,0,-7,-1">
                     <TextBox
                         x:Name="ResponseHeadersTextBox"
                         AcceptsReturn="True"
@@ -322,7 +450,7 @@
                         VerticalScrollBarVisibility="Auto" />
                 </TabItem>
 
-                <TabItem Header="Info" Margin="0,0,-12,-1">
+                <TabItem Header="{DynamicResource HttpInfoTab}" Margin="0,0,-12,-1">
                     <ScrollViewer
                         HorizontalScrollBarVisibility="Disabled"
                         VerticalScrollBarVisibility="Auto">
@@ -339,19 +467,19 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Status Code" />
+                            <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="{DynamicResource HttpStatusCode}" />
                             <TextBlock x:Name="StatusCodeTextBlock" Grid.Row="0" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Reason Phrase" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="{DynamicResource HttpReasonPhrase}" />
                             <TextBlock x:Name="ReasonPhraseTextBlock" Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Elapsed Time" />
+                            <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="{DynamicResource HttpElapsedTime}" />
                             <TextBlock x:Name="ElapsedTimeTextBlock" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                            <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="Request Method" />
+                            <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,12,8" FontWeight="SemiBold" Text="{DynamicResource HttpRequestMethod}" />
                             <TextBlock x:Name="RequestMethodTextBlock" Grid.Row="3" Grid.Column="1" Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                            <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,12,0" FontWeight="SemiBold" Text="Request Url" />
+                            <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,12,0" FontWeight="SemiBold" Text="{DynamicResource HttpRequestUrl}" />
                             <TextBlock x:Name="RequestUrlTextBlock" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" />
                         </Grid>
                     </ScrollViewer>

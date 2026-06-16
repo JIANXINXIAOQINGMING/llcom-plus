@@ -165,10 +165,18 @@ namespace llcom_plus.Pages
             //显示到列表
             if (!needPack && e is not DataShowRaw)//不分包模式
             {
+                var displayData = e.data;
+                if (e is DataShowPara showPara && !showPara.send)
+                {
+                    displayData = ApplyReceiveScript(displayData, showPara);
+                    if (displayData == null || displayData.Length == 0)
+                        return;
+                }
+
                 var DataText = Tools.Global.setting.showHexFormat switch
                 {
-                    2 => Tools.Global.Byte2Hex(e.data, " ", e.data.Length) + " ",
-                    _ => Tools.Global.Byte2Readable(e.data, e.data.Length),
+                    2 => Tools.Global.Byte2Hex(displayData, " ", displayData.Length) + " ",
+                    _ => Tools.Global.Byte2Readable(displayData, displayData.Length),
                 };
                 DoInvoke(() =>
                 {
@@ -181,8 +189,8 @@ namespace llcom_plus.Pages
             {
                 var data = e is DataShowRaw ? 
                     new DataShow((e as DataShowRaw).title, e.data, e.time, (e as DataShowRaw).color) :
-                    new DataShow(e.data, e.time, (e as DataShowPara).send);
-                if (data != null)
+                    new DataShow(e as DataShowPara);
+                if (data != null && data.IsVisible)
                 {
                     DoInvoke(() =>
                     {
@@ -202,6 +210,44 @@ namespace llcom_plus.Pages
                 return false;
             Dispatcher.Invoke(action);
             return true;
+        }
+
+        private static byte[] ApplyReceiveScript(byte[] data, DataShowPara source)
+        {
+            var temp = data?.ToArray() ?? new byte[0];
+            if (source?.send ?? false)
+                return temp;
+
+            try
+            {
+                var context = source?.receiveScriptContext;
+                var scriptName = ResolveReceiveScriptName(context?.ScriptName);
+                var uartPara = context?.Parameter ?? "";
+                var uartSendRaw = context?.SendRaw ?? new byte[0];
+                return ScriptEnv.JavaScriptLoader.Run(
+                    $"{scriptName}.js",
+                    new System.Collections.ArrayList { "uartData", temp, "uartPara", uartPara, "uartSendRaw", uartSendRaw },
+                    "user_script_recv_convert/");
+            }
+            catch (Exception ex)
+            {
+                var message = System.Windows.Application.Current?.TryFindResource("ErrorRecvScript") as string
+                    ?? "Receive conversion JavaScript script error:";
+                Tools.MessageBox.Show(message + "\r\n" + ex.ToString());
+                return null;
+            }
+        }
+
+        private static string ResolveReceiveScriptName(string requestedScriptName)
+        {
+            var scriptName = string.IsNullOrWhiteSpace(requestedScriptName)
+                ? Tools.Global.setting.recvScript
+                : requestedScriptName.Trim();
+            if (string.IsNullOrWhiteSpace(scriptName))
+                scriptName = "default";
+
+            var scriptPath = System.IO.Path.Combine(Tools.Global.ProfilePath, "user_script_recv_convert", scriptName + ".js");
+            return File.Exists(scriptPath) ? scriptName : "default";
         }
 
 
@@ -238,6 +284,7 @@ namespace llcom_plus.Pages
         /// </summary>
         public class DataShow
         {
+            public bool IsVisible { get; private set; }
             public string TimeText { get; set; }
             public string ArrowText { get; set; }
             public string DataText { get; set; }
@@ -255,31 +302,16 @@ namespace llcom_plus.Pages
             public SolidColorBrush HexTextColor { get; set; }
 
 
-            public DataShow(byte[] data, DateTime time, bool sent)
+            internal DataShow(DataShowPara source)
             {
+                var data = source?.data ?? new byte[0];
+                var time = source?.time ?? DateTime.Now;
+                var sent = source?.send ?? false;
                 if (data == null || data.Count() == 0)
                     return;
-                byte[] temp = data.ToArray();
-                //转换下接收数据
-                if (!sent)
-                {
-                    try
-                    {
-                        var uartPara = new byte[0];
-                        var uartSendRaw = new byte[0];
-                        temp = ScriptEnv.JavaScriptLoader.Run(
-                            $"{Tools.Global.setting.recvScript}.js",
-                            new System.Collections.ArrayList { "uartData", temp, "uartPara", uartPara, "uartSendRaw", uartSendRaw },
-                            "user_script_recv_convert/");
-                    }
-                    catch (Exception ex)
-                    {
-                        Tools.MessageBox.Show($"receive convert JavaScript script error\r\n" + ex.ToString());
-                        return;
-                    }
-                    if (temp == null)
-                        return;
-                }
+                byte[] temp = ApplyReceiveScript(data, source);
+                if (temp == null || temp.Length == 0)
+                    return;
 
                 TimeText = time.ToString("[yyyy/MM/dd HH:mm:ss.fff]");
                 ArrowText = sent ? " ← " : " → ";
@@ -299,6 +331,7 @@ namespace llcom_plus.Pages
                     if (Tools.Global.setting.showHexFormat == 0)
                         HexText = "\nHex: " + Tools.Global.Byte2Hex(temp, " ", len);
                 }
+                IsVisible = true;
             }
 
             public DataShow(string title, byte[] data, DateTime time, SolidColorBrush color)
@@ -324,6 +357,7 @@ namespace llcom_plus.Pages
                 RawTitle = title;
                 RawTextColor = color;
                 HexTextColor = color;
+                IsVisible = true;
             }
         }
 

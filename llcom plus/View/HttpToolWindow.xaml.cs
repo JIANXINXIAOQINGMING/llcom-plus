@@ -47,6 +47,8 @@ namespace llcom_plus
         public HttpToolWindow()
         {
             InitializeComponent();
+            HttpTlsSettingsGrid.DataContext = Tools.Global.setting;
+            Tools.CipherSuitePicker.Attach(FindName("HttpCipherSuitesPicker") as ComboBox, key => TryFindResource(key) as string);
             InitializeHeaderPresets();
             InitializeBodyEditors();
             ApplySelectedHeaderPreset();
@@ -65,11 +67,11 @@ namespace llcom_plus
             }
             catch (TaskCanceledException)
             {
-                ShowError("请求超时，请检查网络或稍后重试。");
+                ShowError(GetResourceText("HttpRequestTimeout", "Request timed out. Check the network and try again later."));
             }
             catch (HttpRequestException ex)
             {
-                ShowError($"网络连接失败：{ex.Message}");
+                ShowError(string.Format(GetResourceText("HttpNetworkFailedFormat", "Network connection failed: {0}"), ex.Message));
             }
             catch (Exception ex)
             {
@@ -89,7 +91,8 @@ namespace llcom_plus
         private void AddHeaderPresetButton_Click(object sender, RoutedEventArgs e)
         {
             var headerName = GetSelectedHeaderName();
-            var headerValue = HeaderDefaultValueTextBox.Text.Trim();
+            string headerValue = HeaderDefaultValueTextBox.Text ?? string.Empty;
+            headerValue = headerValue.Trim();
 
             if (string.IsNullOrWhiteSpace(headerName))
                 return;
@@ -99,24 +102,24 @@ namespace llcom_plus
 
         private void OpenFormFieldsDialogButton_Click(object sender, RoutedEventArgs e)
         {
-            OpenFormFieldsDialog("编辑表单字段", _formFields);
+            OpenFormFieldsDialog(GetResourceText("HttpFormFieldsDialogTitle", "Edit form fields"), _formFields);
         }
 
         private void OpenMultipartEditorDialogButton_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = CreateEditorDialog("编辑 Multipart/Form-Data");
+            var dialog = CreateEditorDialog(GetResourceText("HttpMultipartDialogTitle", "Edit Multipart/Form-Data"));
             var tabControl = new TabControl
             {
                 ItemContainerStyle = CreateDialogTabItemStyle()
             };
             tabControl.Items.Add(new TabItem
             {
-                Header = "Form Fields",
+                Header = GetResourceText("HttpFormFieldsTab", "Form Fields"),
                 Content = CreateFormFieldsEditor(_multipartFields)
             });
             tabControl.Items.Add(new TabItem
             {
-                Header = "Files",
+                Header = GetResourceText("HttpFilesTab", "Files"),
                 Content = CreateFilesEditor()
             });
 
@@ -141,7 +144,10 @@ namespace llcom_plus
 
         private HttpRequestModel BuildRequestModelFromUi()
         {
-            var selectedMethod = ((ComboBoxItem)MethodComboBox.SelectedItem).Content?.ToString() ?? "GET";
+            var selectedMethodItem = MethodComboBox.SelectedItem as ComboBoxItem;
+            var selectedMethod = selectedMethodItem?.Tag?.ToString() ??
+                                 selectedMethodItem?.Content?.ToString() ??
+                                 "GET";
 
             return new HttpRequestModel
             {
@@ -177,8 +183,12 @@ namespace llcom_plus
 
         private string BuildFullUrlFromUi()
         {
-            var selectedScheme = ((ComboBoxItem)UrlSchemeComboBox.SelectedItem).Content?.ToString() ?? "https://";
-            var urlPart = UrlTextBox.Text.Trim();
+            var selectedSchemeItem = UrlSchemeComboBox.SelectedItem as ComboBoxItem;
+            var selectedScheme = selectedSchemeItem?.Tag?.ToString() ??
+                                 selectedSchemeItem?.Content?.ToString() ??
+                                 "https://";
+            string urlPart = UrlTextBox.Text ?? string.Empty;
+            urlPart = urlPart.Trim();
 
             if (urlPart.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
                 urlPart = urlPart.Substring("http://".Length);
@@ -258,7 +268,7 @@ namespace llcom_plus
         private void ShowError(string message)
         {
             ResponseBodyTextBox.Text = message;
-            StatusCodeTextBlock.Text = "Error";
+            StatusCodeTextBlock.Text = GetResourceText("HttpError", "Error");
             ReasonPhraseTextBlock.Text = message;
             ElapsedTimeTextBlock.Text = string.Empty;
             RequestMethodTextBlock.Text = string.Empty;
@@ -279,7 +289,9 @@ namespace llcom_plus
         private void SetSendingState(bool isSending)
         {
             SendButton.IsEnabled = !isSending;
-            SendButton.Content = isSending ? "发送中..." : "发送";
+            SendButton.Content = isSending
+                ? GetResourceText("HttpSending", "Sending...")
+                : GetResourceText("HttpSend", "Send");
         }
 
         private void OpenFormFieldsDialog(string title, ObservableCollection<FormFieldModel> fields)
@@ -327,7 +339,7 @@ namespace llcom_plus
             };
 
             var dataGrid = CreateFormFieldsGrid(fields);
-            var addButton = new Button { Width = 110, Content = "添加字段" };
+            var addButton = new Button { Width = 110, Content = GetResourceText("HttpAddField", "Add field") };
             addButton.Click += (sender, e) =>
             {
                 var field = new FormFieldModel { Key = "key", Value = "value" };
@@ -337,7 +349,7 @@ namespace llcom_plus
                 UpdateBodySummaries();
             };
 
-            var removeButton = new Button { Width = 110, Margin = new Thickness(8, 0, 0, 0), Content = "删除字段" };
+            var removeButton = new Button { Width = 110, Margin = new Thickness(8, 0, 0, 0), Content = GetResourceText("HttpRemoveField", "Remove field") };
             removeButton.Click += (sender, e) =>
             {
                 var selectedField = dataGrid.SelectedItem as FormFieldModel;
@@ -363,7 +375,7 @@ namespace llcom_plus
             dataGrid.Columns.Add(new DataGridCheckBoxColumn
             {
                 Width = 70,
-                Header = "启用",
+                Header = GetResourceText("HttpEnabledColumn", "Enabled"),
                 Binding = new Binding(nameof(FormFieldModel.IsEnabled))
             });
             dataGrid.Columns.Add(new DataGridTextColumn
@@ -394,7 +406,7 @@ namespace llcom_plus
             };
 
             var dataGrid = CreateFilesGrid();
-            var chooseButton = new Button { Width = 110, Content = "选择文件" };
+            var chooseButton = new Button { Width = 110, Content = GetResourceText("HttpChooseFile", "Choose file") };
             chooseButton.Click += (sender, e) =>
             {
                 AddFilesFromDialog(Window.GetWindow(root));
@@ -402,7 +414,7 @@ namespace llcom_plus
                     dataGrid.ScrollIntoView(_files[_files.Count - 1]);
             };
 
-            var removeButton = new Button { Width = 110, Margin = new Thickness(8, 0, 0, 0), Content = "删除文件" };
+            var removeButton = new Button { Width = 110, Margin = new Thickness(8, 0, 0, 0), Content = GetResourceText("HttpRemoveFile", "Remove file") };
             removeButton.Click += (sender, e) =>
             {
                 var selectedFile = dataGrid.SelectedItem as FileFieldModel;
@@ -428,19 +440,19 @@ namespace llcom_plus
             dataGrid.Columns.Add(new DataGridCheckBoxColumn
             {
                 Width = 70,
-                Header = "启用",
+                Header = GetResourceText("HttpEnabledColumn", "Enabled"),
                 Binding = new Binding(nameof(FileFieldModel.IsEnabled))
             });
             dataGrid.Columns.Add(new DataGridTextColumn
             {
                 Width = 150,
-                Header = "字段名",
+                Header = GetResourceText("HttpFieldName", "Field name"),
                 Binding = new Binding(nameof(FileFieldModel.FieldName))
             });
             dataGrid.Columns.Add(new DataGridTextColumn
             {
                 Width = new DataGridLength(1, DataGridLengthUnitType.Star),
-                Header = "文件路径",
+                Header = GetResourceText("HttpFilePath", "File path"),
                 IsReadOnly = true,
                 Binding = new Binding(nameof(FileFieldModel.FilePath))
             });
@@ -470,7 +482,7 @@ namespace llcom_plus
         {
             var dialog = new OpenFileDialog
             {
-                Title = "选择要上传的文件",
+                Title = GetResourceText("HttpChooseUploadFileTitle", "Choose files to upload"),
                 Multiselect = true,
                 CheckFileExists = true
             };
@@ -494,10 +506,20 @@ namespace llcom_plus
         private void UpdateBodySummaries()
         {
             if (FormFieldsSummaryTextBlock != null)
-                FormFieldsSummaryTextBlock.Text = $"已配置 {_formFields.Count} 个表单字段";
+                FormFieldsSummaryTextBlock.Text = string.Format(
+                    GetResourceText("HttpFormSummaryFormat", "{0} form fields configured"),
+                    _formFields.Count);
 
             if (MultipartSummaryTextBlock != null)
-                MultipartSummaryTextBlock.Text = $"已配置 {_multipartFields.Count} 个表单字段，{_files.Count} 个文件";
+                MultipartSummaryTextBlock.Text = string.Format(
+                    GetResourceText("HttpMultipartSummaryFormat", "{0} form fields and {1} files configured"),
+                    _multipartFields.Count,
+                    _files.Count);
+        }
+
+        private string GetResourceText(string key, string fallback)
+        {
+            return TryFindResource(key) as string ?? fallback;
         }
 
         private static string GuessContentType(string filePath)

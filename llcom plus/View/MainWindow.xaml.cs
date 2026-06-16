@@ -87,11 +87,24 @@ namespace llcom_plus
         private Task runtimeFilesTask = null;
         private readonly object sessionSendStringLock = new object();
         private readonly Queue<string> sessionSendStringOverrides = new Queue<string>();
+        private readonly object receiveScriptContextLock = new object();
+        private ReceiveScriptContext currentReceiveScriptContext = new ReceiveScriptContext();
         private readonly List<ToolModule> toolModules = new List<ToolModule>();
         private bool toolsInitialized = false;
         private bool rightToolsCollapsed = false;
         private double expandedRightToolsWidth = ExpandedRightToolsDefaultWidth;
         public static string recvScriptBackup = "";
+
+        private sealed class SendSuggestionItem
+        {
+            public string SendText { get; set; }
+            public string ButtonText { get; set; }
+
+            public override string ToString()
+            {
+                return SendText ?? string.Empty;
+            }
+        }
 
         private sealed class ToolModule
         {
@@ -300,6 +313,21 @@ namespace llcom_plus
             AddFrameTool("TcpClient", GetResourceText("TcpClientTitle", "socket客户端"), "Pages/SocketClientPage.xaml");
         }
 
+        private void RefreshToolModulesLocalization()
+        {
+            if (!toolsInitialized || ToolListBox == null)
+                return;
+
+            var selectedKey = (ToolListBox.SelectedItem as ToolModule)?.Key;
+            RegisterToolModules();
+            ToolListBox.ItemsSource = null;
+            ToolListBox.ItemsSource = toolModules;
+
+            var selectedModule = toolModules.FirstOrDefault(module => module.Key == selectedKey);
+            ToolListBox.SelectedItem = selectedModule ?? toolModules.FirstOrDefault();
+            ShowSelectedToolModule();
+        }
+
         private void AddFrameTool(string key, string title, string pagePath)
         {
             toolModules.Add(new ToolModule(key, title, () =>
@@ -437,9 +465,11 @@ namespace llcom_plus
         private void LoadQuickSendList()
         {
             NormalizeQuickSendRows();
+            toSendListItems.Clear();
             foreach (var i in Tools.Global.setting.quickSend)
             {
-                i.commit = TryFindResource("QuickSendButton") as string ?? "?!";
+                if (string.IsNullOrWhiteSpace(i.commit))
+                    i.commit = TryFindResource("QuickSendButton") as string ?? "?!";
                 toSendListItems.Add(i);
             }
             CheckToSendListId();
@@ -470,13 +500,15 @@ namespace llcom_plus
 
                 foreach (var item in list.Where(item => item != null))
                 {
-                    if (sampleTexts.Contains(item.text ?? "") || sampleButtons.Contains(item.commit ?? ""))
+                    var hasSampleButton = sampleButtons.Contains(item.commit ?? "");
+                    if (sampleTexts.Contains(item.text ?? "") || hasSampleButton)
                     {
                         item.text = "";
                         item.hex = false;
                     }
 
-                    item.commit = defaultButtonText;
+                    if (string.IsNullOrWhiteSpace(item.commit) || hasSampleButton)
+                        item.commit = defaultButtonText;
                 }
             }
         }
@@ -489,11 +521,8 @@ namespace llcom_plus
             quickListSelectorRefreshing = true;
             try
             {
-                var names = Enumerable.Range(1, Global.setting.GetQuickSendListCount())
-                    .Select(index => index.ToString())
-                    .ToList();
                 QuickListSelectComboBox.ItemsSource = null;
-                QuickListSelectComboBox.ItemsSource = names;
+                QuickListSelectComboBox.ItemsSource = GetQuickSendPageSelectorItems();
                 QuickListSelectComboBox.SelectedIndex = Global.setting.quickSendSelect;
                 if (QuickListNameTextBox != null)
                     QuickListNameTextBox.Text = Global.setting.GetQuickListNameNow();
@@ -503,6 +532,32 @@ namespace llcom_plus
             {
                 quickListSelectorRefreshing = false;
             }
+        }
+
+        private List<string> GetQuickSendPageSelectorItems()
+        {
+            var names = Global.setting.GetAllQuickListNames();
+            var count = Global.setting.GetQuickSendListCount();
+            var items = new List<string>();
+            for (int i = 0; i < count; i++)
+            {
+                var name = i < names.Count ? names[i] : "";
+                if (string.IsNullOrWhiteSpace(name))
+                    name = $"未命名{i}";
+                items.Add($"{i + 1}. {name}");
+            }
+            return items;
+        }
+
+        private void RefreshQuickSendPageSelectorItemsOnly()
+        {
+            if (QuickListSelectComboBox == null)
+                return;
+
+            var selectedIndex = Global.setting.quickSendSelect;
+            QuickListSelectComboBox.ItemsSource = null;
+            QuickListSelectComboBox.ItemsSource = GetQuickSendPageSelectorItems();
+            QuickListSelectComboBox.SelectedIndex = selectedIndex;
         }
 
         private void Uart_UartDataSent(object sender, EventArgs e)
@@ -520,14 +575,14 @@ namespace llcom_plus
 
         private void Uart_UartDataRecived(object sender, EventArgs e)
         {
-            Tools.Logger.ShowData(sender as byte[], false);
+            Tools.Logger.ShowData(sender as byte[], false, null, GetReceiveScriptContext());
         }
 
         private void Global_SendRawDataRequest(byte[] data)
         {
             Dispatcher.Invoke(new Action(delegate
             {
-                Global.setting.recvScript = recvScriptBackup;
+                SetReceiveScriptContext(recvScriptBackup, "", data);
                 sendUartData(data, true, false);
             }));
         }
@@ -542,6 +597,32 @@ namespace llcom_plus
         {
             lock (sessionSendStringLock)
                 return sessionSendStringOverrides.Count > 0 ? sessionSendStringOverrides.Dequeue() : null;
+        }
+
+        private void SetReceiveScriptContext(string scriptName, object parameter, byte[] sendRaw)
+        {
+            lock (receiveScriptContextLock)
+            {
+                currentReceiveScriptContext = new ReceiveScriptContext
+                {
+                    ScriptName = string.IsNullOrWhiteSpace(scriptName) ? recvScriptBackup : scriptName,
+                    Parameter = parameter ?? "",
+                    SendRaw = sendRaw == null ? new byte[0] : (byte[])sendRaw.Clone()
+                };
+            }
+        }
+
+        private ReceiveScriptContext GetReceiveScriptContext()
+        {
+            lock (receiveScriptContextLock)
+            {
+                return new ReceiveScriptContext
+                {
+                    ScriptName = currentReceiveScriptContext.ScriptName,
+                    Parameter = currentReceiveScriptContext.Parameter,
+                    SendRaw = currentReceiveScriptContext.SendRaw == null ? new byte[0] : (byte[])currentReceiveScriptContext.SendRaw.Clone()
+                };
+            }
         }
 
         private bool refreshLock = false;
@@ -1087,8 +1168,8 @@ namespace llcom_plus
 
         private void SendCurrentTextBoxData()
         {
-            Global.setting.recvScript = recvScriptBackup;
             var data = Global.GetEncoding().GetBytes(toSendDataTextBox.Text);
+            SetReceiveScriptContext(recvScriptBackup, "", data);
             sendUartData(data, null, true, Tools.Global.setting.hexSend ? toSendDataTextBox.Text : null);
         }
 
@@ -1159,8 +1240,8 @@ namespace llcom_plus
                 return;
             }
 
-            var items = GetQuickSendAtCommands()
-                .Where(i => i.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase))
+            var items = GetQuickSendAtSuggestions()
+                .Where(i => i.SendText.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase))
                 .Take(12)
                 .ToList();
 
@@ -1199,7 +1280,7 @@ namespace llcom_plus
             }));
         }
 
-        private IEnumerable<string> GetQuickSendAtCommands()
+        private IEnumerable<SendSuggestionItem> GetQuickSendAtSuggestions()
         {
             var allItems = new List<ToSendData>();
             allItems.AddRange(toSendListItems);
@@ -1212,11 +1293,42 @@ namespace llcom_plus
                 }
             }
 
+            var defaultButtonText = TryFindResource("QuickSendButton") as string ?? "发送";
             return allItems
                 .Where(i => i != null && !i.hex && !string.IsNullOrWhiteSpace(i.text))
-                .Select(i => i.text.Trim())
-                .Where(i => i.StartsWith("AT", StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase);
+                .Select(i => new
+                {
+                    SendText = i.text.Trim(),
+                    ButtonText = GetQuickSendSuggestionButtonText(i, defaultButtonText)
+                })
+                .Where(i => i.SendText.StartsWith("AT", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(i => i.SendText, StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
+                {
+                    var buttonText = g.Select(i => i.ButtonText)
+                        .FirstOrDefault(i => !string.IsNullOrWhiteSpace(i));
+                    return new SendSuggestionItem
+                    {
+                        SendText = g.Key,
+                        ButtonText = buttonText ?? string.Empty
+                    };
+                });
+        }
+
+        private static string GetQuickSendSuggestionButtonText(ToSendData item, string defaultButtonText)
+        {
+            var buttonText = item.commit?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(buttonText))
+                return string.Empty;
+            if (buttonText.Equals(defaultButtonText, StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+            if (buttonText.Equals("发送", StringComparison.OrdinalIgnoreCase) ||
+                buttonText.Equals("Send", StringComparison.OrdinalIgnoreCase) ||
+                buttonText.Equals("?!", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+            if (buttonText.Equals(item.text?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+            return buttonText;
         }
 
         private string GetCurrentSendLinePrefix(out int lineStart, out int prefixLength)
@@ -1238,8 +1350,9 @@ namespace llcom_plus
 
         private bool ApplySelectedSendSuggestion()
         {
-            var selected = sendSuggestListBox.SelectedItem as string;
-            if (string.IsNullOrEmpty(selected))
+            var selected = sendSuggestListBox.SelectedItem as SendSuggestionItem;
+            var selectedText = selected?.SendText;
+            if (string.IsNullOrEmpty(selectedText))
                 return false;
 
             int lineStart;
@@ -1253,8 +1366,8 @@ namespace llcom_plus
             applyingSendSuggestion = true;
             try
             {
-                toSendDataTextBox.Text = text.Remove(replaceStart, replaceLength).Insert(replaceStart, selected);
-                toSendDataTextBox.CaretIndex = replaceStart + selected.Length;
+                toSendDataTextBox.Text = text.Remove(replaceStart, replaceLength).Insert(replaceStart, selectedText);
+                toSendDataTextBox.CaretIndex = replaceStart + selectedText.Length;
             }
             finally
             {
@@ -1267,7 +1380,7 @@ namespace llcom_plus
 
         private void AddSendListButton_Click(object sender, RoutedEventArgs e)
         {
-            toSendListItems.Add(new ToSendData() { id = toSendListItems.Count + 1, text = "", hex = false , commit = TryFindResource("QuickSendButton") as string ?? "?!" });
+            toSendListItems.Add(CreateBlankQuickSendItem(toSendListItems.Count + 1));
             SaveSendList(null, EventArgs.Empty);
         }
 
@@ -1277,14 +1390,95 @@ namespace llcom_plus
             if (item == null)
                 return;
 
+            if (toSendListItems.Count <= 1)
+            {
+                ClearQuickSendItem(item, 1);
+                SaveSendList(null, EventArgs.Empty);
+                return;
+            }
+
             toSendListItems.Remove(item);
             CheckToSendListId();
             SaveSendList(null, EventArgs.Empty);
         }
 
+        private ToSendData CreateBlankQuickSendItem(int id)
+        {
+            var oldCanSaveSendList = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                return new ToSendData
+                {
+                    id = id,
+                    text = "",
+                    hex = false,
+                    commit = TryFindResource("QuickSendButton") as string ?? "?!",
+                    recvScriptPath = "",
+                    recvScriptPara = ""
+                };
+            }
+            finally
+            {
+                canSaveSendList = oldCanSaveSendList;
+            }
+        }
+
+        private void ClearQuickSendItem(ToSendData item, int id)
+        {
+            if (item == null)
+                return;
+
+            var oldCanSaveSendList = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                item.id = id;
+                item.text = "";
+                item.hex = false;
+                item.commit = TryFindResource("QuickSendButton") as string ?? "?!";
+                item.recvScriptPath = "";
+                item.recvScriptPara = "";
+            }
+            finally
+            {
+                canSaveSendList = oldCanSaveSendList;
+            }
+        }
+
+        private bool HasQuickSendContent(ToSendData item)
+        {
+            return item != null &&
+                   (!string.IsNullOrWhiteSpace(item.text) ||
+                    !string.IsNullOrWhiteSpace(item.recvScriptPath) ||
+                    !string.IsNullOrWhiteSpace(item.recvScriptPara));
+        }
+
         private void knowSendDataButton_click(object sender, RoutedEventArgs e)
         {
-            ToSendData data = ((Button)sender).Tag as ToSendData;
+            SendQuickSendItem(((Button)sender).Tag as ToSendData);
+        }
+
+        private void QuickSendTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Return && e.Key != Key.Enter)
+                return;
+
+            if (!(sender is TextBox textBox) || !(textBox.DataContext is ToSendData data))
+                return;
+
+            textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            e.Handled = true;
+            SendQuickSendItem(data);
+        }
+
+        private void SendQuickSendItem(ToSendData data)
+        {
+            if (data == null)
+                return;
+
+            var sendData = data.hex ? Global.Hex2Byte(data.text) : Global.GetEncoding().GetBytes(data.text);
+            var receiveScriptName = recvScriptBackup;
 
             // 如果有指定接收脚本，则切换
             if (!string.IsNullOrEmpty(data.recvScriptPath))
@@ -1292,25 +1486,38 @@ namespace llcom_plus
                 //检查文件是否存在
                 if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{data.recvScriptPath}.js"))
                 {
-                    Tools.Global.setting.recvScript = "default";
                     data.recvScriptPath = "";
-                    if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.js"))
+                    if (!File.Exists(Tools.Global.ProfilePath + "user_script_recv_convert/default.js"))
                     {
-                        File.Create(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.js").Close();
+                        File.Create(Tools.Global.ProfilePath + "user_script_recv_convert/default.js").Close();
                     }
                 }
                 else
                 {
-                    Tools.Global.setting.recvScript = data.recvScriptPath;
+                    receiveScriptName = data.recvScriptPath;
                 }
             }
-            else
-            {
-                Tools.Global.setting.recvScript = recvScriptBackup;
-            }
 
-            var sendData = data.hex ? Global.Hex2Byte(data.text) : Global.GetEncoding().GetBytes(data.text);
+            SetReceiveScriptContext(receiveScriptName, data.recvScriptPara ?? "", sendData);
             sendUartData(sendData, true, true, data.hex ? data.text : null);
+        }
+
+        private void QuickSendButton_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (!(((Button)sender).Tag is ToSendData data))
+                return;
+
+            var defaultButtonText = TryFindResource("QuickSendButton") as string ?? "发送";
+            var ret = Tools.InputDialog.OpenDialog(
+                TryFindResource("QuickSendSetButton") as string ?? "输入你想显示的内容",
+                string.IsNullOrWhiteSpace(data.commit) ? defaultButtonText : data.commit,
+                TryFindResource("QuickSendChangeButton") as string ?? "更改发送按键显示内容");
+            if (!ret.Item1)
+                return;
+
+            data.commit = string.IsNullOrWhiteSpace(ret.Item2) ? defaultButtonText : ret.Item2.Trim();
+            SaveSendList(null, EventArgs.Empty);
+            e.Handled = true;
         }
 
         /// <summary>
@@ -1693,6 +1900,8 @@ namespace llcom_plus
         private void MenuItem_Click(object sender, RoutedEventArgs e)
         {
             Tools.Global.setting.language = ((MenuItem)sender).Tag.ToString();
+            RefreshToolModulesLocalization();
+            SetRightToolsCollapsed(rightToolsCollapsed);
             UpdateThemeToggleMenu();
         }
 
@@ -1740,7 +1949,10 @@ namespace llcom_plus
                 return;
             if (ret.Item2.Trim().Length == 0)//留空删除该项目
             {
-                toSendListItems.RemoveAt(data.id-1);
+                if (toSendListItems.Count <= 1)
+                    ClearQuickSendItem(data, 1);
+                else
+                    toSendListItems.RemoveAt(data.id-1);
             }
             else
             {
@@ -1775,6 +1987,15 @@ namespace llcom_plus
                 return;
 
             Global.setting.SetQuickListNameNow(QuickListNameTextBox.Text);
+            quickListSelectorRefreshing = true;
+            try
+            {
+                RefreshQuickSendPageSelectorItemsOnly();
+            }
+            finally
+            {
+                quickListSelectorRefreshing = false;
+            }
         }
 
         private void SelectQuickSendPage(int select)
@@ -1809,12 +2030,15 @@ namespace llcom_plus
                 return;
             }
 
-            var ret = Tools.InputDialog.OpenDialog(
-                TryFindResource("QuickSendDeletePageConfirmMsg") as string ?? "?!",
-                "",
-                TryFindResource("DeleteConfirmation") as string ?? "?!");
-            if (!ret.Item1 || ret.Item2 != "YES")
-                return;
+            if (toSendListItems.Count(HasQuickSendContent) > 1)
+            {
+                var ret = Tools.InputDialog.OpenDialog(
+                    TryFindResource("QuickSendDeletePageConfirmMsg") as string ?? "?!",
+                    "",
+                    TryFindResource("DeleteConfirmation") as string ?? "?!");
+                if (!ret.Item1 || ret.Item2 != "YES")
+                    return;
+            }
 
             canSaveSendList = false;
             toSendListItems.Clear();
@@ -1881,6 +2105,7 @@ namespace llcom_plus
                 this.Dispatcher.Invoke(new Action(delegate
                 {
                     canSaveSendList = false;
+                    toSendListItems.Clear();
                     foreach(var d in data)
                     {
                         toSendListItems.Add(d);

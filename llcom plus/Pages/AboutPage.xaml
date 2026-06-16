@@ -60,8 +60,6 @@
                             <LineBreak/>
                             LibUsbDotNet
                             <LineBreak/>
-                            Costura.Fody
-                            <LineBreak/>
                             <LineBreak/>
             </TextBlock>
             <TextBlock Text="{DynamicResource AboutVersion}"/>

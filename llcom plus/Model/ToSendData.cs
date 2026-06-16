@@ -28,6 +28,7 @@ namespace llcom_plus.Model
             {
                 _id = value;
                 //DataChanged?.Invoke(0, EventArgs.Empty);
+                OnPropertyChanged(nameof(id));
             }
         }
         public string text
@@ -40,6 +41,7 @@ namespace llcom_plus.Model
             {
                 _text = value;
                 DataChanged?.Invoke(0, EventArgs.Empty);
+                OnPropertyChanged(nameof(text));
             }
         }
         public bool hex
@@ -52,6 +54,7 @@ namespace llcom_plus.Model
             {
                 _hex = value;
                 DataChanged?.Invoke(0, EventArgs.Empty);
+                OnPropertyChanged(nameof(hex));
             }
         }
 
@@ -65,6 +68,7 @@ namespace llcom_plus.Model
             {
                 _commit = value;
                 DataChanged?.Invoke(0, EventArgs.Empty);
+                OnPropertyChanged(nameof(commit));
             }
         }
 

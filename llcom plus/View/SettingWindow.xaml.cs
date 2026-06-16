@@ -280,12 +280,16 @@ namespace llcom_plus
 
         private void NewScriptFileButton_Click(object sender, RoutedEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(newScriptFileNameTextBox.Text))
+            var scriptName = NormalizeScriptFileName(newScriptFileNameTextBox.Text);
+            if (!IsValidScriptFileName(scriptName))
             {
-                Tools.MessageBox.Show(TryFindResource("ScriptNoName") as string ?? "?!");
+                Tools.MessageBox.Show(string.IsNullOrWhiteSpace(scriptName)
+                    ? TryFindResource("ScriptNoName") as string ?? "?!"
+                    : TryFindResource("ScriptInvalidName") as string ?? "?!");
                 return;
             }
-            if (File.Exists(Tools.Global.ProfilePath + $"user_script_send_convert/{newScriptFileNameTextBox.Text}.js"))
+            newScriptFileNameTextBox.Text = scriptName;
+            if (File.Exists(Tools.Global.ProfilePath + $"user_script_send_convert/{scriptName}.js"))
             {
                 Tools.MessageBox.Show(TryFindResource("ScriptExist") as string ?? "?!");
                 return;
@@ -293,8 +297,8 @@ namespace llcom_plus
 
             try
             {
-                File.Create(Tools.Global.ProfilePath + $"user_script_send_convert/{newScriptFileNameTextBox.Text}.js").Close();
-                loadScriptFile(newScriptFileNameTextBox.Text);
+                File.Create(Tools.Global.ProfilePath + $"user_script_send_convert/{scriptName}.js").Close();
+                loadScriptFile(scriptName);
             }
             catch
             {
@@ -310,10 +314,16 @@ namespace llcom_plus
             {
                 try
                 {
+                    saveScriptFile(scriptFileList.SelectedItem as string);
                     byte[] r = ScriptEnv.JavaScriptLoader.Run($"{scriptFileList.SelectedItem as string}.js",
                                         new System.Collections.ArrayList{"uartData",
-                                            (bool)scriptTestHexCheck.IsChecked ? Tools.Global.Hex2Byte(scriptTestTextBox.Text) :
+                                            scriptTestHexCheck.IsChecked == true ? Tools.Global.Hex2Byte(scriptTestTextBox.Text) :
                                             Tools.Global.GetEncoding().GetBytes(scriptTestTextBox.Text)});
+                    if (r == null)
+                    {
+                        Tools.MessageBox.Show($"{TryFindResource("SettingScriptRunResult") as string ?? "?!"}\r\nnull");
+                        return;
+                    }
                     Tools.MessageBox.Show($"{TryFindResource("SettingScriptRunResult") as string ?? "?!"}\r\nHEX：" + Tools.Global.Byte2Hex(r) +
                         $"\r\n{TryFindResource("SettingScriptRawText") as string ?? "?!"}" + Tools.Global.Byte2Readable(r));
                 }
@@ -388,12 +398,16 @@ namespace llcom_plus
 
         private void newScriptFileButtonRev_Click(object sender, RoutedEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(newScriptFileNameTextBoxRev.Text))
+            var scriptName = NormalizeScriptFileName(newScriptFileNameTextBoxRev.Text);
+            if (!IsValidScriptFileName(scriptName))
             {
-                Tools.MessageBox.Show(TryFindResource("ScriptNoName") as string ?? "?!");
+                Tools.MessageBox.Show(string.IsNullOrWhiteSpace(scriptName)
+                    ? TryFindResource("ScriptNoName") as string ?? "?!"
+                    : TryFindResource("ScriptInvalidName") as string ?? "?!");
                 return;
             }
-            if (File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{newScriptFileNameTextBoxRev.Text}.js"))
+            newScriptFileNameTextBoxRev.Text = scriptName;
+            if (File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{scriptName}.js"))
             {
                 Tools.MessageBox.Show(TryFindResource("ScriptExist") as string ?? "?!");
                 return;
@@ -401,8 +415,8 @@ namespace llcom_plus
 
             try
             {
-                File.Create(Tools.Global.ProfilePath + $"user_script_recv_convert/{newScriptFileNameTextBoxRev.Text}.js").Close();
-                loadScriptFileRev(newScriptFileNameTextBoxRev.Text);
+                File.Create(Tools.Global.ProfilePath + $"user_script_recv_convert/{scriptName}.js").Close();
+                loadScriptFileRev(scriptName);
             }
             catch
             {
@@ -423,20 +437,29 @@ namespace llcom_plus
             {
                 try
                 {
+                    saveScriptFileRev(scriptFileListRev.SelectedItem as string);
+                    var testData = scriptTestHexCheckRev.IsChecked == true ?
+                        Tools.Global.Hex2Byte(scriptTestTextBoxRev.Text) :
+                        Tools.Global.GetEncoding().GetBytes(scriptTestTextBoxRev.Text);
                     byte[] r = ScriptEnv.JavaScriptLoader.Run(
                         $"{scriptFileListRev.SelectedItem as string}.js",
                         new System.Collections.ArrayList{
-                            "uartData", (bool)(scriptTestHexCheckRev.IsChecked) ? 
-                            Tools.Global.Hex2Byte(scriptTestTextBoxRev.Text) : 
-                            Tools.Global.GetEncoding().GetBytes(scriptTestTextBoxRev.Text),
+                            "uartData", testData,
+                            "uartPara", scriptTestParaTextBoxRev.Text ?? "",
+                            "uartSendRaw", testData,
                         },
                         "user_script_recv_convert/");
+                    if (r == null)
+                    {
+                        Tools.MessageBox.Show($"{TryFindResource("SettingScriptRunResult") as string ?? "?!"}\r\nnull");
+                        return;
+                    }
                     Tools.MessageBox.Show($"{TryFindResource("SettingScriptRunResult") as string ?? "?!"}\r\nHEX：" + Tools.Global.Byte2Hex(r) +
                         $"\r\n{TryFindResource("SettingScriptRawText") as string ?? "?!"}" + Tools.Global.Byte2Readable(r));
                 }
                 catch (Exception ex)
                 {
-                    Tools.MessageBox.Show($"{TryFindResource("ErrorScript") as string ?? "?!"}\r\n" + ex.ToString());
+                    Tools.MessageBox.Show($"{TryFindResource("ErrorRecvScript") as string ?? "?!"}\r\n" + ex.ToString());
                 }
             }
         }
@@ -451,6 +474,30 @@ namespace llcom_plus
             //自动保存脚本
             if (lastScriptFileRev != "")
                 saveScriptFileRev(lastScriptFileRev);
+        }
+
+        private static string NormalizeScriptFileName(string fileName)
+        {
+            var name = (fileName ?? string.Empty).Trim();
+            return name.EndsWith(".js", StringComparison.OrdinalIgnoreCase)
+                ? name.Substring(0, name.Length - 3)
+                : name;
+        }
+
+        private static bool IsValidScriptFileName(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+                return false;
+            if (fileName == "." || fileName == "..")
+                return false;
+            if (fileName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
+                return false;
+            if (fileName.Contains(System.IO.Path.DirectorySeparatorChar.ToString()) ||
+                fileName.Contains(System.IO.Path.AltDirectorySeparatorChar.ToString()))
+            {
+                return false;
+            }
+            return true;
         }
     }
 }

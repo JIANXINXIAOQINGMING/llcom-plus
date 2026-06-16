@@ -364,7 +364,32 @@
                         MaxHeight="180"
                         Width="{Binding ElementName=toSendDataTextBox, Path=ActualWidth}"
                         FontFamily="Consolas"
-                        MouseDoubleClick="SendSuggestListBox_MouseDoubleClick" />
+                        HorizontalContentAlignment="Stretch"
+                        MouseDoubleClick="SendSuggestListBox_MouseDoubleClick">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MinHeight="24">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Margin="2,0,8,0"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding SendText}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Margin="8,0,4,0"
+                                            VerticalAlignment="Center"
+                                            Opacity="0.72"
+                                            Text="{Binding ButtonText}"
+                                            TextAlignment="Right"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </Border>
                 </Popup>
                 <Button
@@ -575,8 +600,8 @@
                                             <Grid Name="ItemGrid" Margin="0,3,0,0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="28" />
-                                                    <ColumnDefinition Width="4*" />
-                                                    <ColumnDefinition Width="64" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="42" />
                                                     <ColumnDefinition Width="46" />
                                                     <ColumnDefinition Width="40" />
@@ -601,13 +626,18 @@
                                                 Grid.Column="1"
                                                 Margin="0,0,2,0"
                                                 HorizontalAlignment="Stretch"
+                                                MinWidth="60"
+                                                PreviewKeyDown="QuickSendTextBox_PreviewKeyDown"
                                                 Text="{Binding text, UpdateSourceTrigger=PropertyChanged}" />
                                                 <Button
                                                 Grid.Column="2"
                                                 MinWidth="58"
-                                                HorizontalAlignment="Stretch"
+                                                Margin="0,0,2,0"
+                                                Padding="10,0"
+                                                HorizontalAlignment="Left"
                                                 Click="knowSendDataButton_click"
-                                                Content="{DynamicResource QuickSendButton}"
+                                                MouseRightButtonDown="QuickSendButton_MouseRightButtonDown"
+                                                Content="{Binding commit}"
                                                 Cursor="Cross"
                                                 Tag="{Binding}"
                                                 ToolTip="{DynamicResource QuickSendButtonTip}" />
@@ -641,7 +671,7 @@
                                                     <TextBlock.ToolTip>
                                                         <MultiBinding Converter="{StaticResource rsToolTipConverter}">
                                                             <Binding Path="recvScriptPath" UpdateSourceTrigger="PropertyChanged"/>
-                                                            <Binding ElementName="sendDataButton" Path="Content" UpdateSourceTrigger="PropertyChanged" Delay="1000"/>
+                                                            <Binding Path="commit" UpdateSourceTrigger="PropertyChanged" Delay="1000"/>
                                                         </MultiBinding>
                                                     </TextBlock.ToolTip>
                                                 </TextBlock>
@@ -707,7 +737,8 @@
                             <DockPanel Margin="0,0,0,8">
                                 <ComboBox
                                 Name="QuickListSelectComboBox"
-                                Width="76"
+                                MinWidth="170"
+                                MaxWidth="260"
                                 MaxDropDownHeight="280"
                                 HorizontalAlignment="Left"
                                 SelectionChanged="QuickListSelectComboBox_SelectionChanged" />

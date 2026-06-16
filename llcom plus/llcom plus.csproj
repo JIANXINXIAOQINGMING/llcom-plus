@@ -1,6 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props" Condition="Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props')" />
   <Import Project="..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props" Condition="Exists('..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -32,7 +31,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>1</ApplicationRevision>
-    <ApplicationVersion>1.0.0.%2a</ApplicationVersion>
+    <ApplicationVersion>1.1.0.0</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <PublishWizardCompleted>true</PublishWizardCompleted>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -100,9 +99,6 @@
     </Reference>
     <Reference Include="CoAP.NET, Version=1.1.0.0, Culture=neutral, PublicKeyToken=e2c10a743037308b, processorArchitecture=MSIL">
       <HintPath>..\packages\CoAP.1.1.0\lib\net40\CoAP.NET.dll</HintPath>
-    </Reference>
-    <Reference Include="Costura, Version=5.7.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\Costura.Fody.5.7.0\lib\netstandard1.0\Costura.dll</HintPath>
     </Reference>
     <Reference Include="CrashReporter.NET, Version=1.6.0.0, Culture=neutral, PublicKeyToken=7828e0fd88cab698, processorArchitecture=MSIL">
       <HintPath>..\packages\CrashReporter.NET.Official.1.6.0\lib\net462\CrashReporter.NET.dll</HintPath>
@@ -272,6 +268,9 @@
     <Compile Include="Program.cs" />
     <Compile Include="Tools\InputDialog.cs" />
     <Compile Include="Tools\DataCalcResult.cs" />
+    <Compile Include="Tools\CipherSuitePicker.cs" />
+    <Compile Include="Tools\GitHubReleaseUpdater.cs" />
+    <Compile Include="Tools\OpenSslCli.cs" />
     <Compile Include="Tools\StartupProfiler.cs" />
     <Compile Include="Tools\Win32.cs" />
     <Compile Include="HttpTools\HeaderParser.cs" />
@@ -466,17 +465,33 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="costura32\serial_monitor.dll" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="costura64\serial_monitor.dll" />
+    <None Include="Native\x86\serial_monitor.dll" />
+    <None Include="Native\x64\serial_monitor.dll" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="DefaultFiles\libusb-1.0-x64.dll" />
     <Resource Include="DefaultFiles\libusb-1.0-x86.dll" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Target Name="CreateReleaseZip" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="ResolveNativeRuntimeFiles">
+    <ItemGroup>
+      <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Native\x86\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x86' Or '$(Platform)' == 'x86'" />
+      <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Native\x64\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x64' Or '$(Platform)' == 'x64'" />
+    </ItemGroup>
+    <Error Condition="'@(NativeRuntimeFile)' == ''" Text="No native runtime files configured for PlatformTarget=$(PlatformTarget), Platform=$(Platform)." />
+    <Error Condition="'@(NativeRuntimeFile)' != '' And !Exists('%(NativeRuntimeFile.Identity)')" Text="Missing native runtime file: %(NativeRuntimeFile.Identity)" />
+  </Target>
+  <Target Name="CopyNativeRuntimeFiles" AfterTargets="Build" DependsOnTargets="ResolveNativeRuntimeFiles">
+    <Copy SourceFiles="@(NativeRuntimeFile)" DestinationFiles="@(NativeRuntimeFile->'$(TargetDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyOpenSslRuntimeFiles" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\OpenSSL')">
+    <ItemGroup>
+      <OpenSslRuntimeFile Include="$(MSBuildProjectDirectory)\OpenSSL\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(TargetDir)OpenSSL" />
+    <Copy SourceFiles="@(OpenSslRuntimeFile)" DestinationFiles="@(OpenSslRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles" Condition="'$(Configuration)' == 'Release'">
     <GetAssemblyIdentity AssemblyFiles="$(TargetPath)">
       <Output TaskParameter="Assemblies" ItemName="BuiltAssemblyIdentity" />
     </GetAssemblyIdentity>
@@ -488,16 +503,12 @@
       <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
-      <ReleasePackageFile Include="$(TargetPath)" />
-      <ReleasePackageFile Include="$(TargetDir)$(TargetFileName).config" Condition="Exists('$(TargetDir)$(TargetFileName).config')" />
-      <ReleasePackageFile Include="$(TargetDir)CrashReporter.NET.dll.config" Condition="Exists('$(TargetDir)CrashReporter.NET.dll.config')" />
-      <ReleasePackageFile Include="$(TargetDir)JavaScriptApi.md" Condition="Exists('$(TargetDir)JavaScriptApi.md')" />
-      <ReleasePackageFile Include="$(MSBuildProjectDirectory)\DefaultFiles\LICENSE" Condition="Exists('$(MSBuildProjectDirectory)\DefaultFiles\LICENSE')" />
+      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
     </ItemGroup>
     <MakeDir Directories="$(MSBuildProjectDirectory)\..\artifacts\release" />
     <RemoveDir Directories="$(ReleasePackageRoot)" Condition="Exists('$(ReleasePackageRoot)')" />
     <MakeDir Directories="$(ReleasePackageRoot)" />
-    <Copy SourceFiles="@(ReleasePackageFile)" DestinationFiles="@(ReleasePackageFile->'$(ReleasePackageRoot)\%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(ReleasePackageFile)" DestinationFiles="@(ReleasePackageFile->'$(ReleasePackageRoot)\%(RecursiveDir)%(Filename)%(Extension)')" />
     <Delete Files="$(ReleasePackageZip)" Condition="Exists('$(ReleasePackageZip)')" />
     <ZipDirectory SourceDirectory="$(ReleasePackageRoot)" DestinationFile="$(ReleasePackageZip)" />
     <Message Importance="High" Text="Release zip -> $(ReleasePackageZip)" />
@@ -513,10 +524,7 @@
     <Error Condition="!Exists('..\packages\NETStandard.Library.2.0.3\build\netstandard2.0\NETStandard.Library.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\NETStandard.Library.2.0.3\build\netstandard2.0\NETStandard.Library.targets'))" />
     <Error Condition="!Exists('..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props'))" />
     <Error Condition="!Exists('..\packages\Fody.6.6.0\build\Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Fody.6.6.0\build\Fody.targets'))" />
-    <Error Condition="!Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Costura.Fody.5.7.0\build\Costura.Fody.props'))" />
-    <Error Condition="!Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets'))" />
   </Target>
   <Import Project="..\packages\NETStandard.Library.2.0.3\build\netstandard2.0\NETStandard.Library.targets" Condition="Exists('..\packages\NETStandard.Library.2.0.3\build\netstandard2.0\NETStandard.Library.targets')" />
   <Import Project="..\packages\Fody.6.6.0\build\Fody.targets" Condition="Exists('..\packages\Fody.6.6.0\build\Fody.targets')" />
-  <Import Project="..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets" Condition="Exists('..\packages\Costura.Fody.5.7.0\build\Costura.Fody.targets')" />
 </Project>

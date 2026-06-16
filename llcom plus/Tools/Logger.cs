@@ -21,7 +21,7 @@ namespace llcom_plus.Tools
             DataClearEvent?.Invoke(null,null);
         }
         //显示日志数据
-        public static void ShowData(byte[] data, bool send, string sessionStringText = null)
+        public static void ShowData(byte[] data, bool send, string sessionStringText = null, ReceiveScriptContext receiveScriptContext = null)
         {
             //不刷新日志
             if (Tools.Global.setting.DisableLog)
@@ -29,7 +29,8 @@ namespace llcom_plus.Tools
             var showData = new DataShowPara
             {
                 data = data,
-                send = send
+                send = send,
+                receiveScriptContext = receiveScriptContext
             };
             WriteSessionLog(showData.time, send ? "send" : "recv", null, data, sessionStringText);
             DataShowTask?.Invoke(null, showData);
@@ -337,6 +338,14 @@ namespace llcom_plus.Tools
     class DataShowPara : DataShow
     {
         public bool send;
+        public ReceiveScriptContext receiveScriptContext;
+    }
+
+    class ReceiveScriptContext
+    {
+        public string ScriptName { get; set; } = "";
+        public object Parameter { get; set; } = "";
+        public byte[] SendRaw { get; set; } = new byte[0];
     }
 
     /// <summary>

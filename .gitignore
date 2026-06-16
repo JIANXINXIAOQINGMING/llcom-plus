@@ -333,3 +333,10 @@ ASALocalRun/
 serial_monitor_rs/target/
 serial_monitor_rs/Cargo.lock
 **/*.rs.bk
+
+# Packaged native runtime libraries kept in source control.
+!llcom plus/Native/
+!llcom plus/Native/x86/
+!llcom plus/Native/x86/serial_monitor.dll
+!llcom plus/Native/x64/
+!llcom plus/Native/x64/serial_monitor.dll

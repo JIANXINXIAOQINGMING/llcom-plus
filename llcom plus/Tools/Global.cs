@@ -94,7 +94,7 @@ namespace llcom_plus.Tools
         }
 
         private const string ProductName = "llcom plus";
-        private const string ExpectedExeFileName = ProductName + ".exe";
+        internal const string ExpectedExeFileName = ProductName + ".exe";
 
         //配置文件路径（普通exe时，会被替换为AppPath）
         public static string ProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + @"\llcom plus\";
@@ -207,15 +207,6 @@ namespace llcom_plus.Tools
             {
                 StartupProfiler.Measure("Global.LoadSetting create default settings", () =>
                 {
-                    if (Directory.GetFiles(ProfilePath).Length > 10)
-                    {
-                        var r = Tools.InputDialog.OpenDialog("检测到当前文件夹有其他文件\r\n" +
-                            "建议新建一个文件夹给llcom plus，并将llcom plus.exe放入其中\r\n" +
-                            "不然当前文件夹会显得很乱哦~\r\n" +
-                            "是否想要继续运行呢？", null, "温馨提示");
-                        if (!r.Item1)
-                            Environment.Exit(1);
-                    }
                     setting = new Model.Settings();
                 });
             }

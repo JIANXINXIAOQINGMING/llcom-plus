@@ -372,6 +372,16 @@
                                 <fa:FontAwesome Foreground="Red" Icon="Ban" />
                             </Button>
                         </WrapPanel>
+                        <WrapPanel
+                            Grid.Row="1"
+                            Margin="3"
+                            Visibility="{Binding ElementName=scriptTestWrapPanelRev, Path=Visibility}">
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingScriptTestPara}" />
+                            <TextBox
+                                Name="scriptTestParaTextBoxRev"
+                                Margin="3,0,0,0"
+                                Width="260" />
+                        </WrapPanel>
                     </Grid>
                     <avalonEdit:TextEditor
                         xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"

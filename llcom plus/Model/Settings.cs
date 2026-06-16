@@ -13,6 +13,7 @@ namespace llcom_plus.Model
     [PropertyChanged.AddINotifyPropertyChangedInterface]
     class Settings
     {
+        private const int DefaultQuickSendRows = 10;
         public event EventHandler MainWindowTop;
         private string _dataToSend = "uart data";
         private int _baudRate = 115200;
@@ -88,6 +89,7 @@ namespace llcom_plus.Model
         /// <summary>
         /// 当前选中的快捷发送列表数据
         /// </summary>
+        [JsonIgnore]
         public List<ToSendData> quickSend
         {
             get
@@ -98,7 +100,8 @@ namespace llcom_plus.Model
             set
             {
                 EnsureQuickSendListState();
-                quickSendList[_quickSendSelect] = value;
+                quickSendList[_quickSendSelect] = value ?? CreateDefaultQuickSendRows();
+                NormalizeQuickSendListRows();
                 Save();
             }
         }
@@ -108,12 +111,53 @@ namespace llcom_plus.Model
             if (quickSendList == null)
                 quickSendList = new List<List<ToSendData>>();
             if (quickSendList.Count == 0)
-                quickSendList.Add(new List<ToSendData>());
+                quickSendList.Add(CreateDefaultQuickSendRows());
 
             EnsureQuickListNames();
 
             if (_quickSendSelect < 0 || _quickSendSelect >= quickSendList.Count)
                 _quickSendSelect = 0;
+
+            NormalizeQuickSendListRows();
+        }
+
+        private void NormalizeQuickSendListRows()
+        {
+            for (int i = 0; i < quickSendList.Count; i++)
+            {
+                var list = quickSendList[i];
+                if (list == null || list.Count == 0)
+                {
+                    quickSendList[i] = CreateDefaultQuickSendRows();
+                    continue;
+                }
+
+                var blankRows = 0;
+                var normalized = new List<ToSendData>();
+                foreach (var item in list.Where(item => item != null))
+                {
+                    if (IsBlankQuickSendRow(item))
+                    {
+                        if (blankRows >= DefaultQuickSendRows)
+                            continue;
+
+                        blankRows++;
+                    }
+
+                    normalized.Add(item);
+                }
+
+                quickSendList[i] = normalized.Count == 0 ? CreateDefaultQuickSendRows() : normalized;
+            }
+        }
+
+        private bool IsBlankQuickSendRow(ToSendData item)
+        {
+            return item == null ||
+                   (string.IsNullOrWhiteSpace(item.text) &&
+                    !item.hex &&
+                    string.IsNullOrWhiteSpace(item.recvScriptPath) &&
+                    string.IsNullOrWhiteSpace(item.recvScriptPara));
         }
 
         private void EnsureQuickListNames()
@@ -195,11 +239,27 @@ namespace llcom_plus.Model
         public int AddQuickSendPage()
         {
             EnsureQuickSendListState();
-            quickSendList.Add(new List<ToSendData>());
+            quickSendList.Add(CreateDefaultQuickSendRows());
             quickListNames.Add(GetDefaultQuickListName(quickSendList.Count - 1));
             _quickSendSelect = quickSendList.Count - 1;
             Save();
             return _quickSendSelect;
+        }
+
+        private List<ToSendData> CreateDefaultQuickSendRows()
+        {
+            var rows = new List<ToSendData>();
+            for (int i = 0; i < DefaultQuickSendRows; i++)
+            {
+                rows.Add(new ToSendData
+                {
+                    id = i + 1,
+                    text = "",
+                    hex = false,
+                    commit = ""
+                });
+            }
+            return rows;
         }
 
         public bool RemoveQuickSendPage(int index)
@@ -759,6 +819,29 @@ namespace llcom_plus.Model
         public string tcpClientServer { get { return _tcpClientServer; } set { _tcpClientServer = value; Save(); } }
         public int tcpClientPort { get { return _tcpClientPort; } set { _tcpClientPort = value; Save(); } }
         public int tcpClientProtocolType { get { return _tcpClientProtocolType; } set { _tcpClientProtocolType = value; Save(); } }
+
+        private int _tcpClientSslAuthMode = 0;
+        private int _tcpClientSslProtocolType = 0;
+        private string _tcpClientSslTargetHost = "";
+        private string _tcpClientSslCaCertPath = "";
+        private string _tcpClientSslClientCertPath = "";
+        private string _tcpClientSslClientCertPassword = "";
+        private string _tcpClientSslCipherSuites = "";
+        private bool _tcpClientSslCheckRevocation = false;
+        private bool _tcpClientSslPrintDetails = true;
+        public int tcpClientSslAuthMode { get { return _tcpClientSslAuthMode; } set { _tcpClientSslAuthMode = value; Save(); } }
+        public int tcpClientSslProtocolType { get { return _tcpClientSslProtocolType; } set { _tcpClientSslProtocolType = value; Save(); } }
+        public string tcpClientSslTargetHost { get { return _tcpClientSslTargetHost; } set { _tcpClientSslTargetHost = value; Save(); } }
+        public string tcpClientSslCaCertPath { get { return _tcpClientSslCaCertPath; } set { _tcpClientSslCaCertPath = value; Save(); } }
+        public string tcpClientSslClientCertPath { get { return _tcpClientSslClientCertPath; } set { _tcpClientSslClientCertPath = value; Save(); } }
+        public string tcpClientSslClientCertPassword { get { return _tcpClientSslClientCertPassword; } set { _tcpClientSslClientCertPassword = value; Save(); } }
+        public string tcpClientSslCipherSuites { get { return _tcpClientSslCipherSuites; } set { _tcpClientSslCipherSuites = value; Save(); } }
+        public bool tcpClientSslCheckRevocation { get { return _tcpClientSslCheckRevocation; } set { _tcpClientSslCheckRevocation = value; Save(); } }
+        public bool tcpClientSslPrintDetails { get { return _tcpClientSslPrintDetails; } set { _tcpClientSslPrintDetails = value; Save(); } }
+        private string _tcpClientSslClientKeyPath = "";
+        private string _openSslPath = "";
+        public string tcpClientSslClientKeyPath { get { return _tcpClientSslClientKeyPath; } set { _tcpClientSslClientKeyPath = value; Save(); } }
+        public string openSslPath { get { return _openSslPath; } set { _openSslPath = value; Save(); } }
 
         private bool _tcpReconnect = false;
         public bool tcpReconnect { get { return _tcpReconnect; } set { _tcpReconnect = value; Save(); } }

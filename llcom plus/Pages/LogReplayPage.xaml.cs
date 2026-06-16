@@ -78,6 +78,9 @@ namespace llcom_plus.Pages
 
         private async void StartReplayButton_Click(object sender, RoutedEventArgs e)
         {
+            ReplayStepsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+            ReplayStepsGrid.CommitEdit(DataGridEditingUnit.Row, true);
+
             if (Steps.Count == 0)
                 return;
 
@@ -90,48 +93,34 @@ namespace llcom_plus.Pages
             if (!int.TryParse(TimeoutTextBox.Text, out var timeoutMs) || timeoutMs <= 0)
                 timeoutMs = 5000;
 
+            var loopReplay = LoopReplayCheckBox.IsChecked == true;
+            var loopRound = 0;
             replayCts = new CancellationTokenSource();
             StartReplayButton.IsEnabled = false;
             StopReplayButton.IsEnabled = true;
-            foreach (var step in Steps)
-                step.Status = "";
+            LoopReplayCheckBox.IsEnabled = false;
 
             var ok = true;
             try
             {
-                for (int i = 0; i < Steps.Count; i++)
+                do
                 {
-                    var step = Steps[i];
-                    if (replayCts.IsCancellationRequested)
-                        break;
+                    loopRound++;
+                    foreach (var step in Steps)
+                        step.Status = "";
 
-                    ReplayStepsGrid.ScrollIntoView(step);
-                    if (step.Direction == ReplayDirection.Send)
+                    if (loopReplay)
                     {
-                        ClearReceiveBuffer();
-                        step.Status = TryFindResource("LogReplaySending") as string ?? "Sending";
-                        if (!Global.RequestSendRawData(step.Data))
-                        {
-                            step.Status = TryFindResource("LogReplaySendFail") as string ?? "Send failed";
-                            ok = false;
-                            break;
-                        }
-                        step.Status = TryFindResource("LogReplaySent") as string ?? "Sent";
-                        await Task.Delay(50, replayCts.Token);
+                        ReplayStatusTextBlock.Text = string.Format(
+                            TryFindResource("LogReplayLoopRound") as string ?? "Loop {0}",
+                            loopRound);
                     }
-                    else
-                    {
-                        step.Status = TryFindResource("LogReplayWaiting") as string ?? "Waiting";
-                        var matched = await WaitForReceiveAsync(step.Data, timeoutMs, replayCts.Token);
-                        if (!matched)
-                        {
-                            step.Status = TryFindResource("LogReplayTimeoutStatus") as string ?? "Timeout";
-                            ok = false;
-                            break;
-                        }
-                        step.Status = TryFindResource("LogReplayMatched") as string ?? "Matched";
-                    }
+
+                    ok = await ReplayOnceAsync(timeoutMs, replayCts.Token);
+                    if (ok && loopReplay && !replayCts.IsCancellationRequested)
+                        await Task.Delay(200, replayCts.Token);
                 }
+                while (ok && loopReplay && !replayCts.IsCancellationRequested);
             }
             catch (TaskCanceledException)
             {
@@ -141,6 +130,7 @@ namespace llcom_plus.Pages
             {
                 StopReplayButton.IsEnabled = false;
                 StartReplayButton.IsEnabled = Steps.Count > 0;
+                LoopReplayCheckBox.IsEnabled = true;
                 ReplayStatusTextBlock.Text = replayCts.IsCancellationRequested ?
                     (TryFindResource("LogReplayStopped") as string ?? "Stopped") :
                     (ok ? (TryFindResource("LogReplayDone") as string ?? "Done") : (TryFindResource("LogReplayFailed") as string ?? "Failed"));
@@ -152,6 +142,84 @@ namespace llcom_plus.Pages
         private void StopReplayButton_Click(object sender, RoutedEventArgs e)
         {
             StopReplay();
+        }
+
+        private void IgnoreResponseCheckBox_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is CheckBox checkBox && checkBox.DataContext is ReplayStep step)
+                step.IgnoreResponseValue = checkBox.IsChecked == true;
+        }
+
+        private async Task<bool> ReplayOnceAsync(int timeoutMs, CancellationToken token)
+        {
+            for (int i = 0; i < Steps.Count; i++)
+            {
+                var step = Steps[i];
+                if (token.IsCancellationRequested)
+                    break;
+
+                ReplayStepsGrid.ScrollIntoView(step);
+                if (step.Direction == ReplayDirection.Send)
+                {
+                    ClearReceiveBuffer();
+                    step.Status = TryFindResource("LogReplaySending") as string ?? "Sending";
+                    if (!Global.RequestSendRawData(step.Data))
+                    {
+                        step.Status = TryFindResource("LogReplaySendFail") as string ?? "Send failed";
+                        return false;
+                    }
+                    step.Status = step.IgnoreResponseValue ?
+                        (TryFindResource("LogReplaySentCountOnly") as string ?? "Sent (count only)") :
+                        (TryFindResource("LogReplaySent") as string ?? "Sent");
+
+                    if (step.IgnoreResponseValue)
+                    {
+                        var lastReceiveIndex = await ContinueAfterReceiveCountAsync(i, timeoutMs, token);
+                        if (lastReceiveIndex < 0)
+                            return false;
+
+                        if (lastReceiveIndex > i)
+                            i = lastReceiveIndex;
+                    }
+
+                    await Task.Delay(50, token);
+                }
+                else
+                {
+                    step.Status = TryFindResource("LogReplayWaiting") as string ?? "Waiting";
+                    var matched = await WaitForReceiveAsync(step.Data, timeoutMs, false, token);
+                    if (!matched)
+                    {
+                        step.Status = TryFindResource("LogReplayTimeoutStatus") as string ?? "Timeout";
+                        return false;
+                    }
+                    step.Status = TryFindResource("LogReplayMatched") as string ?? "Matched";
+                }
+            }
+
+            return true;
+        }
+
+        private async Task<int> ContinueAfterReceiveCountAsync(int sendIndex, int timeoutMs, CancellationToken token)
+        {
+            var lastReceiveIndex = sendIndex;
+            for (int i = sendIndex + 1; i < Steps.Count && Steps[i].Direction == ReplayDirection.Receive; i++)
+            {
+                var receiveStep = Steps[i];
+                ReplayStepsGrid.ScrollIntoView(receiveStep);
+                receiveStep.Status = TryFindResource("LogReplayWaiting") as string ?? "Waiting";
+                var received = await WaitForReceiveAsync(receiveStep.Data, timeoutMs, true, token);
+                if (!received)
+                {
+                    receiveStep.Status = TryFindResource("LogReplayTimeoutStatus") as string ?? "Timeout";
+                    return -1;
+                }
+
+                receiveStep.Status = TryFindResource("LogReplayReceived") as string ?? "Received";
+                lastReceiveIndex = i;
+            }
+
+            return lastReceiveIndex;
         }
 
         private void StopReplay()
@@ -212,18 +280,132 @@ namespace llcom_plus.Pages
                     continue;
 
                 var dataText = match.Groups["data"].Value;
+                var replayDirection = direction.Equals("send", StringComparison.OrdinalIgnoreCase) ? ReplayDirection.Send : ReplayDirection.Receive;
                 var data = isHex ? Global.Hex2Byte(dataText) : ParseEscapedStringBytes(dataText);
                 if (data.Length == 0)
                     continue;
 
+                if (replayDirection == ReplayDirection.Receive)
+                {
+                    foreach (var frame in SplitReceiveFrames(data))
+                    {
+                        if (frame.Length == 0)
+                            continue;
+
+                        steps.Add(new ReplayStep
+                        {
+                            Direction = ReplayDirection.Receive,
+                            Text = FormatReplayText(frame, isHex),
+                            Data = frame
+                        });
+                    }
+                    continue;
+                }
+
                 steps.Add(new ReplayStep
                 {
-                    Direction = direction.Equals("send", StringComparison.OrdinalIgnoreCase) ? ReplayDirection.Send : ReplayDirection.Receive,
+                    Direction = replayDirection,
                     Text = dataText,
                     Data = data
                 });
             }
             return steps;
+        }
+
+        private IEnumerable<byte[]> SplitReceiveFrames(byte[] data)
+        {
+            var start = 0;
+            for (int i = 0; i < data.Length; i++)
+            {
+                if (data[i] != 0x0a)
+                    continue;
+
+                var length = i - start + 1;
+                var frame = new byte[length];
+                Array.Copy(data, start, frame, 0, length);
+                yield return frame;
+                start = i + 1;
+            }
+
+            if (start < data.Length)
+            {
+                var length = data.Length - start;
+                var frame = new byte[length];
+                Array.Copy(data, start, frame, 0, length);
+                yield return frame;
+            }
+        }
+
+        private string FormatReplayText(byte[] data, bool isHex)
+        {
+            if (isHex)
+                return Global.Byte2Hex(data, " ", data.Length);
+
+            return BytesToEscapedString(data);
+        }
+
+        private string BytesToEscapedString(byte[] data)
+        {
+            var text = new StringBuilder();
+            var plainBytes = new List<byte>();
+
+            void FlushPlain()
+            {
+                if (plainBytes.Count == 0)
+                    return;
+
+                text.Append(Global.GetEncoding().GetString(plainBytes.ToArray()).Replace("\\", "\\\\"));
+                plainBytes.Clear();
+            }
+
+            foreach (var b in data)
+            {
+                if (b == 0x5c)
+                {
+                    FlushPlain();
+                    text.Append("\\\\");
+                    continue;
+                }
+
+                if (b <= 0x1f || b == 0x7f)
+                {
+                    FlushPlain();
+                    text.Append(ByteToEscapedSymbol(b));
+                    continue;
+                }
+
+                plainBytes.Add(b);
+            }
+
+            FlushPlain();
+            return text.ToString();
+        }
+
+        private string ByteToEscapedSymbol(byte data)
+        {
+            switch (data)
+            {
+                case 0x00:
+                    return "\\0";
+                case 0x07:
+                    return "\\a";
+                case 0x08:
+                    return "\\b";
+                case 0x09:
+                    return "\\t";
+                case 0x0a:
+                    return "\\n";
+                case 0x0b:
+                    return "\\v";
+                case 0x0c:
+                    return "\\f";
+                case 0x0d:
+                    return "\\r";
+                case 0x1b:
+                    return "\\e";
+                default:
+                    return $"\\x{data:X2}";
+            }
         }
 
         private void MergePairedLog(List<ReplayStep> primary, List<ReplayStep> paired, bool primaryIsHex)
@@ -334,7 +516,7 @@ namespace llcom_plus.Pages
                 receiveBuffer.Clear();
         }
 
-        private async Task<bool> WaitForReceiveAsync(byte[] expected, int timeoutMs, CancellationToken token)
+        private async Task<bool> WaitForReceiveAsync(byte[] expected, int timeoutMs, bool anyResponse, CancellationToken token)
         {
             var start = DateTime.Now;
             while ((DateTime.Now - start).TotalMilliseconds < timeoutMs)
@@ -342,7 +524,7 @@ namespace llcom_plus.Pages
                 token.ThrowIfCancellationRequested();
                 lock (receiveLock)
                 {
-                    if (IsMatch(receiveBuffer, expected))
+                    if (anyResponse ? TryConsumeReceiveFrame(expected) : TryConsumeExpected(expected))
                         return true;
                 }
                 await Task.Delay(50, token);
@@ -350,21 +532,52 @@ namespace llcom_plus.Pages
             return false;
         }
 
-        private bool IsMatch(List<byte> buffer, byte[] expected)
+        private bool TryConsumeReceiveFrame(byte[] expected)
         {
-            if (buffer.Count == 0 || expected.Length == 0)
+            if (receiveBuffer.Count == 0)
+                return false;
+
+            if (Array.IndexOf(expected, (byte)0x0a) >= 0)
+            {
+                var lineEnd = receiveBuffer.IndexOf(0x0a);
+                if (lineEnd < 0)
+                    return false;
+
+                receiveBuffer.RemoveRange(0, lineEnd + 1);
+                return true;
+            }
+
+            var consumeCount = Math.Min(receiveBuffer.Count, Math.Max(1, expected.Length));
+            receiveBuffer.RemoveRange(0, consumeCount);
+            return true;
+        }
+
+        private bool TryConsumeExpected(byte[] expected)
+        {
+            if (receiveBuffer.Count == 0 || expected.Length == 0)
                 return false;
 
             var mode = (MatchModeComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
             if (mode == "exact")
-                return ByteListEquals(buffer, expected);
+            {
+                if (!StartsWith(receiveBuffer, expected))
+                    return false;
 
-            return IndexOf(buffer, expected) >= 0;
+                receiveBuffer.RemoveRange(0, expected.Length);
+                return true;
+            }
+
+            var index = IndexOf(receiveBuffer, expected);
+            if (index < 0)
+                return false;
+
+            receiveBuffer.RemoveRange(0, index + expected.Length);
+            return true;
         }
 
-        private bool ByteListEquals(List<byte> buffer, byte[] expected)
+        private bool StartsWith(List<byte> buffer, byte[] expected)
         {
-            if (buffer.Count != expected.Length)
+            if (buffer.Count < expected.Length)
                 return false;
             for (int i = 0; i < expected.Length; i++)
             {
@@ -404,13 +617,25 @@ namespace llcom_plus.Pages
 
     public class ReplayStep : INotifyPropertyChanged
     {
+        private bool ignoreResponseValue = false;
         private string status = "";
         private string text = "";
 
         public int Index { get; set; }
         public ReplayDirection Direction { get; set; }
         public string DirectionText => Direction == ReplayDirection.Send ? "send" : "recv";
+        public bool IsSendStep => Direction == ReplayDirection.Send;
         public byte[] Data { get; set; } = new byte[0];
+
+        public bool IgnoreResponseValue
+        {
+            get => ignoreResponseValue;
+            set
+            {
+                ignoreResponseValue = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IgnoreResponseValue)));
+            }
+        }
 
         public string Text
         {

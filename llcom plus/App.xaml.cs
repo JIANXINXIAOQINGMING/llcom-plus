@@ -19,9 +19,6 @@ namespace llcom_plus
         {
             Tools.StartupProfiler.Begin();
             Tools.StartupProfiler.Mark("App static ctor");
-            Tools.StartupProfiler.Mark("CosturaUtility.Initialize begin");
-            CosturaUtility.Initialize();
-            Tools.StartupProfiler.Mark("CosturaUtility.Initialize end");
         }
 
         public App()
