@@ -83,7 +83,12 @@ namespace llcom_plus.HttpTools
             if (result.TimedOut)
                 throw new TimeoutException("OpenSSL HTTPS 请求超时。");
             if (result.Output.Length == 0 && result.ExitCode.HasValue && result.ExitCode.Value != 0)
-                throw new InvalidOperationException("OpenSSL HTTPS 请求失败：" + result.Diagnostics.Trim());
+            {
+                var diagnostics = OpenSslMessageExplainer.Explain(result.Diagnostics.Trim());
+                if (string.IsNullOrWhiteSpace(diagnostics))
+                    diagnostics = result.Diagnostics.Trim();
+                throw new InvalidOperationException("OpenSSL HTTPS 请求失败：" + diagnostics);
+            }
 
             var response = ParseRawHttpResponse(result.Output);
             response.ElapsedTime = stopwatch.Elapsed;
@@ -92,7 +97,11 @@ namespace llcom_plus.HttpTools
 
             var openSslInfo = OpenSslCli.BuildDiagnosticSummary(options);
             if (!string.IsNullOrWhiteSpace(result.Diagnostics))
-                openSslInfo += "\r\n" + result.Diagnostics.Trim();
+            {
+                var diagnostics = OpenSslMessageExplainer.Explain(result.Diagnostics.Trim());
+                if (!string.IsNullOrWhiteSpace(diagnostics))
+                    openSslInfo += "\r\n" + diagnostics;
+            }
             if (!string.IsNullOrWhiteSpace(openSslInfo))
                 response.Headers = response.Headers + "\r\n[OpenSSL]\r\n" + openSslInfo;
 

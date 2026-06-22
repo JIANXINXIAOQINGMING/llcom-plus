@@ -37,6 +37,9 @@ namespace llcom_plus.Pages
         private const int ProtocolPing = 4;
         private const int ProtocolNtp = 5;
         private const int ProtocolDtls = 6;
+        private const int DnsAddressAll = 0;
+        private const int DnsAddressIpv4 = 1;
+        private const int DnsAddressIpv6 = 2;
 
         public SocketClientPage()
         {
@@ -53,6 +56,7 @@ namespace llcom_plus.Pages
         //是否可更改服务器信息
         public bool Changeable { get; set; } = true;
         public bool HexMode { get; set; } = false;
+        public bool IsDnsToolSelected { get; set; } = false;
 
         //暂存一个对象
         SocketObj socketNow = null;
@@ -68,6 +72,7 @@ namespace llcom_plus.Pages
             ServerTextBox.DataContext = Tools.Global.setting;
             PortTextBox.DataContext = Tools.Global.setting;
             ProtocolTypeComboBox.DataContext = Tools.Global.setting;
+            DnsAddressTypeComboBox.DataContext = Tools.Global.setting;
             ReconnectInterval.DataContext = Tools.Global.setting;
             NeedReconnect.DataContext = Tools.Global.setting;
             SslAuthModeComboBox.DataContext = Tools.Global.setting;
@@ -305,7 +310,11 @@ namespace llcom_plus.Pages
                     text =>
                     {
                         if (Tools.Global.setting.tcpClientSslPrintDetails && !string.IsNullOrWhiteSpace(text))
-                            ShowTextData("🔐 OpenSSL detail", text);
+                        {
+                            var detail = OpenSslMessageExplainer.Explain(text);
+                            if (!string.IsNullOrWhiteSpace(detail))
+                                ShowTextData("🔐 OpenSSL detail", detail);
+                        }
                     },
                     exitCode =>
                     {
@@ -371,7 +380,9 @@ namespace llcom_plus.Pages
             var protocol = GetSelectedProtocol();
             var isConnection = IsConnectionProtocol(protocol);
             var isPing = protocol == ProtocolPing;
+            var isDns = protocol == ProtocolDns;
 
+            IsDnsToolSelected = isDns;
             PortTextBox.IsEnabled = !isPing;
             NeedReconnect.IsEnabled = isConnection;
             ReconnectSettingsPanel.IsEnabled = isConnection;
@@ -433,21 +444,61 @@ namespace llcom_plus.Pages
         private async Task RunDnsLookupAsync()
         {
             var host = GetServerHost();
+            var addressType = GetSelectedDnsAddressType();
             var watch = Stopwatch.StartNew();
             var entry = await Task.Run(() => Dns.GetHostEntry(host));
             watch.Stop();
+            var addresses = entry.AddressList
+                .Where(address => IsDnsAddressFamilyMatch(address, addressType))
+                .ToArray();
 
             var sb = new StringBuilder();
             sb.AppendLine($"Host: {host}");
+            sb.AppendLine($"Query type: {GetDnsAddressTypeText(addressType)}");
             sb.AppendLine($"Canonical name: {entry.HostName}");
             sb.AppendLine($"Elapsed: {watch.ElapsedMilliseconds} ms");
             if (entry.Aliases != null && entry.Aliases.Length > 0)
                 sb.AppendLine($"Aliases: {string.Join(", ", entry.Aliases)}");
             sb.AppendLine("Addresses:");
-            foreach (var address in entry.AddressList)
+            if (addresses.Length == 0)
+                sb.AppendLine("  (none)");
+            foreach (var address in addresses)
                 sb.AppendLine($"  {address} ({address.AddressFamily})");
 
             ShowTextData("🌐 DNS result", sb.ToString());
+        }
+
+        private int GetSelectedDnsAddressType()
+        {
+            var value = DnsAddressTypeComboBox?.SelectedIndex ?? Tools.Global.setting.tcpClientDnsAddressType;
+            return value < DnsAddressAll || value > DnsAddressIpv6 ? DnsAddressAll : value;
+        }
+
+        private static bool IsDnsAddressFamilyMatch(IPAddress address, int addressType)
+        {
+            switch (addressType)
+            {
+                case DnsAddressIpv4:
+                    return address.AddressFamily == AddressFamily.InterNetwork;
+                case DnsAddressIpv6:
+                    return address.AddressFamily == AddressFamily.InterNetworkV6;
+                default:
+                    return address.AddressFamily == AddressFamily.InterNetwork ||
+                           address.AddressFamily == AddressFamily.InterNetworkV6;
+            }
+        }
+
+        private static string GetDnsAddressTypeText(int addressType)
+        {
+            switch (addressType)
+            {
+                case DnsAddressIpv4:
+                    return "IPv4 (A)";
+                case DnsAddressIpv6:
+                    return "IPv6 (AAAA)";
+                default:
+                    return "All";
+            }
         }
 
         private async Task RunPingAsync()

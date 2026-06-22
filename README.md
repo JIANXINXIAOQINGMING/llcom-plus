@@ -1,9 +1,6 @@
 # llcom plus
-<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-6-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
 
-[English readme click here](/README_EN.md)
+[English README](README_EN.md)
 
 <p align="center">
     <br>
@@ -12,68 +9,96 @@
 </p>
 
 <p align="center">
-    <img alt="GitHub" src="https://img.shields.io/github/license/chenxuuu/llcom">
-    <img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/chenxuuu/llcom">
-    <img alt="GitHub top language" src="https://img.shields.io/github/languages/top/chenxuuu/llcom">
-    <img alt="code-size" src="https://img.shields.io/github/languages/code-size/chenxuuu/llcom.svg">
+    <img alt="license" src="https://img.shields.io/github/license/JIANXINXIAOQINGMING/llcom-plus?color=ff69b4&labelColor=333">
+    <img alt="release" src="https://img.shields.io/github/v/release/JIANXINXIAOQINGMING/llcom-plus?label=release&color=ff69b4&labelColor=333">
+    <img alt="top language" src="https://img.shields.io/github/languages/top/JIANXINXIAOQINGMING/llcom-plus?color=ff69b4&labelColor=333">
+    <img alt="inspired by Codex" src="https://img.shields.io/badge/inspired%20by-Codex-ff69b4?logo=openai&logoColor=white&labelColor=333">
+    <img alt="inspired by llcom" src="https://img.shields.io/badge/inspired%20by-LLCOM-ff69b4?labelColor=333">
 </p>
 
-可运行JavaScript脚本的高自由度串口调试工具。使用交流群：`931546484`
+## 介绍
+
+llcom plus 是在原 [llcom](https://github.com/chenxuuu/llcom) 基础上继续扩展的串口调试工具，保留了原项目“能跑 JavaScript 脚本”的高自由度，同时加入了多串口分屏、快捷发送补全、文件发送、TLS/OpenSSL、日志回放、HTTP/MQTT/socket 等开发调试中常用的工具页。
 
 ## 下载
 
-从微软商店安装：
+- 正式版本：[GitHub Releases](https://github.com/JIANXINXIAOQINGMING/llcom-plus/releases/latest)
 
-<a href='//www.microsoft.com/store/apps/9PMPB0233S0S?cid=storebadge&ocid=badge'><img src='https://developer.microsoft.com/store/badges/images/Chinese_Simplified_get-it-from-MS.png' alt='Chinese badge' width='160'/></a>
+## 主要功能
 
-exe便携版：[国内用户点我下载](https://llcom.papapoi.com/llcom.zip)
+### 串口调试
 
-CI快照版：[Github Action](https://nightly.link/chenxuuu/llcom/workflows/build/master/llcom_x64)
+- 支持常见串口打开、关闭、发送、接收、自动重连和终端模式。
+- 支持文本/HEX 发送与显示，支持自定义字符编码。
+- TX/RX 日志颜色区分，支持原始数据、实际发送数据、串口日志和脚本日志。
+- 串口配置按端口保存，波特率、RTS、DTR、HEX 等常用选项可以跟随不同 COM 口自动切换。
+- 发送前可通过 JavaScript 脚本处理数据，快捷发送区域同样适用。
 
-所有正式版本：[GitHub Releases](https://github.com/chenxuuu/llcom/releases/latest)
+### 主界面分屏
 
-## 功能列表
+- 在“更多设置”中可配置主界面分屏数量，支持 1 到 4 个串口窗口。
+- 分屏模式复用原有串口刷新、串口选择、打开/关闭、波特率和发送框。
+- 点击某个分屏窗口会自动切换当前目标，底部发送框、RTS、DTR、HEX 等选项跟随目标窗口。
+- 分屏日志按端口/窗口保存，TX/RX 颜色保持与普通串口日志一致。
+- 切换分屏数量时尽量保留未变化窗口的串口连接，避免不必要的关闭重开。
 
-- 其他串口调试功能具有的功能
-- 收发日志清晰明了，可同时显示HEX值与实际字符串
-- 自动保存串口与JavaScript脚本日志，并附带时间
-- 串口断开后，如果再次连接，会自动重连
-- 发送的数据可被用户自定义的JavaScript脚本提前处理
-- 右侧快捷发送栏，快捷发送条目数量不限制
-- 右侧快捷发送栏，支持10页数据，互相独立
-- 可独立运行JavaScript脚本，并拥有定时器和通用消息通道能力
-- 可选文字编码格式
-- 终端功能，直接敲键盘发送数据（包含ctrl+字母键）
-- 可单独隐藏发送数据
-- 集成TCP、UDP、SSL socket客户端功能，并且支持IPV6
-- 集成各种编码互转功能
-- 集成乱码恢复功能
-- 集成mqtt测试功能
-- 集成串口监听功能，可监听其他软件的串口通信数据
+### 快捷发送
 
-![screen](/image/screen.png)
-![screen3](/image/screen3.png)
-![screen2](/image/screen2.jpg)
+- 快捷发送支持多页、重命名、导入当前页、导入全部、导出当前页和导出全部。
+- 发送框支持从快捷发送内容中快速补全，并显示快捷发送按钮备注。
+- HEX 快捷发送项不会参与补全。
+- 每条快捷发送可单独勾选“排除”，让该指令不进入发送框补全候选。
+- 快捷发送内容可绑定接收处理脚本和脚本参数，方便做一键交互流程。
 
-## 特色功能示范
+### 文件发送与循环发送
 
-### 使用JavaScript脚本提前处理待发送的数据
+- 数据计算/文件发送工具支持手动输入或选择文件作为数据源。
+- 文件发送支持进度显示、暂停、继续发送和重新发送。
+- 循环发送工具可以从快捷发送导入命令，按指定次数和间隔循环发送。
 
-1. 结尾加上换行回车
+### 脚本能力
+
+- 内置 Jint JavaScript 运行环境，可独立运行测试脚本。
+- 脚本支持串口收发回调、定时器和通用消息通道。
+- 发送处理脚本、接收处理脚本、独立运行脚本可覆盖大部分自动化串口调试场景。
+- API 文档见 [JavaScriptApi.md](JavaScriptApi.md)。
+
+### 网络与协议工具
+
+- socket 客户端支持 TCP、UDP、TLS、DTLS、DNS、Ping、NTP 等调试场景。
+- DNS 查询可选择全部地址、IPv4(A) 或 IPv6(AAAA)。
+- TLS/DTLS 支持 OpenSSL 参数、证书、目标主机、吊销检查和加密套件配置。
+- TLS 日志默认展示 ClientHello、ServerHello 等握手摘要，避免原始 TLS 字节刷屏。
+- MQTT 工具支持常用 MQTT 客户端测试。
+- HTTP 工具支持独立窗口调试请求、Header、Body 和 TLS/OpenSSL 相关配置。
+
+### 辅助工具
+
+- 日志回放：可导入 llcom plus 日志，按发送/接收顺序做自动化回放和响应匹配。
+- 串口监听：可监听其他软件的串口通信数据。
+- 编码转换和乱码修复：用于常见字符集转换与文本恢复。
+- 曲线工具：脚本可将数据推送到曲线页显示。
+- WinUSB 工具：用于基础 USB/WinUSB 调试。
+
+## JavaScript 示例
+
+### 发送前处理数据
+
+1. 结尾追加换行回车：
 
 ```javascript
 return concatBytes(uartData, "\r\n");
 ```
 
-2. 发送16进制数据
+2. 将输入内容按 HEX 发送：
 
 ```javascript
 return hexToBytes(bytesToString(uartData));
 ```
 
-此脚本可将形如`30313233`发送数据，处理为`0123`的结果
+此脚本可将形如 `30313233` 的输入处理为实际字节 `0123`。
 
-3. 更多玩法等你发现
+3. 将逗号分隔文本转成 JSON：
 
 ```javascript
 var items = bytesToString(uartData).split(",");
@@ -84,13 +109,9 @@ return stringToBytes(JSON.stringify({
 }));
 ```
 
-此脚本可将形如`a,b,c`发送数据，处理为`{"key1":"a","key2":"b","key3":"c"}`的结果
+此脚本可将 `a,b,c` 处理为 `{"key1":"a","key2":"b","key3":"c"}`。
 
-**此处理脚本，同样对右侧快捷发送区域有效。**
-
-### 独立的JavaScript脚本自动处理串口收发
-
-右侧的脚本调试区域，可直接运行你写的串口测试脚本，如：
+### 独立脚本处理串口收发
 
 ```javascript
 apiSetCb("uart", function(data) {
@@ -108,51 +129,12 @@ function onTrigger(id, type, data) {
 }
 ```
 
-使用此功能，你可以完成大部分的自动化串口调试操作。
-
-## 接口文档
-
-接口文档可以在[JavaScriptApi.md](JavaScriptApi.md)查看
-
-## 已知问题与待添加的功能（请大家反馈，谢谢！）
-
-- [x] ~~bug：某些条件下（比如Air720重启），COM口消失后不会被释放，导致无法再次开启该COM口，只能重启软件（[.net 框架的bug，微软的人在看了](https://github.com/dotnet/corefx/issues/39464)）~~（已解决 #2f26e68）
-
-## 开源
-
-如果各位大佬不觉得麻烦的话，欢迎对本项目进行pr或直接重构。
-
-本项目在前期只是为了实现功能，代码相当零散，所以不太适合阅读我的源码进行学习，等我有空的时候会重构代码。
-
-本项目采用Apache 2.0协议，如有借用，请保留指向该项目的链接。
-
-## Contributors ✨
-
-Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
-
-<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-
-<table>
-  <tr>
-    <td align="center"><a href="https://github.com/whc2001"><img src="https://avatars2.githubusercontent.com/u/16266909?v=4?s=100" width="100px;" alt=""/><br /><sub><b>whc2001</b></sub></a><br /><a href="https://github.com/chenxuuu/llcom/commits?author=whc2001" title="Code">💻</a> <a href="https://github.com/chenxuuu/llcom/issues?q=author%3Awhc2001" title="Bug reports">🐛</a></td>
-    <td align="center"><a href="https://www.chenxublog.com/"><img src="https://avatars3.githubusercontent.com/u/10357394?v=4?s=100" width="100px;" alt=""/><br /><sub><b>chenxuuu</b></sub></a><br /><a href="#projectManagement-chenxuuu" title="Project Management">📆</a></td>
-    <td align="center"><a href="https://github.com/neomissing"><img src="https://avatars0.githubusercontent.com/u/22003930?v=4?s=100" width="100px;" alt=""/><br /><sub><b>neomissing</b></sub></a><br /><a href="#ideas-neomissing" title="Ideas, Planning, & Feedback">🤔</a></td>
-    <td align="center"><a href="https://github.com/RYLF"><img src="https://avatars3.githubusercontent.com/u/28991981?v=4?s=100" width="100px;" alt=""/><br /><sub><b>RuoYun</b></sub></a><br /><a href="https://github.com/chenxuuu/llcom/issues?q=author%3ARYLF" title="Bug reports">🐛</a></td>
-    <td align="center"><a href="http://www.diycms.com"><img src="https://avatars.githubusercontent.com/u/13432299?v=4?s=100" width="100px;" alt=""/><br /><sub><b>王龙</b></sub></a><br /><a href="#ideas-wanglong126" title="Ideas, Planning, & Feedback">🤔</a> <a href="https://github.com/chenxuuu/llcom/issues?q=author%3Awanglong126" title="Bug reports">🐛</a> <a href="https://github.com/chenxuuu/llcom/commits?author=wanglong126" title="Code">💻</a></td>
-    <td align="center"><a href="https://github.com/linhongz"><img src="https://avatars.githubusercontent.com/u/49241612?v=4?s=100" width="100px;" alt=""/><br /><sub><b>linhongz</b></sub></a><br /><a href="#ideas-linhongz" title="Ideas, Planning, & Feedback">🤔</a> <a href="https://github.com/chenxuuu/llcom/issues?q=author%3Alinhongz" title="Bug reports">🐛</a></td>
-  </tr>
-</table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-
-<!-- ALL-CONTRIBUTORS-LIST:END -->
-
-This project follows the [all-contributors](htts://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
 
 
-## 特别感谢
+本项目采用 Apache 2.0 协议。如有借用、分发或二次开发，请保留指向本项目和原始项目的链接。
 
-[![icon-resharper](/image/icon-resharper.svg)](https://www.jetbrains.com/?from=llcom plus)
+## 致谢与引用项目
+
+- [chenxuuu/llcom](https://github.com/chenxuuu/llcom)：本项目基于原 llcom 开源项目继续开发，保留并扩展串口调试、脚本接口和工具页能力。
+- [OpenSSL](https://www.openssl.org/)：用于 TLS/DTLS 连接、HTTPS 辅助请求和握手信息解析。
+- [Jint](https://github.com/sebastienros/jint)：提供 JavaScript 脚本运行能力。

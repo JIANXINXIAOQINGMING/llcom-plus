@@ -5,11 +5,42 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Ports;
 using System.Linq;
+using System.Runtime.Serialization;
+using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace llcom_plus.Model
 {
+    class UartPortProfile
+    {
+        public string dataToSend { get; set; } = "uart data";
+        public int baudRate { get; set; } = 115200;
+        public int showHexFormat { get; set; } = 0;
+        public bool hexSend { get; set; } = false;
+        public bool showSend { get; set; } = true;
+        public bool showSendRaw { get; set; } = true;
+        public int parity { get; set; } = 0;
+        public int timeout { get; set; } = 50;
+        public int dataBits { get; set; } = 8;
+        public int stopBit { get; set; } = 1;
+        public int flowControl { get; set; } = 0;
+        public int sendThrottlePacketSize { get; set; } = 0;
+        public int sendThrottleDelayMs { get; set; } = 0;
+        public bool bitDelay { get; set; } = true;
+        public uint maxLength { get; set; } = 10240;
+        public string sendScript { get; set; } = "default";
+        public string recvScript { get; set; } = "default";
+        public bool terminal { get; set; } = true;
+        public int encoding { get; set; } = 65001;
+        public bool extraEnter { get; set; } = false;
+        public bool enterSend { get; set; } = false;
+        public bool enableSymbol { get; set; } = true;
+        public bool rts { get; set; } = false;
+        public bool dtr { get; set; } = true;
+    }
+
     [PropertyChanged.AddINotifyPropertyChangedInterface]
     class Settings
     {
@@ -48,6 +79,23 @@ namespace llcom_plus.Model
         private bool _sessionLogEnabled = false;
         private string _sessionLogFolder = "";
         private bool _darkMode = false;
+        public Dictionary<string, UartPortProfile> uartProfiles = new Dictionary<string, UartPortProfile>(StringComparer.OrdinalIgnoreCase);
+        [JsonIgnore] private string _activeUartProfileName = "";
+        [JsonIgnore] private bool _suspendSave = false;
+        [JsonIgnore] private readonly HashSet<string> _uartProfilesPendingWrite = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        [OnDeserializing]
+        internal void OnDeserializing(StreamingContext context)
+        {
+            _suspendSave = true;
+        }
+
+        [OnDeserialized]
+        internal void OnDeserialized(StreamingContext context)
+        {
+            _suspendSave = false;
+            EnsureUartProfiles();
+        }
 
         //窗口大小与位置
         private double _windowTop = 0;
@@ -65,9 +113,281 @@ namespace llcom_plus.Model
         /// <summary>
         /// 保存配置
         /// </summary>
-        private void Save()
+        private void Save(bool copyCurrentToActiveProfile = true)
         {
-            File.WriteAllText(Tools.Global.ProfilePath+"settings.json", JsonConvert.SerializeObject(this));
+            if (_suspendSave)
+                return;
+
+            if (copyCurrentToActiveProfile)
+                CopyCurrentToActiveUartProfile(true);
+
+            var settingsPath = Path.Combine(Tools.Global.ProfilePath, "settings.json");
+            var tempPath = settingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            var mutexName = @"Local\llcom_plus_settings_" + GetProfileMutexKey(Tools.Global.ProfilePath);
+            var hasLock = false;
+
+            using (var mutex = new Mutex(false, mutexName))
+            {
+                try
+                {
+                    try
+                    {
+                        hasLock = mutex.WaitOne(TimeSpan.FromSeconds(5));
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        hasLock = true;
+                    }
+
+                    if (!hasLock)
+                        throw new IOException("等待配置文件写入锁超时");
+
+                    var data = JObject.FromObject(this);
+                    MergeUartProfilesForSave(settingsPath, data);
+                    File.WriteAllText(tempPath, data.ToString(Formatting.None));
+                    File.Copy(tempPath, settingsPath, true);
+                    _uartProfilesPendingWrite.Clear();
+                }
+                finally
+                {
+                    if (hasLock)
+                        mutex.ReleaseMutex();
+                    try
+                    {
+                        if (File.Exists(tempPath))
+                            File.Delete(tempPath);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+
+        private void MergeUartProfilesForSave(string settingsPath, JObject data)
+        {
+            var currentProfiles = data["uartProfiles"] as JObject ?? new JObject();
+            var mergedProfiles = new JObject();
+
+            try
+            {
+                if (File.Exists(settingsPath))
+                {
+                    var diskData = JObject.Parse(File.ReadAllText(settingsPath));
+                    if (diskData["uartProfiles"] is JObject diskProfiles)
+                    {
+                        foreach (var profile in diskProfiles.Properties())
+                            mergedProfiles[profile.Name] = profile.Value.DeepClone();
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            foreach (var profile in currentProfiles.Properties())
+            {
+                if (mergedProfiles.Property(profile.Name) == null)
+                    mergedProfiles[profile.Name] = profile.Value.DeepClone();
+            }
+
+            foreach (var profileName in _uartProfilesPendingWrite.ToList())
+            {
+                var profile = currentProfiles.Properties()
+                    .FirstOrDefault(i => string.Equals(i.Name, profileName, StringComparison.OrdinalIgnoreCase));
+                if (profile != null)
+                    mergedProfiles[profileName] = profile.Value.DeepClone();
+            }
+
+            data["uartProfiles"] = mergedProfiles;
+        }
+
+        private static string GetProfileMutexKey(string profilePath)
+        {
+            using (var sha256 = SHA256.Create())
+            {
+                return BitConverter.ToString(sha256.ComputeHash(Encoding.UTF8.GetBytes(profilePath ?? ""))).Replace("-", "");
+            }
+        }
+
+        [JsonIgnore]
+        public string ActiveUartProfileName => _activeUartProfileName;
+
+        public void EnsureRuntimeState()
+        {
+            EnsureUartProfiles();
+            EnsureQuickSendListState();
+        }
+
+        public void SetActiveUartProfile(string portName)
+        {
+            var normalizedPortName = NormalizePortName(portName);
+            if (string.IsNullOrWhiteSpace(normalizedPortName))
+                return;
+
+            EnsureUartProfiles();
+            if (string.Equals(_activeUartProfileName, normalizedPortName, StringComparison.OrdinalIgnoreCase))
+            {
+                CopyCurrentToActiveUartProfile(true);
+                Save();
+                return;
+            }
+
+            CopyCurrentToActiveUartProfile(true);
+            _activeUartProfileName = normalizedPortName;
+            if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
+                uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
+
+            ApplyUartProfile(uartProfiles[normalizedPortName]);
+            _uartProfilesPendingWrite.Add(normalizedPortName);
+            Save();
+            Tools.Global.NotifyUartProfileChanged();
+        }
+
+        public void SaveActiveUartProfile()
+        {
+            CopyCurrentToActiveUartProfile(true);
+            Save();
+        }
+
+        public UartPortProfile GetUartProfileForPort(string portName)
+        {
+            var normalizedPortName = NormalizePortName(portName);
+            if (string.IsNullOrWhiteSpace(normalizedPortName))
+                return null;
+
+            EnsureUartProfiles();
+            if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
+                uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
+
+            return uartProfiles[normalizedPortName];
+        }
+
+        public void SaveUartProfileForPort(string portName, int baudRate, bool hexSend, bool rts, bool dtr)
+        {
+            var normalizedPortName = NormalizePortName(portName);
+            if (string.IsNullOrWhiteSpace(normalizedPortName))
+                return;
+
+            EnsureUartProfiles();
+            if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
+                uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
+
+            var profile = uartProfiles[normalizedPortName];
+            profile.baudRate = baudRate > 0 ? baudRate : 115200;
+            profile.hexSend = hexSend;
+            profile.rts = rts;
+            profile.dtr = dtr;
+            _uartProfilesPendingWrite.Add(normalizedPortName);
+            Save(false);
+        }
+
+        private static string NormalizePortName(string portName)
+        {
+            return string.IsNullOrWhiteSpace(portName) ? "" : portName.Trim().ToUpperInvariant();
+        }
+
+        private void EnsureUartProfiles()
+        {
+            if (uartProfiles == null)
+            {
+                uartProfiles = new Dictionary<string, UartPortProfile>(StringComparer.OrdinalIgnoreCase);
+                return;
+            }
+
+            if (uartProfiles.Comparer == StringComparer.OrdinalIgnoreCase)
+                return;
+
+            uartProfiles = uartProfiles
+                .Where(i => !string.IsNullOrWhiteSpace(i.Key) && i.Value != null)
+                .GroupBy(i => NormalizePortName(i.Key))
+                .ToDictionary(i => i.Key, i => i.Last().Value, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void CopyCurrentToActiveUartProfile(bool markPendingWrite)
+        {
+            var portName = NormalizePortName(_activeUartProfileName);
+            if (string.IsNullOrWhiteSpace(portName))
+                return;
+
+            EnsureUartProfiles();
+            uartProfiles[portName] = CreateUartProfileFromCurrent();
+            if (markPendingWrite)
+                _uartProfilesPendingWrite.Add(portName);
+        }
+
+        private UartPortProfile CreateUartProfileFromCurrent()
+        {
+            return new UartPortProfile
+            {
+                dataToSend = _dataToSend,
+                baudRate = _baudRate,
+                showHexFormat = _showHexFormat,
+                hexSend = _hexSend,
+                showSend = _showSend,
+                showSendRaw = _showSendRaw,
+                parity = _parity,
+                timeout = _timeout,
+                dataBits = _dataBits,
+                stopBit = _stopBit,
+                flowControl = _flowControl,
+                sendThrottlePacketSize = _sendThrottlePacketSize,
+                sendThrottleDelayMs = _sendThrottleDelayMs,
+                bitDelay = _bitDelay,
+                maxLength = _maxLength,
+                sendScript = _sendScript,
+                recvScript = _recvScript,
+                terminal = _terminal,
+                encoding = _encoding,
+                extraEnter = _extraEnter,
+                enterSend = _enterSend,
+                enableSymbol = _enableSymbol,
+                rts = Tools.Global.uart?.Rts ?? false,
+                dtr = Tools.Global.uart?.Dtr ?? true
+            };
+        }
+
+        private void ApplyUartProfile(UartPortProfile profile)
+        {
+            if (profile == null)
+                return;
+
+            _suspendSave = true;
+            try
+            {
+                dataToSend = profile.dataToSend ?? "uart data";
+                baudRate = profile.baudRate > 0 ? profile.baudRate : 115200;
+                showHexFormat = profile.showHexFormat < 0 || profile.showHexFormat > 2 ? 0 : profile.showHexFormat;
+                hexSend = profile.hexSend;
+                showSend = profile.showSend;
+                showSendRaw = profile.showSendRaw;
+                parity = profile.parity < 0 || profile.parity > 4 ? 0 : profile.parity;
+                timeout = profile.timeout;
+                dataBits = profile.dataBits < 5 || profile.dataBits > 8 ? 8 : profile.dataBits;
+                stopBit = profile.stopBit < 1 || profile.stopBit > 3 ? 1 : profile.stopBit;
+                flowControl = profile.flowControl < 0 || profile.flowControl > 2 ? 0 : profile.flowControl;
+                sendThrottlePacketSize = Math.Max(0, profile.sendThrottlePacketSize);
+                sendThrottleDelayMs = Math.Max(0, profile.sendThrottleDelayMs);
+                bitDelay = profile.bitDelay;
+                maxLength = profile.maxLength == 0 ? 10240 : profile.maxLength;
+                sendScript = string.IsNullOrWhiteSpace(profile.sendScript) ? "default" : profile.sendScript;
+                recvScript = string.IsNullOrWhiteSpace(profile.recvScript) ? "default" : profile.recvScript;
+                terminal = profile.terminal;
+                encoding = profile.encoding > 0 ? profile.encoding : 65001;
+                extraEnter = profile.extraEnter;
+                enterSend = profile.enterSend;
+                EnableSymbol = profile.enableSymbol;
+                if (Tools.Global.uart != null)
+                {
+                    Tools.Global.uart.Rts = profile.rts;
+                    Tools.Global.uart.Dtr = profile.dtr;
+                    Tools.Global.uart.ApplyFlowControl();
+                }
+            }
+            finally
+            {
+                _suspendSave = false;
+            }
         }
 
         /// <summary>
@@ -816,9 +1136,26 @@ namespace llcom_plus.Model
         private string _tcpClientServer = "qq.com";
         private int _tcpClientPort = 80;
         private int _tcpClientProtocolType = 0;
+        private int _tcpClientDnsAddressType = 0;
+        private int _serialSplitScreenCount = 1;
         public string tcpClientServer { get { return _tcpClientServer; } set { _tcpClientServer = value; Save(); } }
         public int tcpClientPort { get { return _tcpClientPort; } set { _tcpClientPort = value; Save(); } }
         public int tcpClientProtocolType { get { return _tcpClientProtocolType; } set { _tcpClientProtocolType = value; Save(); } }
+        public int tcpClientDnsAddressType { get { return _tcpClientDnsAddressType; } set { _tcpClientDnsAddressType = Math.Max(0, Math.Min(2, value)); Save(); } }
+        public int serialSplitScreenCount
+        {
+            get { return Math.Max(1, Math.Min(4, _serialSplitScreenCount)); }
+            set
+            {
+                var normalized = Math.Max(1, Math.Min(4, value));
+                if (_serialSplitScreenCount == normalized)
+                    return;
+
+                _serialSplitScreenCount = normalized;
+                Save();
+                Tools.Global.NotifySerialSplitScreenChanged();
+            }
+        }
 
         private int _tcpClientSslAuthMode = 0;
         private int _tcpClientSslProtocolType = 0;

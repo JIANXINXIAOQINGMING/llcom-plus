@@ -416,7 +416,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Button
@@ -429,7 +429,22 @@
                 Content="{DynamicResource RefreshPortButton}"
                 IsEnabled="{Binding ElementName=serialPortsListComboBox, Path=IsEnabled}" />
                 <StackPanel
+                Name="serialSplitSendTargetPanel"
                 Grid.Column="1"
+                Margin="0,0,12,0"
+                VerticalAlignment="Center"
+                Orientation="Horizontal">
+                    <TextBlock
+                    Margin="0,0,6,0"
+                    VerticalAlignment="Center"
+                    Text="{DynamicResource SplitSendTarget}" />
+                    <ComboBox
+                    Name="serialSplitSendTargetComboBox"
+                    Width="86"
+                    SelectionChanged="SerialSplitSendTargetComboBox_SelectionChanged" />
+                </StackPanel>
+                <StackPanel
+                Grid.Column="2"
                 VerticalAlignment="Center"
                 Orientation="Horizontal">
                     <TextBlock
@@ -440,7 +455,8 @@
                     Name="serialPortsListComboBox"
                     MinWidth="190"
                     MaxWidth="320"
-                    Margin="0,0,12,0" />
+                    Margin="0,0,12,0"
+                    SelectionChanged="SerialPortsListComboBox_SelectionChanged" />
                     <TextBlock
                     Margin="0,0,6,0"
                     VerticalAlignment="Center"
@@ -603,6 +619,7 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="38" />
                                                     <ColumnDefinition Width="46" />
                                                     <ColumnDefinition Width="40" />
                                                     <ColumnDefinition Width="0" />
@@ -647,9 +664,16 @@
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
                                                 IsChecked="{Binding hex}" />
+                                                <CheckBox
+                                                Grid.Column="4"
+                                                Margin="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsChecked="{Binding disableSuggestion}"
+                                                ToolTip="{DynamicResource QuickSendDisableSuggestionTip}" />
                                                 <TextBlock
                                                 Name="recvScriptSet"
-                                                Grid.Column="4"
+                                                Grid.Column="5"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
                                                 Opacity="{Binding recvScriptPath, Converter={StaticResource rsOpacityConverter}}"
@@ -678,7 +702,7 @@
                                                 <TextBlock
                                                 Visibility="Collapsed"
                                                 Name="recvScriptPara"
-                                                Grid.Column="6"
+                                                Grid.Column="7"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
                                                 Opacity="{Binding recvScriptPara, Converter={StaticResource rsOpacityConverter}}"
@@ -700,7 +724,7 @@
                                                 </fa:FontAwesome>
                                                 </TextBlock>
                                                 <Button
-                                                Grid.Column="5"
+                                                Grid.Column="6"
                                                 Width="28"
                                                 Height="24"
                                                 Margin="3,0,0,0"
@@ -757,6 +781,7 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="64" />
                                     <ColumnDefinition Width="42" />
+                                    <ColumnDefinition Width="38" />
                                     <ColumnDefinition Width="46" />
                                     <ColumnDefinition Width="40" />
                                     <ColumnDefinition Width="0" />
@@ -775,6 +800,10 @@
                                 Text="{DynamicResource QuickSendHex}" />
                                 <TextBlock
                                 Grid.Column="4"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendDisableSuggestion}" />
+                                <TextBlock
+                                Grid.Column="5"
                                 HorizontalAlignment="Center"
                                 Text="{DynamicResource QuickSendRecvScript}" />
                             </Grid>

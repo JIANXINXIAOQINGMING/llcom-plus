@@ -24,6 +24,7 @@
   <PropertyGroup>
     <WapProjPath Condition="'$(WapProjPath)'==''">$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\</WapProjPath>
   </PropertyGroup>
+  <Import Project="..\Version.props" Condition="Exists('..\Version.props')" />
   <Import Project="$(WapProjPath)\Microsoft.DesktopBridge.props" />
   <PropertyGroup>
     <ProjectGuid>53865299-7486-46a1-b3c4-66293d16af79</ProjectGuid>
@@ -114,4 +115,7 @@
     <ProjectReference Include="..\llcom plus\llcom plus.csproj" />
   </ItemGroup>
   <Import Project="$(WapProjPath)\Microsoft.DesktopBridge.targets" />
+  <Target Name="SyncAppxManifestVersion" BeforeTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AppxManifest" />
+  </Target>
 </Project>

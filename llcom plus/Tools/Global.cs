@@ -14,6 +14,7 @@ using System.Linq;
 using System.Management;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Shapes;
@@ -22,6 +23,14 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace llcom_plus.Tools
 {
+    class UartSendRequest
+    {
+        public byte[] Data { get; set; }
+        public bool? IsHex { get; set; }
+        public bool ApplySendProcessing { get; set; } = true;
+        public string SessionStringLogOverride { get; set; }
+    }
+
     class Global
     {
         public static event EventHandler ProgramClosedEvent;
@@ -37,16 +46,27 @@ namespace llcom_plus.Tools
             }
             set
             {
+                if (_isMainWindowsClosed == value)
+                    return;
+
                 _isMainWindowsClosed = value;
                 if (value)
                 {
-                    uart.WaitUartReceive.Set();
+                    try
+                    {
+                        if (uart?.IsOpen() == true)
+                            uart.Close();
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.AddUartLogDebug($"[ProgramClosed]uart close error:{e.Message}");
+                    }
+                    uart?.WaitUartReceive.Set();
                     Logger.StopSessionLog();
                     Logger.CloseUartLog();
                     Logger.CloseScriptLog();
-                    if (File.Exists(ProfilePath + "lock"))
-                        File.Delete(ProfilePath + "lock");
                     ProgramClosedEvent?.Invoke(null,EventArgs.Empty);
+                    ReleaseSingleInstanceMutex();
                 }
             }
         }
@@ -95,6 +115,8 @@ namespace llcom_plus.Tools
 
         private const string ProductName = "llcom plus";
         internal const string ExpectedExeFileName = ProductName + ".exe";
+        private static Mutex singleInstanceMutex;
+        private static bool singleInstanceMutexOwned;
 
         //配置文件路径（普通exe时，会被替换为AppPath）
         public static string ProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + @"\llcom plus\";
@@ -135,6 +157,24 @@ namespace llcom_plus.Tools
         public static void ChangeTitle(string s) => ChangeTitleEvent?.Invoke(null, s);
 
         /// <summary>
+        /// 后台发送/驱动异常导致串口被强制断开时，通知主界面同步状态。
+        /// </summary>
+        public static event EventHandler<string> UartPortClosedEvent;
+        public static void NotifyUartPortClosed(string portName) => UartPortClosedEvent?.Invoke(null, portName ?? "");
+
+        /// <summary>
+        /// 当前串口配置档切换后，通知界面刷新串口相关控件。
+        /// </summary>
+        public static event EventHandler UartProfileChangedEvent;
+        public static void NotifyUartProfileChanged() => UartProfileChangedEvent?.Invoke(null, EventArgs.Empty);
+
+        /// <summary>
+        /// 主界面串口分屏数量改变后，通知主窗口切换布局。
+        /// </summary>
+        public static event EventHandler SerialSplitScreenChangedEvent;
+        public static void NotifySerialSplitScreenChanged() => SerialSplitScreenChangedEvent?.Invoke(null, EventArgs.Empty);
+
+        /// <summary>
         /// 让工具页面请求主串口发送原始字节
         /// </summary>
         public static event Action<byte[]> SendRawDataRequest;
@@ -143,6 +183,52 @@ namespace llcom_plus.Tools
             if (data == null || data.Length == 0 || SendRawDataRequest == null)
                 return false;
             SendRawDataRequest(data);
+            return true;
+        }
+
+        /// <summary>
+        /// 让工具页面请求主串口按普通发送链路发送数据
+        /// </summary>
+        public static event Action<UartSendRequest> SendDataRequest;
+        public static bool RequestSendData(UartSendRequest request)
+        {
+            if (request?.Data == null || request.Data.Length == 0 || SendDataRequest == null)
+                return false;
+            SendDataRequest(request);
+            return true;
+        }
+
+        public static Func<bool> IsActiveSerialTargetOpenRequest;
+        public static Func<byte[], CancellationToken, bool> SendRawDataToActiveTargetRequest;
+        public static event EventHandler<byte[]> ActiveSerialTargetReceivedEvent;
+        public static void NotifyActiveSerialTargetReceived(byte[] data)
+        {
+            if (data == null || data.Length == 0)
+                return;
+
+            ActiveSerialTargetReceivedEvent?.Invoke(null, data);
+        }
+
+        public static bool IsActiveSerialTargetOpen()
+        {
+            if (IsActiveSerialTargetOpenRequest != null)
+                return IsActiveSerialTargetOpenRequest();
+
+            return uart?.IsOpen() == true;
+        }
+
+        public static bool SendRawDataToActiveTarget(byte[] data, CancellationToken token)
+        {
+            if (data == null || data.Length == 0)
+                return false;
+
+            if (SendRawDataToActiveTargetRequest != null)
+                return SendRawDataToActiveTargetRequest(data, token);
+
+            if (uart?.IsOpen() != true)
+                return false;
+
+            uart.SendDataCancelable(data, token, null, raiseEvents: false);
             return true;
         }
 
@@ -190,6 +276,7 @@ namespace llcom_plus.Tools
                         setting = JsonConvert.DeserializeObject<Model.Settings>(File.ReadAllText(ProfilePath + "settings.json"));
                         if (setting == null)
                             throw new Exception("settings.json is empty");
+                        setting.EnsureRuntimeState();
                         setting.SentCount = 0;
                         setting.ReceivedCount = 0;
                         setting.DisableLog = false;
@@ -208,6 +295,7 @@ namespace llcom_plus.Tools
                 StartupProfiler.Measure("Global.LoadSetting create default settings", () =>
                 {
                     setting = new Model.Settings();
+                    setting.EnsureRuntimeState();
                 });
             }
             StartupProfiler.Measure("Global.LoadSetting language", () => LoadLanguageFile(setting.language));
@@ -275,19 +363,7 @@ namespace llcom_plus.Tools
                 }
             });
 
-            StartupProfiler.Measure("Global.Initial process lock", () =>
-            {
-                //检测多开
-                string processName = Process.GetCurrentProcess().ProcessName;
-                Process[] processes = Process.GetProcessesByName(processName);
-                //如果该数组长度大于1，说明多次运行
-                if (processes.Length > 1 && File.Exists(ProfilePath + "lock"))
-                {
-                    Tools.MessageBox.Show("不支持同文件夹多开！\r\n如需多开，请在多个文件夹分别存放llcom plus.exe后，分别运行。");
-                    Environment.Exit(1);
-                }
-                File.Create(ProfilePath + "lock").Close();
-            });
+            StartupProfiler.Measure("Global.Initial single instance lock", EnsureSingleInstance);
 
             StartupProfiler.Measure("Global.Initial uart config", () =>
             {
@@ -301,6 +377,44 @@ namespace llcom_plus.Tools
                 uart.UartDataRawSent += Uart_UartDataRawSent;
             });
             StartupProfiler.Mark("Global.Initial exit");
+        }
+
+        private static void EnsureSingleInstance()
+        {
+            var normalizedPath = Regex.Replace(
+                (AppPath ?? "").TrimEnd('\\').ToUpperInvariant(),
+                @"[^A-Z0-9]+",
+                "_");
+            if (normalizedPath.Length > 180)
+                normalizedPath = normalizedPath.Substring(normalizedPath.Length - 180);
+
+            var mutexName = @"Local\llcom_plus_single_instance_" + normalizedPath;
+            bool createdNew;
+            singleInstanceMutex = new Mutex(true, mutexName, out createdNew);
+            singleInstanceMutexOwned = createdNew;
+            if (createdNew)
+                return;
+
+            Tools.MessageBox.Show("当前目录下已运行 llcom plus。\r\n请使用小工具里的“四串口分屏”同时操作多个串口。");
+            Environment.Exit(1);
+        }
+
+        private static void ReleaseSingleInstanceMutex()
+        {
+            try
+            {
+                if (singleInstanceMutexOwned)
+                    singleInstanceMutex?.ReleaseMutex();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                singleInstanceMutexOwned = false;
+                singleInstanceMutex?.Dispose();
+                singleInstanceMutex = null;
+            }
         }
 
         public static void PrepareRuntimeFiles()
@@ -388,12 +502,15 @@ namespace llcom_plus.Tools
 
             StartupProfiler.Measure("PrepareRuntimeFiles settings backup", () =>
             {
-                //备份一下文件好了（心理安慰）
-                if (File.Exists(ProfilePath + "settings.json"))
+                try
                 {
-                    if (File.Exists(ProfilePath + "settings.json.bakup"))
-                        File.Delete(ProfilePath + "settings.json.bakup");
-                    File.Copy(ProfilePath + "settings.json", ProfilePath + "settings.json.bakup");
+                    //备份一下文件好了（心理安慰），多开抢占时不能影响启动。
+                    if (File.Exists(ProfilePath + "settings.json"))
+                        File.Copy(ProfilePath + "settings.json", ProfilePath + "settings.json.bakup", true);
+                }
+                catch (Exception e)
+                {
+                    Debug.WriteLine($"[PrepareRuntimeFiles] settings backup skipped: {e.Message}");
                 }
             });
             StartupProfiler.Mark("Global.PrepareRuntimeFiles exit");
@@ -714,8 +831,18 @@ namespace llcom_plus.Tools
         /// <param name="d">是否覆盖</param>
         public static void CreateFile(string insidePath, string outPath, bool d = true)
         {
-            if(!File.Exists(outPath) || d)
+            if (File.Exists(outPath) && !d)
+                return;
+
+            try
+            {
                 File.WriteAllBytes(outPath, GetAssetsFileContent(insidePath));
+            }
+            catch (IOException)
+            {
+                if (d || !File.Exists(outPath))
+                    throw;
+            }
         }
 
         public static void CreateFileIfMissing(string insidePath, string outPath)

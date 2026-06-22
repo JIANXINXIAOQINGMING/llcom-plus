@@ -10,7 +10,7 @@ namespace llcom_plus.Pages
     public partial class AboutPage : Page
     {
         private const string OriginalProjectUrl = "https://github.com/chenxuuu/llcom";
-        private const string ProjectUrl = "https://github.com/JIANXINXIAOQINGMING/llcom-lawrence";
+        private const string ProjectUrl = "https://github.com/JIANXINXIAOQINGMING/llcom-plus";
         private const string ReleasesUrl = ProjectUrl + "/releases";
         private bool checkingUpdate = false;
 

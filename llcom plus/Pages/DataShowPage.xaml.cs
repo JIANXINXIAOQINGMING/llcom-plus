@@ -29,6 +29,10 @@ namespace llcom_plus.Pages
     [PropertyChanged.AddINotifyPropertyChangedInterface]
     public partial class DataShowPage : Page
     {
+        private const int MaxPackedLogItems = 3000;
+        private const int MaxPlainTextLogChars = 1024 * 1024;
+        private const int PlainTextTrimChars = 256 * 1024;
+
         public DataShowPage()
         {
             StartupProfiler.Mark("DataShowPage ctor enter");
@@ -51,20 +55,18 @@ namespace llcom_plus.Pages
             StartupProfiler.Measure("DataShowPage.Loaded init", () =>
             {
                 MainTextBox.LostFocus += MainTextBox_LostFocus;
+                Unloaded += DataShowPage_Unloaded;
                 //添加待显示数据到缓冲区
                 Tools.Logger.DataShowTask += Logger_DataShowTask;
-                Tools.Logger.DataClearEvent += (xx,x) =>
-                {
-                    MainList.Items.Clear();
-                    MainTextBox.Clear();
-                };
+                Tools.Logger.DataClearEvent += Logger_DataClearEvent;
                 LockIcon.DataContext = this;
                 UnLockIcon.DataContext = this;
                 UnLockText.DataContext = this;
                 RTSCheckBox.DataContext = this;
                 DTRCheckBox.DataContext = this;
-                Rts = false;
-                Dtr = true;
+                Rts = Tools.Global.uart.Rts;
+                Dtr = Tools.Global.uart.Dtr;
+                Tools.Global.UartProfileChangedEvent += Global_UartProfileChangedEvent;
 
                 MainList.DataContext = Tools.Global.setting;
                 MainTextBox.DataContext = Tools.Global.setting;
@@ -82,6 +84,34 @@ namespace llcom_plus.Pages
                 MainTextBox.Visibility = lastPackShowMode ? Visibility.Collapsed : Visibility.Visible;
             });
             StartupProfiler.Mark("DataShowPage.Loaded exit");
+        }
+
+        private void DataShowPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            MainTextBox.LostFocus -= MainTextBox_LostFocus;
+            Unloaded -= DataShowPage_Unloaded;
+            Tools.Logger.DataShowTask -= Logger_DataShowTask;
+            Tools.Logger.DataClearEvent -= Logger_DataClearEvent;
+            Tools.Global.UartProfileChangedEvent -= Global_UartProfileChangedEvent;
+            loaded = false;
+        }
+
+        private void Logger_DataClearEvent(object sender, EventArgs e)
+        {
+            DoInvoke(() =>
+            {
+                MainList.Items.Clear();
+                MainTextBox.Clear();
+            });
+        }
+
+        private void Global_UartProfileChangedEvent(object sender, EventArgs e)
+        {
+            DoInvoke(() =>
+            {
+                Rts = Tools.Global.uart.Rts;
+                Dtr = Tools.Global.uart.Dtr;
+            });
         }
 
         //记录一下上次是不是分包显示的
@@ -181,6 +211,7 @@ namespace llcom_plus.Pages
                 DoInvoke(() =>
                 {
                     MainTextBox.AppendText(DataText);
+                    TrimPlainTextLog();
                     if (!LockLog)
                         MainTextBox.ScrollToEnd();
                 });
@@ -197,6 +228,7 @@ namespace llcom_plus.Pages
                         if (packedLogSelectionMode)
                             RestorePackedLogView();
                         MainList.Items.Add(data);
+                        TrimPackedLog();
                         if (!LockLog)
                             MainListScrollViewer.ScrollToEnd();
                     });
@@ -208,8 +240,36 @@ namespace llcom_plus.Pages
         {
             if (Tools.Global.isMainWindowsClosed)
                 return false;
-            Dispatcher.Invoke(action);
-            return true;
+            try
+            {
+                if (Dispatcher.CheckAccess())
+                    action();
+                else
+                    Dispatcher.Invoke(action);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void TrimPlainTextLog()
+        {
+            if (MainTextBox.Text.Length <= MaxPlainTextLogChars)
+                return;
+
+            var trimLength = Math.Max(PlainTextTrimChars, MainTextBox.Text.Length - MaxPlainTextLogChars);
+            trimLength = Math.Min(trimLength, MainTextBox.Text.Length);
+            MainTextBox.Text = MainTextBox.Text.Substring(trimLength);
+            MainTextBox.SelectionStart = MainTextBox.Text.Length;
+        }
+
+        private void TrimPackedLog()
+        {
+            var removeCount = MainList.Items.Count - MaxPackedLogItems;
+            for (var i = 0; i < removeCount; i++)
+                MainList.Items.RemoveAt(0);
         }
 
         private static byte[] ApplyReceiveScript(byte[] data, DataShowPara source)
@@ -264,7 +324,10 @@ namespace llcom_plus.Pages
             }
             set
             {
+                if (Tools.Global.uart.Rts == value)
+                    return;
                 Tools.Global.uart.Rts = value;
+                Tools.Global.setting?.SaveActiveUartProfile();
             }
         }
         public bool Dtr
@@ -275,7 +338,10 @@ namespace llcom_plus.Pages
             }
             set
             {
+                if (Tools.Global.uart.Dtr == value)
+                    return;
                 Tools.Global.uart.Dtr = value;
+                Tools.Global.setting?.SaveActiveUartProfile();
             }
         }
 
@@ -307,7 +373,7 @@ namespace llcom_plus.Pages
                 var data = source?.data ?? new byte[0];
                 var time = source?.time ?? DateTime.Now;
                 var sent = source?.send ?? false;
-                if (data == null || data.Count() == 0)
+                if (data == null || data.Length == 0)
                     return;
                 byte[] temp = ApplyReceiveScript(data, source);
                 if (temp == null || temp.Length == 0)
@@ -336,7 +402,7 @@ namespace llcom_plus.Pages
 
             public DataShow(string title, byte[] data, DateTime time, SolidColorBrush color)
             {
-                byte[] temp = data.ToArray();
+                byte[] temp = data?.ToArray() ?? new byte[0];
 
                 TimeText = time.ToString("[yyyy/MM/dd HH:mm:ss.fff]");
 
@@ -374,27 +440,29 @@ namespace llcom_plus.Pages
             {
                 string saveFilePath = saveFileDialog.FileName;
                 var needPack = Tools.Global.setting.timeout >= 0;
-                FileStream fs = new FileStream(saveFilePath, FileMode.Create);
-                StreamWriter sw = new StreamWriter(fs, Encoding.UTF8);
-                if (!needPack)
+                using (var fs = new FileStream(saveFilePath, FileMode.Create))
+                using (var sw = new StreamWriter(fs, Encoding.UTF8))
                 {
-                    sw.Write(MainTextBox.Text);
-                }
-                else
-                {
-                    int iCount = MainList.Items.Count - 1;
-                    for (int i = 0; i <= iCount; i++)
+                    if (!needPack)
                     {
-                        var item = MainList.Items[i] as DataShow;
-                        if (string.IsNullOrEmpty(item.RawTitle))
-                            sw.WriteLine(item.TimeText + (item.ArrowText == " ← " ? " [send] " : " [recv] ") + item.DataText);
-                        else
-                            sw.WriteLine(item.TimeText + " [" + item.RawTitle + "] " + item.RawText);
+                        sw.Write(MainTextBox.Text);
+                    }
+                    else
+                    {
+                        int iCount = MainList.Items.Count - 1;
+                        for (int i = 0; i <= iCount; i++)
+                        {
+                            var item = MainList.Items[i] as DataShow;
+                            if (item == null)
+                                continue;
+
+                            if (string.IsNullOrEmpty(item.RawTitle))
+                                sw.WriteLine(item.TimeText + (item.ArrowText == " ← " ? " [send] " : " [recv] ") + item.DataText);
+                            else
+                                sw.WriteLine(item.TimeText + " [" + item.RawTitle + "] " + item.RawText);
+                        }
                     }
                 }
-                sw.Flush();
-                sw.Close();
-                fs.Close();
             }
         }
 

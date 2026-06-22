@@ -22,12 +22,23 @@ namespace llcom_plus
             DataContext = Tools.Global.setting;
             Topmost = true;
             Closing += FlowControlWindow_Closing;
+            Tools.Global.UartProfileChangedEvent += Global_UartProfileChangedEvent;
+        }
+
+        private void Global_UartProfileChangedEvent(object sender, System.EventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                DataContext = null;
+                DataContext = Tools.Global.setting;
+            });
         }
 
         private void FlowControlWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             if (Tools.Global.isMainWindowsClosed)
             {
+                Tools.Global.UartProfileChangedEvent -= Global_UartProfileChangedEvent;
                 e.Cancel = false;
                 return;
             }

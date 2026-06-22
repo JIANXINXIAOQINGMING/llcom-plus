@@ -111,17 +111,147 @@ namespace llcom_plus.Tools
             Task.Run(() =>
             {
                 var buffer = new byte[4096];
+                var textBuffer = new StringBuilder();
+                var blockBuffer = new StringBuilder();
+                var blockExpectedLength = -1;
+                var blockActualLength = 0;
+
+                void FlushBlock()
+                {
+                    if (blockBuffer.Length <= 0)
+                        return;
+
+                    onText?.Invoke(blockBuffer.ToString());
+                    blockBuffer.Clear();
+                    blockExpectedLength = -1;
+                    blockActualLength = 0;
+                }
+
+                void FlushTextLine(string line)
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
+                        onText?.Invoke(line + Environment.NewLine);
+                }
+
+                void ProcessLine(string line)
+                {
+                    if (IsOpenSslMessageHeader(line, out var expectedLength))
+                    {
+                        FlushBlock();
+                        blockBuffer.AppendLine(line);
+                        blockExpectedLength = expectedLength;
+                        blockActualLength = 0;
+                        if (blockExpectedLength == 0)
+                            FlushBlock();
+                        return;
+                    }
+
+                    if (blockBuffer.Length > 0 && IsOpenSslHexLine(line, out var hexByteCount))
+                    {
+                        blockBuffer.AppendLine(line);
+                        blockActualLength += hexByteCount;
+                        if (blockExpectedLength >= 0 && blockActualLength >= blockExpectedLength)
+                            FlushBlock();
+                        return;
+                    }
+
+                    FlushBlock();
+                    FlushTextLine(line);
+                }
+
+                void ProcessText(string text)
+                {
+                    textBuffer.Append(text);
+                    while (true)
+                    {
+                        var current = textBuffer.ToString();
+                        var lineEnd = current.IndexOf('\n');
+                        if (lineEnd < 0)
+                            return;
+
+                        var line = current.Substring(0, lineEnd).TrimEnd('\r');
+                        textBuffer.Remove(0, lineEnd + 1);
+                        ProcessLine(line);
+                    }
+                }
+
                 while (true)
                 {
                     int read;
                     try { read = stream.Read(buffer, 0, buffer.Length); }
-                    catch { return; }
-                    if (read <= 0)
+                    catch
+                    {
+                        FlushBlock();
                         return;
+                    }
+                    if (read <= 0)
+                    {
+                        if (textBuffer.Length > 0)
+                        {
+                            ProcessLine(textBuffer.ToString());
+                            textBuffer.Clear();
+                        }
+                        FlushBlock();
+                        return;
+                    }
 
-                    onText?.Invoke(Encoding.UTF8.GetString(buffer, 0, read));
+                    ProcessText(Encoding.UTF8.GetString(buffer, 0, read));
                 }
             });
+        }
+
+        private static bool IsOpenSslMessageHeader(string line, out int expectedLength)
+        {
+            expectedLength = -1;
+            var text = (line ?? string.Empty).Trim();
+            if (!(text.StartsWith("<<<", StringComparison.Ordinal) || text.StartsWith(">>>", StringComparison.Ordinal)))
+                return false;
+
+            var marker = "[length ";
+            var start = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+                return false;
+
+            start += marker.Length;
+            var end = text.IndexOf(']', start);
+            if (end <= start)
+                return true;
+
+            if (int.TryParse(
+                text.Substring(start, end - start),
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var length))
+            {
+                expectedLength = length;
+            }
+            return true;
+        }
+
+        private static bool IsOpenSslHexLine(string line, out int byteCount)
+        {
+            byteCount = 0;
+            var parts = (line ?? string.Empty)
+                .Trim()
+                .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+                return false;
+
+            foreach (var part in parts)
+            {
+                if (part.Length != 2 ||
+                    !byte.TryParse(
+                        part,
+                        System.Globalization.NumberStyles.HexNumber,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out _))
+                {
+                    return false;
+                }
+            }
+
+            byteCount = parts.Length;
+            return true;
         }
     }
 

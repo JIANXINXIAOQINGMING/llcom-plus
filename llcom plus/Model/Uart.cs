@@ -12,6 +12,9 @@ namespace llcom_plus.Model
 {
     class Uart
     {
+        private const int SerialWriteTimeoutMilliseconds = 5000;
+        private const int SerialDisposeTimeoutMilliseconds = 1500;
+
         //废弃的串口对象，存放处，尝试fix[System.ObjectDisposedException: 已关闭 Safe handle]
         //https://drdump.com/Problem.aspx?ProblemID=524533
         private List<SerialPort> useless = new List<SerialPort>();
@@ -59,8 +62,12 @@ namespace llcom_plus.Model
         {
             //声明接收到事件
             serial.DataReceived += Serial_DataReceived;
-            ApplyControlLines();
-            new Thread(ReadData).Start();
+            ConfigureSerialDevice(serial);
+            var readThread = new Thread(ReadData)
+            {
+                IsBackground = true
+            };
+            readThread.Start();
 
             //适配一下通用通道
             ScriptApis.SendChannelsRegister("uart", (data, _) => 
@@ -78,88 +85,106 @@ namespace llcom_plus.Model
         /// <summary>
         /// 刷新串口对象
         /// </summary>
-        private void refreshSerialDevice()
+        private void refreshSerialDevice(bool waitForDispose = false)
         {
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]start");
-            try
-            {
-                Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]lastPortBaseStream.Dispose");
-                Task.Run(() =>//这行代码会卡住，我扔task里还卡吗？
-                {
-                    try
-                    {
-                        lastPortBaseStream?.Dispose();
-                    }
-                    catch { }
-                });
-            }
-            catch (Exception e)
-            {
-                Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]lastPortBaseStream.Dispose error:{e.Message}");
-                Console.WriteLine($"portBaseStream?.Dispose error:{e.Message}");
-            }
-            try
-            {
-                Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose");
-                Task.Run(() =>//这行代码会卡住，我扔task里还卡吗？
-                {
-                    try
-                    {
-                        serial.BaseStream.Dispose();
-                    }
-                    catch { }
-                });
-            }
-            catch (Exception e)
-            {
-                Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose error:{e.Message}");
-                Console.WriteLine($"serial.BaseStream.Dispose error:{e.Message}");
-            }
-            Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]Dispose");
-            Task.Run(() =>//我服了
-            {
-                try
-                {
-                    serial.Dispose();
-                }
-                catch { }
-            });
+            var oldSerial = serial;
+            var oldBaseStream = lastPortBaseStream;
+            lastPortBaseStream = null;
+            DisposeSerialResources(oldSerial, oldBaseStream, waitForDispose);
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]new");
             lock(useless)//存起来
-                useless.Add(serial);
+                useless.Add(oldSerial);
             serial = new SerialPort();
             //声明接收到事件
             serial.DataReceived += Serial_DataReceived;
-            serial.BaudRate = Tools.Global.setting.baudRate;
-            serial.Parity = (Parity)Tools.Global.setting.parity;
-            serial.DataBits = Tools.Global.setting.dataBits;
-            serial.StopBits = (StopBits)Tools.Global.setting.stopBit;
-            ApplyControlLines();
+            ConfigureSerialDevice(serial);
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]done");
+        }
+
+        private void DisposeSerialResources(SerialPort port, Stream baseStream, bool waitForDispose)
+        {
+            Action dispose = () =>
+            {
+                try
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose");
+                    baseStream?.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose error:{e.Message}");
+                }
+
+                try
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Close");
+                    if (port?.IsOpen == true)
+                        port.Close();
+                }
+                catch (Exception e)
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Close error:{e.Message}");
+                }
+
+                try
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Dispose");
+                    port?.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Dispose error:{e.Message}");
+                }
+            };
+
+            var task = Task.Run(dispose);
+            if (waitForDispose && !task.Wait(SerialDisposeTimeoutMilliseconds))
+                Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]dispose timeout {SerialDisposeTimeoutMilliseconds}ms");
+        }
+
+        private void ConfigureSerialDevice(SerialPort port)
+        {
+            if (port == null)
+                return;
+
+            if (Tools.Global.setting != null)
+            {
+                port.BaudRate = Tools.Global.setting.baudRate;
+                port.Parity = (Parity)Tools.Global.setting.parity;
+                port.DataBits = Tools.Global.setting.dataBits;
+                port.StopBits = (StopBits)Tools.Global.setting.stopBit;
+            }
+
+            port.WriteTimeout = SerialWriteTimeoutMilliseconds;
+            ApplyControlLines(port);
         }
 
         public void ApplyFlowControl()
         {
-            ApplyControlLines();
+            ApplyControlLines(serial);
         }
 
-        private void ApplyControlLines()
+        private void ApplyControlLines(SerialPort port)
         {
+            if (port == null)
+                return;
+
             var handshake = GetHandshake();
             if (handshake == Handshake.RequestToSend)
             {
                 try
                 {
-                    serial.RtsEnable = false;
+                    port.RtsEnable = false;
                 }
                 catch
                 {
                 }
             }
-            serial.Handshake = handshake;
+            port.Handshake = handshake;
             if (handshake != Handshake.RequestToSend)
-                serial.RtsEnable = Rts;
-            serial.DtrEnable = Dtr;
+                port.RtsEnable = Rts;
+            port.DtrEnable = Dtr;
         }
 
         private bool IsHardwareFlowControl()
@@ -227,12 +252,11 @@ namespace llcom_plus.Model
         /// <summary>
         /// 关闭串口
         /// </summary>
-        public void Close()
+        public void Close(bool waitForDispose = false)
         {
             Tools.Logger.AddUartLogDebug($"[UartClose]refreshSerialDevice");
-            refreshSerialDevice();
-            Tools.Logger.AddUartLogDebug($"[UartClose]Close");
-            serial.Close();
+            refreshSerialDevice(waitForDispose);
+            WaitUartReceive.Set();
             Tools.Logger.AddUartLogDebug($"[UartClose]done");
         }
 
@@ -240,7 +264,7 @@ namespace llcom_plus.Model
         /// 发送数据
         /// </summary>
         /// <param name="data">数据内容</param>
-        public void SendData(byte[] data, byte[] dataRaw = null)
+        public void SendData(byte[] data, byte[] dataRaw = null, bool raiseEvents = true)
         {
             if (data.Length == 0)
                 return;
@@ -250,6 +274,9 @@ namespace llcom_plus.Model
                 WriteData(data);
                 Tools.Global.setting.SentCount += data.Length;
 
+                if (!raiseEvents)
+                    return;
+
                 //判断data与dataRaw是否相同，如果相同且实际发送也显示，就只显示一个
                 if (dataRaw != null && Tools.Global.setting.showSend && ByteArrayEquals(dataRaw, data))
                     dataRaw = null;
@@ -258,22 +285,92 @@ namespace llcom_plus.Model
             }
         }
 
+        public void SendDataCancelable(byte[] data, CancellationToken cancellationToken, byte[] dataRaw = null, bool raiseEvents = true)
+        {
+            if (data.Length == 0)
+                return;
+
+            lock (sendLock)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                WriteData(data, cancellationToken);
+                Tools.Global.setting.SentCount += data.Length;
+
+                if (!raiseEvents)
+                    return;
+
+                if (dataRaw != null && Tools.Global.setting.showSend && ByteArrayEquals(dataRaw, data))
+                    dataRaw = null;
+                if (dataRaw != null && Tools.Global.setting.showSendRaw) UartDataRawSent?.Invoke(dataRaw, EventArgs.Empty);
+                if (Tools.Global.setting.showSend) UartDataSent?.Invoke(data, EventArgs.Empty);
+            }
+        }
+
         private void WriteData(byte[] data)
+        {
+            WriteData(data, CancellationToken.None);
+        }
+
+        private void WriteData(byte[] data, CancellationToken cancellationToken)
         {
             var packetSize = Math.Max(0, Tools.Global.setting.sendThrottlePacketSize);
             var delayMs = Math.Max(0, Tools.Global.setting.sendThrottleDelayMs);
             if (packetSize == 0 || delayMs == 0 || data.Length <= packetSize)
             {
-                serial.Write(data, 0, data.Length);
+                WritePort(data, 0, data.Length, cancellationToken);
                 return;
             }
 
             for (int offset = 0; offset < data.Length; offset += packetSize)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var count = Math.Min(packetSize, data.Length - offset);
-                serial.Write(data, offset, count);
+                WritePort(data, offset, count, cancellationToken);
                 if (delayMs > 0 && offset + count < data.Length)
-                    Thread.Sleep(delayMs);
+                {
+                    if (cancellationToken.WaitHandle.WaitOne(delayMs))
+                        cancellationToken.ThrowIfCancellationRequested();
+                }
+            }
+        }
+
+        private void WritePort(byte[] data, int offset, int count, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var port = serial;
+            if (port == null || !port.IsOpen)
+                throw new IOException("Serial port is not open.");
+
+            var portName = port.PortName;
+            var stream = port.BaseStream;
+            var timeout = port.WriteTimeout > 0 ? port.WriteTimeout : SerialWriteTimeoutMilliseconds;
+            IAsyncResult asyncResult = null;
+
+            try
+            {
+                asyncResult = stream.BeginWrite(data, offset, count, null, null);
+                if (asyncResult.AsyncWaitHandle.WaitOne(timeout))
+                {
+                    stream.EndWrite(asyncResult);
+                    return;
+                }
+
+                refreshSerialDevice(waitForDispose: false);
+                Tools.Global.NotifyUartPortClosed(portName);
+                throw new TimeoutException($"Serial write timed out after {timeout} ms.");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (TimeoutException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException("Serial write canceled.", ex, cancellationToken);
             }
         }
 

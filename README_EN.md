@@ -1,63 +1,104 @@
 # llcom plus
 
-![icon](/llcom plus/Assets/AppIcon.ico)
+[中文 README](README.md)
 
-[![Build status](https://ci.appveyor.com/api/projects/status/telji5j8r0v5001c?svg=true)](https://ci.appveyor.com/project/chenxuuu/llcom)
-[![MIT](https://img.shields.io/static/v1.svg?label=license&message=Apache+2&color=blue)](https://github.com/chenxuuu/llcom/blob/master/LICENSE)
-[![code-size](https://img.shields.io/github/languages/code-size/chenxuuu/llcom.svg)](https://github.com/chenxuuu/llcom/archive/master.zip)
+<p align="center">
+    <br>
+    <img src="./llcom plus/Assets/AppIcon.ico" width="150"/>
+    <br>
+</p>
 
-A serial port debugger tool with JavaScript scripting.
+<p align="center">
+    <img alt="license" src="https://img.shields.io/github/license/JIANXINXIAOQINGMING/llcom-plus?color=ff69b4&labelColor=333">
+    <img alt="release" src="https://img.shields.io/github/v/release/JIANXINXIAOQINGMING/llcom-plus?label=release&color=ff69b4&labelColor=333">
+    <img alt="top language" src="https://img.shields.io/github/languages/top/JIANXINXIAOQINGMING/llcom-plus?color=ff69b4&labelColor=333">
+    <img alt="inspired by Codex" src="https://img.shields.io/badge/inspired%20by-Codex-ff69b4?logo=openai&logoColor=white&labelColor=333">
+    <img alt="inspired by llcom" src="https://img.shields.io/badge/inspired%20by-LLCOM-ff69b4?labelColor=333">
+</p>
 
-> this tool is only Chinese and English now, you can help me to translate, thanks!
+## Introduction
+
+llcom plus is a serial debugging tool extended from the original [llcom](https://github.com/chenxuuu/llcom) project. It keeps the original project's flexible JavaScript scripting capability and adds common development/debugging tools such as multi-port split view, quick-send suggestions, file sending, TLS/OpenSSL, log replay, HTTP/MQTT/socket utilities, and more.
 
 ## Download
 
-Get it from Microsoft store:
+- Stable builds: [GitHub Releases](https://github.com/JIANXINXIAOQINGMING/llcom-plus/releases/latest)
 
-<a href='//www.microsoft.com/store/apps/9PMPB0233S0S?cid=storebadge&ocid=badge'><img src='https://developer.microsoft.com/store/badges/images/English_get-it-from-MS.png' alt='English badge' width='160'/></a>
+## Main Features
 
-Portable exe version: [GitHub](https://github.com/chenxuuu/llcom/releases/latest)
+### Serial Debugging
 
-Appveyor snapshot version: [Appveyor Artifacts](https://ci.appveyor.com/project/chenxuuu/llcom/build/artifacts)
+- Supports common serial-port operations such as open, close, send, receive, auto-reconnect, and terminal mode.
+- Supports text/HEX sending and display, with configurable text encoding.
+- TX/RX logs use different colors and can show raw data, actual sent data, serial logs, and script logs.
+- Serial configuration is saved per port, so baud rate, RTS, DTR, HEX, and other common options can follow different COM ports automatically.
+- Data can be processed by JavaScript before sending, and the same flow also works for the quick-send area.
 
-## Functions
+### Main Window Split View
 
-- Basic functions of serial port debugger tools.
-- The log is clear with two colors, display both HEX values and strings at same time.
-- Auto save serial and JavaScript script logs, with time stamp.
-- Auto reconnect serial port after disconnected.
-- Data you want to send can be processed with your own JavaScript scripts.
-- Quick send bar on the right.
-- JavaScript scripts can be run independently with timers and common message channels.
-- TCP, UDP, SSL socket client. Also support IPV6.
-- mqtt client test
-- Encoding converter
-- Garbled code fix
-- monitor serial data which send or received by other software
+- The split-view count can be configured in More Settings, supporting 1 to 4 serial panes.
+- Split mode reuses the existing serial refresh, serial selection, open/close, baud-rate, and send-box controls.
+- Clicking a pane automatically switches the current target; the bottom send box, RTS, DTR, HEX, and related options follow the target pane.
+- Split logs are saved per port/pane, while TX/RX colors remain consistent with normal serial logs.
+- When changing the split count, unchanged panes try to keep their serial connections open to avoid unnecessary close/reopen operations.
 
-![screenEN](/image/screenEN.png)
-![screen3](/image/screen3EN.png)
-![screen2](/image/screen2.jpg)
+### Quick Send
 
-## features' exemples
+- Quick send supports multiple pages, page renaming, current-page import, all-page import, current-page export, and all-page export.
+- The send box can show quick suggestions from quick-send content and display each row's button remark.
+- HEX quick-send rows do not participate in suggestions.
+- Each quick-send row can be individually marked as excluded, so that command will not appear in send-box suggestions.
+- Quick-send content can bind receive-processing scripts and script parameters for one-click interaction flows.
 
-### Use JavaScript script process data you want to send
+### File Sending and Loop Sending
 
-1. end with "\r\n"
+- The data calculation/file sending tool supports manual input or a selected file as the data source.
+- File sending supports progress display, pause, resume, and resend.
+- Loop sending can import commands from quick send and send them repeatedly by configured count and interval.
+
+### Scripting
+
+- Built-in Jint JavaScript runtime for independent test scripts.
+- Scripts support serial send/receive callbacks, timers, and common message channels.
+- Send-processing scripts, receive-processing scripts, and independent scripts can cover most automated serial debugging scenarios.
+- API documentation is available in [JavaScriptApi.md](JavaScriptApi.md).
+
+### Network and Protocol Tools
+
+- The socket client supports TCP, UDP, TLS, DTLS, DNS, Ping, NTP, and other debugging scenarios.
+- DNS lookup can query all addresses, IPv4(A), or IPv6(AAAA).
+- TLS/DTLS supports OpenSSL options, certificates, target host, revocation checking, and cipher-suite configuration.
+- TLS logs show handshake summaries such as ClientHello and ServerHello by default, avoiding raw TLS byte flooding.
+- MQTT tools support common MQTT client testing.
+- The HTTP tool provides an independent request window with Header, Body, and TLS/OpenSSL related settings.
+
+### Utility Tools
+
+- Log replay: import llcom plus logs and run automated replay and response matching by send/receive order.
+- Serial monitor: monitor serial communication data from other software.
+- Encoding conversion and garbled-text recovery for common character-set conversion and text recovery.
+- Plot tool: scripts can push data to the plot page for display.
+- WinUSB tool: basic USB/WinUSB debugging.
+
+## JavaScript Examples
+
+### Process Data Before Sending
+
+1. Append CRLF:
 
 ```javascript
 return concatBytes(uartData, "\r\n");
 ```
 
-2. send HEX values
+2. Send input as HEX:
 
 ```javascript
 return hexToBytes(bytesToString(uartData));
 ```
 
-this script can change `30313233` to `0123`.
+This script can convert input such as `30313233` into the actual bytes for `0123`.
 
-3. another script example
+3. Convert comma-separated text to JSON:
 
 ```javascript
 var items = bytesToString(uartData).split(",");
@@ -68,13 +109,9 @@ return stringToBytes(JSON.stringify({
 }));
 ```
 
-this script can change `a,b,c` to `{"key1":"a","key2":"b","key3":"c"}`.
+This script can convert `a,b,c` into `{"key1":"a","key2":"b","key3":"c"}`.
 
-**these scripts also work with Quick send bar**
-
-### independent script auto process uart sand and receive
-
-you can run your own JavaScript script on the right, such as:
+### Independent Script for Serial Send/Receive
 
 ```javascript
 apiSetCb("uart", function(data) {
@@ -92,16 +129,10 @@ function onTrigger(id, type, data) {
 }
 ```
 
-you can make your debug automatic
+This project is licensed under Apache 2.0. If you reuse, distribute, or modify it, please keep links to this project and the original upstream project.
 
-## api document (in Chinese)
+## Acknowledgements and Referenced Projects
 
-you can read [JavaScriptApi.md](JavaScriptApi.md)
-
-## Known bugs and functions to be added
-
-- [x] ~~bug: SerialPort The Requested Resource is in Use([.net's bug](https://github.com/dotnet/corefx/issues/39464))~~(fixed #2f26e68)
-
-## Special Thanks
-
-[![icon-resharper](/image/icon-resharper.svg)](https://www.jetbrains.com/?from=llcom plus)
+- [chenxuuu/llcom](https://github.com/chenxuuu/llcom): this project continues development from the original llcom open-source project and keeps/extends its serial debugging, scripting API, and tool-page capabilities.
+- [OpenSSL](https://www.openssl.org/): used for TLS/DTLS connections, HTTPS helper requests, and handshake message parsing.
+- [Jint](https://github.com/sebastienros/jint): provides JavaScript scripting capability.

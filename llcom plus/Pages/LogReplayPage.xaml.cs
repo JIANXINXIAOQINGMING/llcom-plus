@@ -32,18 +32,18 @@ namespace llcom_plus.Pages
 
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
-            Global.uart.UartDataRecived += Uart_UartDataRecived;
+            Global.ActiveSerialTargetReceivedEvent += ActiveSerialTargetReceived;
         }
 
         private void Page_Unloaded(object sender, RoutedEventArgs e)
         {
-            Global.uart.UartDataRecived -= Uart_UartDataRecived;
+            Global.ActiveSerialTargetReceivedEvent -= ActiveSerialTargetReceived;
             StopReplay();
         }
 
-        private void Uart_UartDataRecived(object sender, EventArgs e)
+        private void ActiveSerialTargetReceived(object sender, byte[] data)
         {
-            if (sender is byte[] data && data.Length > 0)
+            if (data != null && data.Length > 0)
             {
                 lock (receiveLock)
                     receiveBuffer.AddRange(data);
@@ -84,7 +84,7 @@ namespace llcom_plus.Pages
             if (Steps.Count == 0)
                 return;
 
-            if (!Global.uart.IsOpen())
+            if (!Global.IsActiveSerialTargetOpen())
             {
                 ReplayStatusTextBlock.Text = TryFindResource("LogReplayPortNotOpen") as string ?? "Please open the serial port first";
                 return;

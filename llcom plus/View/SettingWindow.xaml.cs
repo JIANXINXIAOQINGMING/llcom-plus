@@ -38,6 +38,8 @@ namespace llcom_plus
         //上次打开文件名
         private static string lastScriptFile = "";
         private static string lastScriptFileRev = "";
+        private bool loaded = false;
+        private bool refreshingUartControls = false;
 
         /// <summary>
         /// 加载脚本文件
@@ -153,6 +155,13 @@ namespace llcom_plus
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            if (loaded)
+            {
+                RefreshUartSettingControls();
+                return;
+            }
+            loaded = true;
+
             this.DataContext = Tools.Global.setting;
 
             //重写关闭响应代码
@@ -160,11 +169,6 @@ namespace llcom_plus
 
             //置顶显示以免被挡住
             this.Topmost = true;
-
-            //初始化下拉框参数
-            dataBitsComboBox.SelectedIndex = Tools.Global.setting.dataBits - 5;
-            stopBitComboBox.SelectedIndex = Tools.Global.setting.stopBit - 1;
-            dataCheckComboBox.SelectedIndex = Tools.Global.setting.parity;
 
             showHexComboBox.DataContext = Tools.Global.setting;
             //scriptTestHexCheck.DataContext = Tools.Global.setting;
@@ -193,6 +197,37 @@ namespace llcom_plus
                 if (Tools.Global.setting.encoding == en.CodePage)//现在用的编码
                     encodingComboBox.SelectedIndex = index;
             }
+            RefreshUartSettingControls();
+            Tools.Global.UartProfileChangedEvent += Global_UartProfileChangedEvent;
+        }
+
+        private void Global_UartProfileChangedEvent(object sender, EventArgs e)
+        {
+            Dispatcher.Invoke(RefreshUartSettingControls);
+        }
+
+        private void RefreshUartSettingControls()
+        {
+            refreshingUartControls = true;
+            try
+            {
+                dataBitsComboBox.SelectedIndex = Math.Max(0, Math.Min(3, Tools.Global.setting.dataBits - 5));
+                stopBitComboBox.SelectedIndex = Math.Max(0, Math.Min(2, Tools.Global.setting.stopBit - 1));
+                dataCheckComboBox.SelectedIndex = Math.Max(0, Math.Min(4, Tools.Global.setting.parity));
+
+                for (int i = 0; i < encodingComboBox.Items.Count; i++)
+                {
+                    if ((int)((ComboBoxItem)encodingComboBox.Items[i]).Tag == Tools.Global.setting.encoding)
+                    {
+                        encodingComboBox.SelectedIndex = i;
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                refreshingUartControls = false;
+            }
         }
 
         private void SettingWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -205,6 +240,7 @@ namespace llcom_plus
             if (Tools.Global.isMainWindowsClosed)
             {
                 //说明软件关了
+                Tools.Global.UartProfileChangedEvent -= Global_UartProfileChangedEvent;
                 e.Cancel = false;
             }
             else
@@ -227,6 +263,8 @@ namespace llcom_plus
 
         private void DataBitsComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (refreshingUartControls)
+                return;
             if(dataBitsComboBox.SelectedItem != null)
             {
                 Tools.Global.setting.dataBits = dataBitsComboBox.SelectedIndex + 5;
@@ -235,6 +273,8 @@ namespace llcom_plus
 
         private void StopBitComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (refreshingUartControls)
+                return;
             if (stopBitComboBox.SelectedItem != null)
             {
                 Tools.Global.setting.stopBit = stopBitComboBox.SelectedIndex + 1;
@@ -243,6 +283,8 @@ namespace llcom_plus
 
         private void DataCheckComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (refreshingUartControls)
+                return;
             if (dataCheckComboBox.SelectedItem != null)
             {
                 Tools.Global.setting.parity = dataCheckComboBox.SelectedIndex;
@@ -361,7 +403,11 @@ namespace llcom_plus
 
         private void encodingComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (refreshingUartControls)
+                return;
             ComboBox c = sender as ComboBox;
+            if (c?.SelectedItem == null)
+                return;
             if ((int)((ComboBoxItem)c.SelectedItem).Tag == Tools.Global.setting.encoding)
                 return;
             Tools.Global.setting.encoding = (int)((ComboBoxItem)c.SelectedItem).Tag;

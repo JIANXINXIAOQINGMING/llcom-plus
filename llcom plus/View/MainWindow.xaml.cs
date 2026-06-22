@@ -93,6 +93,9 @@ namespace llcom_plus
         private bool toolsInitialized = false;
         private bool rightToolsCollapsed = false;
         private double expandedRightToolsWidth = ExpandedRightToolsDefaultWidth;
+        private Pages.MultiPortPage mainSplitPortPage = null;
+        private int appliedSerialSplitScreenCount = -1;
+        private bool syncingSerialSplitControls = false;
         public static string recvScriptBackup = "";
 
         private sealed class SendSuggestionItem
@@ -144,6 +147,11 @@ namespace llcom_plus
                         Tools.Global.uart.UartDataSent += Uart_UartDataSent;
                         Tools.Global.uart.UartDataRawSent += Uart_UartDataRawSent;
                         Tools.Global.SendRawDataRequest += Global_SendRawDataRequest;
+                        Tools.Global.SendDataRequest += Global_SendDataRequest;
+                        Tools.Global.UartPortClosedEvent += Global_UartPortClosedEvent;
+                        Tools.Global.SerialSplitScreenChangedEvent += Global_SerialSplitScreenChangedEvent;
+                        Tools.Global.IsActiveSerialTargetOpenRequest = IsActiveSerialTargetOpenForTools;
+                        Tools.Global.SendRawDataToActiveTargetRequest = SendRawDataToActiveTargetForTools;
                     });
 
                     //初始化所有数据
@@ -164,21 +172,12 @@ namespace llcom_plus
                     });
 
                     //收发数据显示页面
-                    StartupProfiler.Measure("Navigate DataShowPage", () =>
-                        dataShowFrame.Navigate(new Uri("Pages/DataShowPage.xaml", UriKind.Relative)));
+                    StartupProfiler.Measure("Apply serial split layout", ApplySerialSplitLayout);
 
                     StartupProfiler.Measure("Loaded baud rate init", () =>
                     {
                         //加载初始波特率
-                        var br = Tools.Global.setting.baudRate.ToString();
-                        if(baudRateComboBox.Items.Contains(br))
-                            baudRateComboBox.Text = Tools.Global.setting.baudRate.ToString();
-                        else
-                        {
-                            lastBaudRateSelectedIndex = baudRateComboBox.Items.Count - 1;//防止弹窗提示
-                            baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = br;
-                            baudRateComboBox.Text = br;
-                        }
+                        SetBaudRateComboBoxFromSetting();
                     });
 
                     StartupProfiler.Measure("Loaded device hook", () =>
@@ -305,6 +304,7 @@ namespace llcom_plus
             AddFrameTool("Mqtt", "MQTT", "Pages/MqttTestPage.xaml");
             AddFrameTool("SerialMonitor", GetResourceText("SerialMonitorHeader", "串口监听"), "Pages/SerialMonitorPage.xaml");
             AddFrameTool("LogReplay", GetResourceText("LogReplayToolTab", "日志回放"), "Pages/LogReplayPage.xaml");
+            AddFrameTool("CircularSend", GetResourceText("CircularSendToolTab", "循环发送"), "Pages/CircularSendPage.xaml");
             AddFrameTool("EncodingFix", GetResourceText("EncodingFixHeader", "乱码修复"), "Pages/EncodingFixPage.xaml");
             AddFrameTool("Plot", GetResourceText("PlotHeader", "曲线"), "Pages/PlotPage.xaml");
             AddFrameTool("WinUsb", "WinUSB", "Pages/WinUSBPage.xaml");
@@ -337,6 +337,259 @@ namespace llcom_plus
                     frame.Navigate(new Uri(pagePath, UriKind.Relative)));
                 return frame;
             }));
+        }
+
+        private void Global_SerialSplitScreenChangedEvent(object sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(ApplySerialSplitLayout));
+        }
+
+        private int GetSerialSplitScreenCount()
+        {
+            return Math.Max(1, Math.Min(4, Tools.Global.setting?.serialSplitScreenCount ?? 1));
+        }
+
+        private bool IsSerialSplitModeRequested()
+        {
+            return GetSerialSplitScreenCount() > 1;
+        }
+
+        private bool IsSerialSplitModeActive()
+        {
+            return mainSplitPortPage != null && appliedSerialSplitScreenCount > 1;
+        }
+
+        private void ApplySerialSplitLayout()
+        {
+            if (dataShowFrame == null || serialSplitSendTargetPanel == null)
+                return;
+
+            var count = GetSerialSplitScreenCount();
+            RefreshSerialSplitTargetSelector(count);
+
+            if (count <= 1)
+            {
+                if (appliedSerialSplitScreenCount == 1 && dataShowFrame.Content is Pages.DataShowPage)
+                {
+                    serialSplitSendTargetPanel.Visibility = Visibility.Visible;
+                    serialSplitSendTargetComboBox.IsEnabled = false;
+                    SetMainSerialControlsEnabled(true);
+                    return;
+                }
+
+                serialSplitSendTargetPanel.Visibility = Visibility.Visible;
+                serialSplitSendTargetComboBox.IsEnabled = false;
+                mainSplitPortPage = null;
+                appliedSerialSplitScreenCount = 1;
+                if (!(dataShowFrame.Content is Pages.DataShowPage))
+                    dataShowFrame.Navigate(new Uri("Pages/DataShowPage.xaml", UriKind.Relative));
+                SetMainSerialControlsEnabled(true);
+                statusTextBlock.Text = Tools.Global.uart.IsOpen()
+                    ? (TryFindResource("OpenPort_open") as string ?? "?!")
+                    : (TryFindResource("OpenPort_close") as string ?? "?!");
+                return;
+            }
+
+            serialSplitSendTargetPanel.Visibility = Visibility.Visible;
+            serialSplitSendTargetComboBox.IsEnabled = count > 1;
+            if (mainSplitPortPage == null || appliedSerialSplitScreenCount != count)
+            {
+                mainSplitPortPage = new Pages.MultiPortPage(count, false);
+                mainSplitPortPage.ActiveSlotChanged += MainSplitPortPage_ActiveSlotChanged;
+                dataShowFrame.Navigate(mainSplitPortPage);
+                appliedSerialSplitScreenCount = count;
+            }
+
+            mainSplitPortPage.SetActiveSlot(GetSelectedSerialSplitSlot());
+            UpdateSelectedSplitSlotControls();
+        }
+
+        private void MainSplitPortPage_ActiveSlotChanged(int slotNumber)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => MainSplitPortPage_ActiveSlotChanged(slotNumber)));
+                return;
+            }
+
+            if (serialSplitSendTargetComboBox == null)
+                return;
+
+            var index = Math.Max(0, Math.Min(slotNumber - 1, serialSplitSendTargetComboBox.Items.Count - 1));
+            if (serialSplitSendTargetComboBox.SelectedIndex != index)
+                serialSplitSendTargetComboBox.SelectedIndex = index;
+            else
+                UpdateSelectedSplitSlotControls();
+        }
+
+        private void SetMainSerialControlsEnabled(bool enabled)
+        {
+            if (openClosePortButton != null)
+                openClosePortButton.IsEnabled = enabled && serialPortsListComboBox.Items.Count > 0;
+            if (serialPortsListComboBox != null)
+                serialPortsListComboBox.IsEnabled = enabled && !Tools.Global.uart.IsOpen();
+            if (baudRateComboBox != null)
+                baudRateComboBox.IsEnabled = enabled;
+            if (FlowControlButton != null)
+                FlowControlButton.IsEnabled = enabled;
+        }
+
+        private void RefreshSerialSplitTargetSelector(int count)
+        {
+            if (serialSplitSendTargetComboBox == null)
+                return;
+
+            var oldIndex = Math.Max(0, serialSplitSendTargetComboBox.SelectedIndex);
+            serialSplitSendTargetComboBox.Items.Clear();
+            for (int i = 1; i <= Math.Max(1, count); i++)
+            {
+                serialSplitSendTargetComboBox.Items.Add(string.Format(
+                    TryFindResource("SplitSendTargetItem") as string ?? "窗口 {0}",
+                    i));
+            }
+
+            serialSplitSendTargetComboBox.SelectedIndex = Math.Min(oldIndex, serialSplitSendTargetComboBox.Items.Count - 1);
+            serialSplitSendTargetComboBox.IsEnabled = count > 1;
+        }
+
+        private int GetSelectedSerialSplitSlot()
+        {
+            if (serialSplitSendTargetComboBox == null || serialSplitSendTargetComboBox.SelectedIndex < 0)
+                return 1;
+            return serialSplitSendTargetComboBox.SelectedIndex + 1;
+        }
+
+        private void SerialSplitSendTargetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (mainSplitPortPage == null)
+                return;
+
+            mainSplitPortPage.SetActiveSlot(GetSelectedSerialSplitSlot());
+            UpdateSelectedSplitSlotControls();
+        }
+
+        private void UpdateSelectedSplitSlotControls()
+        {
+            if (!IsSerialSplitModeActive() || mainSplitPortPage == null)
+                return;
+
+            syncingSerialSplitControls = true;
+            try
+            {
+                var slot = GetSelectedSerialSplitSlot();
+                var isOpen = mainSplitPortPage.IsSlotOpen(slot);
+                var slotPort = mainSplitPortPage.GetSlotPortName(slot);
+                SelectSerialPortComboBoxItem(slotPort);
+                SetBaudRateComboBoxValue(mainSplitPortPage.GetSlotBaudRate(slot));
+
+                openClosePortButton.IsEnabled = serialPortsListComboBox.Items.Count > 0;
+                serialPortsListComboBox.IsEnabled = !isOpen;
+                baudRateComboBox.IsEnabled = true;
+                FlowControlButton.IsEnabled = false;
+                openClosePortTextBlock.Text = TryFindResource(isOpen ? "OpenPort_close" : "OpenPort_open") as string ?? "?!";
+                statusTextBlock.Text = string.Format(
+                    TryFindResource("SplitModeStatus") as string ?? "分屏模式 {0}",
+                    slot);
+            }
+            finally
+            {
+                syncingSerialSplitControls = false;
+            }
+        }
+
+        private void SelectSerialPortComboBoxItem(string portName)
+        {
+            if (serialPortsListComboBox == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(portName))
+            {
+                if (serialPortsListComboBox.Items.Count > 0)
+                    serialPortsListComboBox.SelectedIndex = Math.Min(GetSelectedSerialSplitSlot() - 1, serialPortsListComboBox.Items.Count - 1);
+                return;
+            }
+
+            foreach (var item in serialPortsListComboBox.Items)
+            {
+                var text = item as string;
+                if (!string.IsNullOrWhiteSpace(text) && text.Contains($"({portName})"))
+                {
+                    serialPortsListComboBox.SelectedItem = item;
+                    return;
+                }
+            }
+        }
+
+        private void SetBaudRateComboBoxValue(int baudRate)
+        {
+            var text = baudRate.ToString();
+            for (int i = 0; i < baudRateComboBox.Items.Count - 1; i++)
+            {
+                if ((baudRateComboBox.Items[i] as ComboBoxItem)?.Content?.ToString() == text)
+                {
+                    lastBaudRateSelectedIndex = i;
+                    baudRateComboBox.SelectedIndex = i;
+                    return;
+                }
+            }
+
+            lastBaudRateSelectedIndex = baudRateComboBox.Items.Count - 1;
+            baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = text;
+            baudRateComboBox.Text = text;
+        }
+
+        private bool IsActiveSerialTargetOpenForTools()
+        {
+            if (!Dispatcher.CheckAccess())
+                return Dispatcher.Invoke(new Func<bool>(IsActiveSerialTargetOpenForTools));
+
+            if (IsSerialSplitModeActive())
+                return mainSplitPortPage?.IsSlotOpen(GetSelectedSerialSplitSlot()) == true;
+
+            return Tools.Global.uart.IsOpen();
+        }
+
+        private bool SendRawDataToActiveTargetForTools(byte[] data, CancellationToken token)
+        {
+            if (data == null || data.Length == 0)
+                return false;
+
+            if (Dispatcher.CheckAccess())
+            {
+                if (IsSerialSplitModeActive())
+                {
+                    var slot = GetSelectedSerialSplitSlot();
+                    var displayAsHex = mainSplitPortPage?.IsSlotHexMode(slot) ?? Tools.Global.setting.hexSend;
+                    return mainSplitPortPage?.SendBytesBlocking(slot, data, displayAsHex, token) == true;
+                }
+
+                if (!Tools.Global.uart.IsOpen())
+                    return false;
+
+                Tools.Global.uart.SendDataCancelable(data, token, null, raiseEvents: false);
+                return true;
+            }
+
+            Pages.MultiPortPage page = null;
+            var targetSlot = 1;
+            var splitMode = false;
+            var splitDisplayAsHex = false;
+            Dispatcher.Invoke(new Action(() =>
+            {
+                splitMode = IsSerialSplitModeActive();
+                page = mainSplitPortPage;
+                targetSlot = GetSelectedSerialSplitSlot();
+                splitDisplayAsHex = page?.IsSlotHexMode(targetSlot) ?? Tools.Global.setting.hexSend;
+            }));
+
+            if (splitMode)
+                return page?.SendBytesBlocking(targetSlot, data, splitDisplayAsHex, token) == true;
+
+            if (!Tools.Global.uart.IsOpen())
+                return false;
+
+            Tools.Global.uart.SendDataCancelable(data, token, null, raiseEvents: false);
+            return true;
         }
 
         private void AddLaunchTool(string key, string title, string buttonText, RoutedEventHandler clickHandler)
@@ -505,6 +758,7 @@ namespace llcom_plus
                     {
                         item.text = "";
                         item.hex = false;
+                        item.disableSuggestion = false;
                     }
 
                     if (string.IsNullOrWhiteSpace(item.commit) || hasSampleButton)
@@ -575,7 +829,10 @@ namespace llcom_plus
 
         private void Uart_UartDataRecived(object sender, EventArgs e)
         {
-            Tools.Logger.ShowData(sender as byte[], false, null, GetReceiveScriptContext());
+            var data = sender as byte[];
+            Tools.Logger.ShowData(data, false, null, GetReceiveScriptContext());
+            if (!IsSerialSplitModeActive() || GetSelectedSerialSplitSlot() == 1)
+                Tools.Global.NotifyActiveSerialTargetReceived(data);
         }
 
         private void Global_SendRawDataRequest(byte[] data)
@@ -584,6 +841,42 @@ namespace llcom_plus
             {
                 SetReceiveScriptContext(recvScriptBackup, "", data);
                 sendUartData(data, true, false);
+            }));
+        }
+
+        private void Global_SendDataRequest(Tools.UartSendRequest request)
+        {
+            if (request?.Data == null)
+                return;
+
+            Dispatcher.Invoke(new Action(delegate
+            {
+                SetReceiveScriptContext(recvScriptBackup, "", request.Data);
+                sendUartData(
+                    request.Data,
+                    request.IsHex,
+                    request.ApplySendProcessing,
+                    request.SessionStringLogOverride);
+            }));
+        }
+
+        private void Global_UartPortClosedEvent(object sender, string portName)
+        {
+            Dispatcher.BeginInvoke(new Action(delegate
+            {
+                if (Tools.Global.isMainWindowsClosed)
+                    return;
+                if (IsSerialSplitModeRequested())
+                {
+                    ApplySerialSplitLayout();
+                    return;
+                }
+
+                Tools.Logger.StopSessionLog();
+                openClosePortTextBlock.Text = TryFindResource("OpenPort_open") as string ?? "?!";
+                serialPortsListComboBox.IsEnabled = true;
+                statusTextBlock.Text = TryFindResource("OpenPort_close") as string ?? "?!";
+                refreshPortList(string.IsNullOrWhiteSpace(portName) ? null : portName);
             }));
         }
 
@@ -623,6 +916,86 @@ namespace llcom_plus
                     SendRaw = currentReceiveScriptContext.SendRaw == null ? new byte[0] : (byte[])currentReceiveScriptContext.SendRaw.Clone()
                 };
             }
+        }
+
+        private bool applyingUartProfile = false;
+
+        private void SerialPortsListComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (syncingSerialSplitControls)
+                return;
+
+            if (IsSerialSplitModeActive())
+            {
+                mainSplitPortPage?.SetSlotPortName(GetSelectedSerialSplitSlot(), GetSelectedPortName());
+                UpdateSelectedSplitSlotControls();
+                return;
+            }
+
+            ApplySelectedUartProfile();
+        }
+
+        private void ApplySelectedUartProfile()
+        {
+            ApplyUartProfileForPort(GetSelectedPortName());
+        }
+
+        private void ApplyUartProfileForPort(string portName)
+        {
+            if (applyingUartProfile || Tools.Global.setting == null || string.IsNullOrWhiteSpace(portName))
+                return;
+
+            applyingUartProfile = true;
+            try
+            {
+                Tools.Global.setting.SetActiveUartProfile(portName);
+                if (!Tools.Global.uart.IsOpen())
+                    Tools.Global.uart.SetName(portName);
+                SetBaudRateComboBoxFromSetting();
+            }
+            finally
+            {
+                applyingUartProfile = false;
+            }
+        }
+
+        private string GetSelectedPortName()
+        {
+            return ExtractPortName(serialPortsListComboBox?.SelectedItem as string ?? serialPortsListComboBox?.Text);
+        }
+
+        private static string ExtractPortName(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return "";
+
+            var match = Regex.Match(text, @"\((COM\d+)\)", RegexOptions.IgnoreCase);
+            if (match.Success)
+                return match.Groups[1].Value.ToUpperInvariant();
+
+            match = Regex.Match(text, @"\bCOM\d+\b", RegexOptions.IgnoreCase);
+            return match.Success ? match.Value.ToUpperInvariant() : "";
+        }
+
+        private void SetBaudRateComboBoxFromSetting()
+        {
+            if (baudRateComboBox == null || Tools.Global.setting == null)
+                return;
+
+            var text = Tools.Global.setting.baudRate.ToString();
+            for (int i = 0; i < baudRateComboBox.Items.Count - 1; i++)
+            {
+                if ((baudRateComboBox.Items[i] as ComboBoxItem)?.Content?.ToString() == text)
+                {
+                    lastBaudRateSelectedIndex = i;
+                    baudRateComboBox.SelectedIndex = i;
+                    return;
+                }
+            }
+
+            lastBaudRateSelectedIndex = baudRateComboBox.Items.Count - 1;
+            baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = text;
+            baudRateComboBox.Text = text;
         }
 
         private bool refreshLock = false;
@@ -705,12 +1078,33 @@ namespace llcom_plus
 
 
                 StartupProfiler.Measure("refreshPortList UI update", () => this.Dispatcher.Invoke(new Action(delegate {
+                    var preferredPort = string.IsNullOrEmpty(lastPort) ? Tools.Global.uart.GetName() : lastPort;
+                    string selectedItem = null;
                     foreach (string i in strs)
+                    {
                         serialPortsListComboBox.Items.Add(i);
+                        if (!string.IsNullOrWhiteSpace(preferredPort) && i.Contains($"({preferredPort})"))
+                            selectedItem = i;
+                    }
+
+                    if (selectedItem == null && strs.Count > 0)
+                        selectedItem = strs[0];
+
+                    if (IsSerialSplitModeRequested())
+                    {
+                        mainSplitPortPage?.RefreshSlotPorts(strs.Select(ExtractPortName).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray());
+                        if (selectedItem != null)
+                            serialPortsListComboBox.SelectedItem = selectedItem;
+                        refreshLock = false;
+                        ApplySerialSplitLayout();
+                        return;
+                    }
+
                     if (strs.Count >= 1)
                     {
                         openClosePortButton.IsEnabled = true;
-                        serialPortsListComboBox.SelectedIndex = 0;
+                        serialPortsListComboBox.SelectedItem = selectedItem;
+                        ApplyUartProfileForPort(ExtractPortName(selectedItem));
                     }
                     else
                     {
@@ -718,40 +1112,33 @@ namespace llcom_plus
                     }
                     refreshLock = false;
 
-                    if (string.IsNullOrEmpty(lastPort))
-                        lastPort = Tools.Global.uart.GetName();
-                    //选定上次的com口
-                    foreach (string c in serialPortsListComboBox.Items)
+                    if (!string.IsNullOrWhiteSpace(preferredPort) &&
+                        selectedItem != null &&
+                        selectedItem.Contains($"({preferredPort})") &&
+                        !forcusClosePort &&
+                        Tools.Global.setting.autoReconnect &&
+                        !isOpeningPort)
                     {
-                        if (c.Contains($"({lastPort})"))
+                        Task.Run(() =>
                         {
-                            serialPortsListComboBox.Text = c;
-                            //自动重连，不管结果
-                            if (!forcusClosePort && Tools.Global.setting.autoReconnect && !isOpeningPort)
+                            isOpeningPort = true;
+                            try
                             {
-                                Task.Run(() =>
+                                Tools.Global.uart.Open();
+                                Tools.Logger.StartSessionLog(Tools.Global.uart.GetName());
+                                Dispatcher.Invoke(new Action(delegate
                                 {
-                                    isOpeningPort = true;
-                                    try
-                                    {
-                                        Tools.Global.uart.Open();
-                                        Tools.Logger.StartSessionLog(Tools.Global.uart.GetName());
-                                        Dispatcher.Invoke(new Action(delegate
-                                        {
-                                            openClosePortTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
-                                            serialPortsListComboBox.IsEnabled = false;
-                                            statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
-                                        }));
-                                    }
-                                    catch
-                                    {
-                                        //MessageBox.Show("串口打开失败！");
-                                    }
-                                    isOpeningPort = false;
-                                });
+                                    openClosePortTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
+                                    serialPortsListComboBox.IsEnabled = false;
+                                    statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
+                                }));
                             }
-                            break;
-                        }
+                            catch
+                            {
+                                //MessageBox.Show("串口打开失败！");
+                            }
+                            isOpeningPort = false;
+                        });
                     }
                 })));
                 StartupProfiler.Mark($"refreshPortList worker exit, ports={strs.Count}");
@@ -912,8 +1299,11 @@ namespace llcom_plus
         private void openPort()
         {
             Tools.Logger.AddUartLogDebug($"[openPort]{isOpeningPort},{serialPortsListComboBox.SelectedItem}");
+            if (IsSerialSplitModeRequested())
+                return;
             if (isOpeningPort)
                 return;
+            ApplySelectedUartProfile();
             if (serialPortsListComboBox.SelectedItem != null)
             {
                 string[] ports;//获取所有串口列表
@@ -988,6 +1378,14 @@ namespace llcom_plus
         }
         private void OpenClosePortButton_Click(object sender, RoutedEventArgs e)
         {
+            if (IsSerialSplitModeRequested())
+            {
+                if (mainSplitPortPage == null)
+                    ApplySerialSplitLayout();
+                mainSplitPortPage?.ToggleSlotOpen(GetSelectedSerialSplitSlot());
+                UpdateSelectedSplitSlotControls();
+                return;
+            }
             Tools.Logger.AddUartLogDebug($"[OpenClosePortButton]now:{Tools.Global.uart.IsOpen()}");
             if (!Tools.Global.uart.IsOpen())//打开串口逻辑
             {
@@ -1022,12 +1420,18 @@ namespace llcom_plus
 
         private void ClearLogButton_Click(object sender, RoutedEventArgs e)
         {
-            Tools.Logger.ClearData();
+            if (IsSerialSplitModeActive())
+                mainSplitPortPage?.ClearAllLogs();
+            else
+                Tools.Logger.ClearData();
         }
 
         private int lastBaudRateSelectedIndex = -1;
         private void BaudRateComboBox_Changed(object sender, EventArgs e)
         {
+            if (syncingSerialSplitControls)
+                return;
+
             //选的没变
             if(lastBaudRateSelectedIndex == baudRateComboBox.SelectedIndex)
                 return;
@@ -1044,6 +1448,13 @@ namespace llcom_plus
                     {
                         Tools.MessageBox.Show(TryFindResource("OtherRateFail") as string ?? "?!");
                     }
+                    if (IsSerialSplitModeActive())
+                    {
+                        mainSplitPortPage?.SetSlotBaudRate(GetSelectedSerialSplitSlot(), br);
+                        baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = br.ToString();
+                        baudRateComboBox.Text = br.ToString();
+                        return;
+                    }
                     Tools.Global.setting.baudRate = br;
                     Task.Run(() =>
                     {
@@ -1056,6 +1467,14 @@ namespace llcom_plus
                 }
                 else
                 {
+                    if (IsSerialSplitModeActive())
+                    {
+                        mainSplitPortPage?.SetSlotBaudRate(
+                            GetSelectedSerialSplitSlot(),
+                            int.Parse((baudRateComboBox.SelectedItem as ComboBoxItem).Content.ToString()));
+                        baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = TryFindResource("OtherRate") as string ?? "?!";
+                        return;
+                    }
                     Tools.Global.setting.baudRate =
                         int.Parse((baudRateComboBox.SelectedItem as ComboBoxItem).Content.ToString());
                     baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = TryFindResource("OtherRate") as string ?? "?!";
@@ -1072,6 +1491,19 @@ namespace llcom_plus
             if (data == null)
                 return;
 
+            if (IsSerialSplitModeActive())
+            {
+                var targetSlot = GetSelectedSerialSplitSlot();
+                var targetHexMode = mainSplitPortPage?.IsSlotHexMode(targetSlot) ?? Tools.Global.setting.hexSend;
+                var displayAsHex = is_hex ?? targetHexMode;
+                var splitData = PrepareUartSendData(data, is_hex, applySendProcessing, targetHexMode);
+                if (splitData == null || splitData.Length == 0)
+                    return;
+
+                _ = SendToSelectedSplitSlotAsync(splitData, displayAsHex);
+                return;
+            }
+
             if (!Tools.Global.uart.IsOpen())
             {
                 toSendData = (byte[])data.Clone();//带发送数据缓存起来，连上串口后发出去
@@ -1084,38 +1516,9 @@ namespace llcom_plus
 
             if (Tools.Global.uart.IsOpen())
             {
-                byte[] dataConvert = data;
-                if (applySendProcessing)
-                {
-                    try
-                    {
-                        WaitRuntimeFilesReady();
-                        dataConvert = ScriptEnv.JavaScriptLoader.Run(
-                            $"{Tools.Global.setting.sendScript}.js",
-                            new System.Collections.ArrayList
-                            {
-                                "uartData",
-                                is_hex == null ?
-                                (Tools.Global.setting.hexSend ? Tools.Global.Hex2Byte(Tools.Global.Byte2String(data)) : data) : data
-                            });
-                    }
-                    catch (Exception ex)
-                    {
-                        Tools.MessageBox.Show($"{TryFindResource("ErrorScript") as string ?? "?!"}\r\n" + ex.ToString());
-                        return;
-                    }
-
-                    if (dataConvert == null)
-                        return;
-
-                    if (Tools.Global.setting.extraEnter)
-                    {
-                        var temp = dataConvert.ToList();
-                        temp.Add(0x0d);
-                        temp.Add(0x0a);
-                        dataConvert = temp.ToArray();
-                    }
-                }
+                byte[] dataConvert = PrepareUartSendData(data, is_hex, applySendProcessing);
+                if (dataConvert == null)
+                    return;
 
                 if (dataConvert.Length == 0)
                     return;
@@ -1137,6 +1540,73 @@ namespace llcom_plus
                     Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n"+ ex.ToString());
                     return;
                 }
+            }
+        }
+
+        private byte[] PrepareUartSendData(byte[] data, bool? isHex, bool applySendProcessing, bool? defaultHexSend = null)
+        {
+            byte[] dataConvert = data;
+            if (!applySendProcessing)
+                return dataConvert;
+
+            try
+            {
+                WaitRuntimeFilesReady();
+                dataConvert = ScriptEnv.JavaScriptLoader.Run(
+                    $"{Tools.Global.setting.sendScript}.js",
+                    new System.Collections.ArrayList
+                    {
+                        "uartData",
+                        isHex == null ?
+                        ((defaultHexSend ?? Tools.Global.setting.hexSend) ? Tools.Global.Hex2Byte(Tools.Global.Byte2String(data)) : data) : data
+                    });
+            }
+            catch (Exception ex)
+            {
+                Tools.MessageBox.Show($"{TryFindResource("ErrorScript") as string ?? "?!"}\r\n" + ex.ToString());
+                return null;
+            }
+
+            if (dataConvert == null)
+                return null;
+
+            if (Tools.Global.setting.extraEnter)
+            {
+                var temp = dataConvert.ToList();
+                temp.Add(0x0d);
+                temp.Add(0x0a);
+                dataConvert = temp.ToArray();
+            }
+
+            return dataConvert;
+        }
+
+        private async Task SendToSelectedSplitSlotAsync(byte[] data, bool displayAsHex, bool autoOpen = true)
+        {
+            try
+            {
+                if (mainSplitPortPage == null)
+                    ApplySerialSplitLayout();
+
+                if (mainSplitPortPage == null)
+                    return;
+
+                var slot = GetSelectedSerialSplitSlot();
+                if (!mainSplitPortPage.IsSlotOpen(slot))
+                {
+                    if (!autoOpen || !mainSplitPortPage.EnsureSlotOpen(slot))
+                    {
+                        UpdateSelectedSplitSlotControls();
+                        return;
+                    }
+                    UpdateSelectedSplitSlotControls();
+                }
+
+                await mainSplitPortPage.SendBytesAsync(slot, data, displayAsHex);
+            }
+            catch (Exception ex)
+            {
+                Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n" + ex.ToString());
             }
         }
 
@@ -1234,14 +1704,22 @@ namespace llcom_plus
             int prefixLength;
             var prefix = GetCurrentSendLinePrefix(out lineStart, out prefixLength);
             var matchPrefix = prefix.TrimStart();
-            if (matchPrefix.Length == 0 || !matchPrefix.StartsWith("A", StringComparison.OrdinalIgnoreCase))
+            if (matchPrefix.Length == 0)
             {
                 sendSuggestPopup.IsOpen = false;
                 return;
             }
 
-            var items = GetQuickSendAtSuggestions()
-                .Where(i => i.SendText.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase))
+            var items = GetQuickSendSuggestions()
+                .Select(i => new
+                {
+                    Item = i,
+                    Rank = GetSendSuggestionRank(i.SendText, matchPrefix)
+                })
+                .Where(i => i.Rank >= 0)
+                .OrderBy(i => i.Rank)
+                .ThenBy(i => i.Item.SendText.Length)
+                .Select(i => i.Item)
                 .Take(12)
                 .ToList();
 
@@ -1280,7 +1758,7 @@ namespace llcom_plus
             }));
         }
 
-        private IEnumerable<SendSuggestionItem> GetQuickSendAtSuggestions()
+        private IEnumerable<SendSuggestionItem> GetQuickSendSuggestions()
         {
             var allItems = new List<ToSendData>();
             allItems.AddRange(toSendListItems);
@@ -1295,13 +1773,12 @@ namespace llcom_plus
 
             var defaultButtonText = TryFindResource("QuickSendButton") as string ?? "发送";
             return allItems
-                .Where(i => i != null && !i.hex && !string.IsNullOrWhiteSpace(i.text))
+                .Where(i => i != null && !i.hex && !i.disableSuggestion && !string.IsNullOrWhiteSpace(i.text))
                 .Select(i => new
                 {
                     SendText = i.text.Trim(),
                     ButtonText = GetQuickSendSuggestionButtonText(i, defaultButtonText)
                 })
-                .Where(i => i.SendText.StartsWith("AT", StringComparison.OrdinalIgnoreCase))
                 .GroupBy(i => i.SendText, StringComparer.OrdinalIgnoreCase)
                 .Select(g =>
                 {
@@ -1313,6 +1790,17 @@ namespace llcom_plus
                         ButtonText = buttonText ?? string.Empty
                     };
                 });
+        }
+
+        private static int GetSendSuggestionRank(string suggestion, string prefix)
+        {
+            if (string.IsNullOrWhiteSpace(suggestion) || string.IsNullOrWhiteSpace(prefix))
+                return -1;
+            if (suggestion.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return 0;
+            if (prefix.Length < 2)
+                return -1;
+            return suggestion.IndexOf(prefix, StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : -1;
         }
 
         private static string GetQuickSendSuggestionButtonText(ToSendData item, string defaultButtonText)
@@ -1415,7 +1903,8 @@ namespace llcom_plus
                     hex = false,
                     commit = TryFindResource("QuickSendButton") as string ?? "?!",
                     recvScriptPath = "",
-                    recvScriptPara = ""
+                    recvScriptPara = "",
+                    disableSuggestion = false
                 };
             }
             finally
@@ -1439,6 +1928,7 @@ namespace llcom_plus
                 item.commit = TryFindResource("QuickSendButton") as string ?? "?!";
                 item.recvScriptPath = "";
                 item.recvScriptPara = "";
+                item.disableSuggestion = false;
             }
             finally
             {
@@ -2197,6 +2687,12 @@ namespace llcom_plus
         {
             if (e.TextComposition.Text.Length < 1 || !Tools.Global.setting.terminal)
                 return;
+            if (IsSerialSplitModeActive())
+            {
+                _ = SendToSelectedSplitSlotAsync(Encoding.ASCII.GetBytes(e.TextComposition.Text), false, autoOpen: false);
+                e.Handled = true;
+                return;
+            }
             if (Tools.Global.uart.IsOpen())
                 try
                 {
@@ -2219,6 +2715,15 @@ namespace llcom_plus
 
             if (e.Key == Key.C || e.Key == Key.V)
                 return;
+
+            if (e.Key >= Key.A && e.Key <= Key.Z && IsSerialSplitModeActive())
+                try
+                {
+                    _ = SendToSelectedSplitSlotAsync(new byte[] { (byte)((int)e.Key - (int)Key.A + 1) }, false, autoOpen: false);
+                    e.Handled = true;
+                    return;
+                }
+                catch { }
 
             if (e.Key >= Key.A && e.Key <= Key.Z && Tools.Global.uart.IsOpen())
                 try

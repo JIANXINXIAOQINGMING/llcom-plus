@@ -18,6 +18,7 @@ namespace llcom_plus.Model
         private string _commit;
         private string _recvScriptPath = "";
         private string _recvScriptPara = "";
+        private bool _disableSuggestion;
         public int id
         {
             get
@@ -89,6 +90,20 @@ namespace llcom_plus.Model
         public string recvScriptPara {
             get { return _recvScriptPara; }
             set { _recvScriptPara = value; DataChanged?.Invoke(0, EventArgs.Empty); OnPropertyChanged(nameof(recvScriptPara)); } }
+
+        public bool disableSuggestion
+        {
+            get
+            {
+                return _disableSuggestion;
+            }
+            set
+            {
+                _disableSuggestion = value;
+                DataChanged?.Invoke(0, EventArgs.Empty);
+                OnPropertyChanged(nameof(disableSuggestion));
+            }
+        }
 
         protected void OnPropertyChanged(string propertyName)
         {

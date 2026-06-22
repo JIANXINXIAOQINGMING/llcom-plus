@@ -2,6 +2,7 @@
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props" Condition="Exists('..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <Import Project="..\Version.props" Condition="Exists('..\Version.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -31,7 +32,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>1</ApplicationRevision>
-    <ApplicationVersion>1.1.0.0</ApplicationVersion>
+    <ApplicationVersion>$(AppVersion)</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <PublishWizardCompleted>true</PublishWizardCompleted>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -238,6 +239,9 @@
     <Compile Include="Pages\ConvertPage.xaml.cs">
       <DependentUpon>ConvertPage.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Pages\CircularSendPage.xaml.cs">
+      <DependentUpon>CircularSendPage.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Pages\DataCalcPage.xaml.cs">
       <DependentUpon>DataCalcPage.xaml</DependentUpon>
     </Compile>
@@ -252,6 +256,9 @@
     </Compile>
     <Compile Include="Pages\MqttTestPage.xaml.cs">
       <DependentUpon>MqttTestPage.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Pages\MultiPortPage.xaml.cs">
+      <DependentUpon>MultiPortPage.xaml</DependentUpon>
     </Compile>
     <Compile Include="Pages\PlotPage.xaml.cs">
       <DependentUpon>PlotPage.xaml</DependentUpon>
@@ -271,6 +278,7 @@
     <Compile Include="Tools\CipherSuitePicker.cs" />
     <Compile Include="Tools\GitHubReleaseUpdater.cs" />
     <Compile Include="Tools\OpenSslCli.cs" />
+    <Compile Include="Tools\OpenSslMessageExplainer.cs" />
     <Compile Include="Tools\StartupProfiler.cs" />
     <Compile Include="Tools\Win32.cs" />
     <Compile Include="HttpTools\HeaderParser.cs" />
@@ -317,6 +325,10 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="Pages\CircularSendPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Pages\DataCalcPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -334,6 +346,10 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="Pages\MqttTestPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Pages\MultiPortPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -472,7 +488,30 @@
     <Resource Include="DefaultFiles\libusb-1.0-x64.dll" />
     <Resource Include="DefaultFiles\libusb-1.0-x86.dll" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(IntermediateOutputPath)AppVersion.g.cs" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="GenerateAppVersionInfo" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <AppVersionAssemblyAttribute Include="System.Reflection.AssemblyVersionAttribute">
+        <_Parameter1>$(AppVersion)</_Parameter1>
+      </AppVersionAssemblyAttribute>
+      <AppVersionAssemblyAttribute Include="System.Reflection.AssemblyFileVersionAttribute">
+        <_Parameter1>$(AppVersion)</_Parameter1>
+      </AppVersionAssemblyAttribute>
+      <AppVersionAssemblyAttribute Include="System.Reflection.AssemblyInformationalVersionAttribute">
+        <_Parameter1>$(AppVersion)</_Parameter1>
+      </AppVersionAssemblyAttribute>
+    </ItemGroup>
+    <WriteCodeFragment
+      AssemblyAttributes="@(AppVersionAssemblyAttribute)"
+      Language="C#"
+      OutputFile="$(IntermediateOutputPath)AppVersion.g.cs" />
+  </Target>
+  <Target Name="SyncRepositoryVersionFiles" BeforeTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AutoUpdate -AppxManifest" />
+  </Target>
   <Target Name="ResolveNativeRuntimeFiles">
     <ItemGroup>
       <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Native\x86\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x86' Or '$(Platform)' == 'x86'" />
@@ -492,11 +531,8 @@
     <Copy SourceFiles="@(OpenSslRuntimeFile)" DestinationFiles="@(OpenSslRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles" Condition="'$(Configuration)' == 'Release'">
-    <GetAssemblyIdentity AssemblyFiles="$(TargetPath)">
-      <Output TaskParameter="Assemblies" ItemName="BuiltAssemblyIdentity" />
-    </GetAssemblyIdentity>
     <PropertyGroup>
-      <ReleasePackageVersion>%(BuiltAssemblyIdentity.Version)</ReleasePackageVersion>
+      <ReleasePackageVersion>$(AppVersion)</ReleasePackageVersion>
       <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>
       <ReleasePackagePlatform Condition="'$(ReleasePackagePlatform)' == ''">$(Platform)</ReleasePackagePlatform>
       <ReleasePackageRoot>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)release_package\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform)</ReleasePackageRoot>

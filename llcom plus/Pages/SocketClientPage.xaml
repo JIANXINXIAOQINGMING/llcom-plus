@@ -24,6 +24,7 @@
             <RowDefinition Height="auto" />
             <RowDefinition Height="auto" />
             <RowDefinition Height="auto" />
+            <RowDefinition Height="auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="auto" />
         </Grid.RowDefinitions>
@@ -99,6 +100,24 @@
 
         <StackPanel
             Grid.Row="1"
+            Margin="0,4,0,0"
+            HorizontalAlignment="Left"
+            Orientation="Horizontal"
+            Visibility="{Binding IsDnsToolSelected, Converter={StaticResource boolVisibeConverter}}">
+            <TextBlock VerticalAlignment="Center" Text="{DynamicResource TcpDnsAddressType}" />
+            <ComboBox
+                Name="DnsAddressTypeComboBox"
+                Width="140"
+                Margin="5,0,0,0"
+                SelectedIndex="{Binding tcpClientDnsAddressType}">
+                <ComboBoxItem Content="{DynamicResource TcpDnsAddressAll}" />
+                <ComboBoxItem Content="{DynamicResource TcpDnsAddressIpv4}" />
+                <ComboBoxItem Content="{DynamicResource TcpDnsAddressIpv6}" />
+            </ComboBox>
+        </StackPanel>
+
+        <StackPanel
+            Grid.Row="2"
             Grid.ColumnSpan="3"
             Orientation="Horizontal">
             <TextBlock VerticalAlignment="Center" Text="{DynamicResource ToSendDataTextBlock}" />
@@ -111,7 +130,7 @@
         </StackPanel>
         <CheckBox
                 Name="NeedReconnect"
-                Grid.Row="2"
+                Grid.Row="3"
                 Grid.ColumnSpan="3"
                 Margin="2,4,2,2"
                 HorizontalAlignment="Left"
@@ -120,7 +139,7 @@
                 IsChecked="{Binding tcpReconnect}" />
         <StackPanel
             Name="ReconnectSettingsPanel"
-            Grid.Row="2"           
+            Grid.Row="3"
             HorizontalAlignment="Right"
             Orientation="Horizontal">
             <TextBlock 
@@ -135,7 +154,7 @@
                     PreviewTextInput="Reconnect_TextInputCheck" Margin="5,0,0,0"/>
         </StackPanel>
         <Expander
-            Grid.Row="3"
+            Grid.Row="4"
             Margin="0,4,0,0"
             Header="{DynamicResource TlsSslDtlsSettings}">
             <Grid Margin="6,4,0,4">
@@ -272,7 +291,7 @@
         </Expander>
         <TextBox
             Name="ToSendTextBox"
-            Grid.Row="4"
+            Grid.Row="5"
             Margin="0,3,0,0"
             VerticalContentAlignment="Top"
             AcceptsReturn="True"
@@ -281,7 +300,7 @@
             VerticalScrollBarVisibility="Auto" />
         <Button
             Name="SendButton"
-            Grid.Row="5"
+            Grid.Row="6"
             Margin="0,5,0,0"
             HorizontalAlignment="Right"
             Click="SendButton_Click"

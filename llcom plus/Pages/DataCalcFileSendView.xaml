@@ -11,6 +11,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -64,7 +65,8 @@
                 Width="130"
                 Height="32"
                 VerticalContentAlignment="Center"
-                SelectedIndex="0">
+                SelectedIndex="0"
+                SelectionChanged="SourceComboBox_SelectionChanged">
                 <ComboBoxItem Content="{DynamicResource DataCalcSourceManual}" />
                 <ComboBoxItem Content="{DynamicResource DataCalcSourceFile}" />
             </ComboBox>
@@ -74,6 +76,8 @@
                 Height="32"
                 VerticalAlignment="Center"
                 VerticalContentAlignment="Center"
+                Checked="InputSourceChanged"
+                Unchecked="InputSourceChanged"
                 Content="{DynamicResource DataCalcHexInput}" />
             <Button
                 Name="SendSelectedDataButton"
@@ -93,7 +97,29 @@
                 Content="{DynamicResource DataCalcCalculate}" />
         </Grid>
 
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="2" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ProgressBar
+                Name="SendProgressBar"
+                Height="10"
+                Maximum="100"
+                Minimum="0"
+                VerticalAlignment="Center"
+                Value="0" />
+            <TextBlock
+                Name="SendProgressTextBlock"
+                Grid.Column="1"
+                MinWidth="150"
+                Margin="10,0,0,0"
+                VerticalAlignment="Center"
+                FontFamily="Consolas"
+                Text="{DynamicResource DataCalcSendProgressIdle}" />
+        </Grid>
+
+        <Grid Grid.Row="3">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -107,6 +133,7 @@
                 Grid.Row="1"
                 AcceptsReturn="True"
                 FontFamily="Consolas"
+                TextChanged="ManualDataTextBox_TextChanged"
                 TextWrapping="Wrap"
                 VerticalScrollBarVisibility="Auto" />
         </Grid>
