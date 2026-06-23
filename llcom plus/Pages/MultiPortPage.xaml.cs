@@ -453,9 +453,12 @@ namespace llcom_plus.Pages
 
         private void UpdateStatus()
         {
+            if (Global.isMainWindowsClosed || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+                return;
+
             if (!Dispatcher.CheckAccess())
             {
-                Dispatcher.BeginInvoke(new Action(UpdateStatus));
+                RunOnUi(UpdateStatus);
                 return;
             }
 
@@ -468,10 +471,19 @@ namespace llcom_plus.Pages
 
         private void RunOnUi(Action action)
         {
-            if (Dispatcher.CheckAccess())
-                action();
-            else
-                Dispatcher.BeginInvoke(action);
+            if (Global.isMainWindowsClosed || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+                return;
+
+            try
+            {
+                if (Dispatcher.CheckAccess())
+                    action();
+                else
+                    Dispatcher.BeginInvoke(action);
+            }
+            catch
+            {
+            }
         }
 
         private string FindText(string key, string fallback)
@@ -559,8 +571,34 @@ namespace llcom_plus.Pages
             public int Index { get; }
             public Border Root { get; }
             public bool UsesMainUart => useMainUart;
-            public bool IsOpen => useMainUart ? Global.uart.IsOpen() : serial.IsOpen;
-            public string PortName => NormalizePortName(useMainUart ? Global.uart.GetName() : serial.PortName);
+            public bool IsOpen
+            {
+                get
+                {
+                    try
+                    {
+                        return useMainUart ? Global.uart.IsOpen() : serial.IsOpen;
+                    }
+                    catch (Exception ex) when (IsClosedSerialException(ex))
+                    {
+                        return false;
+                    }
+                }
+            }
+            public string PortName
+            {
+                get
+                {
+                    try
+                    {
+                        return NormalizePortName(useMainUart ? Global.uart.GetName() : serial.PortName);
+                    }
+                    catch (Exception ex) when (IsClosedSerialException(ex))
+                    {
+                        return NormalizePortName(portComboBox.Text);
+                    }
+                }
+            }
             public string SelectedPortName => IsOpen ? PortName : NormalizePortName(portComboBox.Text);
             public int BaudRate
             {
@@ -672,7 +710,7 @@ namespace llcom_plus.Pages
                                 Logger.StopSessionLog();
                             }
                         }
-                        else if (serial.IsOpen)
+                        else if (IsOpen)
                         {
                             serial.Close();
                         }
@@ -843,9 +881,9 @@ namespace llcom_plus.Pages
                         if (Global.setting != null)
                             Global.setting.baudRate = baudRate;
                         else
-                            Global.uart.serial.BaudRate = baudRate;
+                            Global.uart.SetBaudRate(baudRate);
                     }
-                    else if (serial.IsOpen)
+                    else if (IsOpen)
                     {
                         serial.BaudRate = baudRate;
                     }
@@ -947,7 +985,7 @@ namespace llcom_plus.Pages
                             if (Global.uart.IsOpen())
                                 Global.uart.Close();
                         }
-                        else if (serial.IsOpen)
+                        else if (IsOpen)
                         {
                             serial.Close();
                         }
@@ -1092,7 +1130,7 @@ namespace llcom_plus.Pages
                     return;
                 }
 
-                if (!serial.IsOpen)
+                if (!IsOpen)
                 {
                     owner.SaveSlotProfile(this);
                     return;
@@ -1103,6 +1141,10 @@ namespace llcom_plus.Pages
                     serial.DtrEnable = dtrCheckBox.IsChecked == true;
                     if (serial.Handshake != Handshake.RequestToSend)
                         serial.RtsEnable = rtsCheckBox.IsChecked == true;
+                    owner.SaveSlotProfile(this);
+                }
+                catch (Exception ex) when (IsClosedSerialException(ex))
+                {
                     owner.SaveSlotProfile(this);
                 }
                 catch (Exception ex)
@@ -1139,16 +1181,19 @@ namespace llcom_plus.Pages
 
                     var data = new byte[length];
                     serial.Read(data, 0, length);
-                    owner.Dispatcher.BeginInvoke(new Action(() =>
+                    owner.RunOnUi(() =>
                     {
                         WriteDataLog("RX", data, HexMode, false);
                         if (Index == owner.activeSlotNumber)
                             Global.NotifyActiveSerialTargetReceived(data);
-                    }));
+                    });
+                }
+                catch (Exception ex) when (IsClosedSerialException(ex))
+                {
                 }
                 catch (Exception ex)
                 {
-                    owner.Dispatcher.BeginInvoke(new Action(() => AppendLog("ERR", ex.Message)));
+                    owner.RunOnUi(() => AppendLog("ERR", ex.Message));
                 }
             }
 
@@ -1158,8 +1203,8 @@ namespace llcom_plus.Pages
                 if (data == null || data.Length == 0)
                     return;
 
-                owner.Dispatcher.BeginInvoke(new Action(() =>
-                    WriteDataLog("TX", data, HexMode, true, updateCounters: false, writeSessionLog: false)));
+                owner.RunOnUi(() =>
+                    WriteDataLog("TX", data, HexMode, true, updateCounters: false, writeSessionLog: false));
             }
 
             private void MainUart_UartDataRawSent(object sender, EventArgs e)
@@ -1168,8 +1213,8 @@ namespace llcom_plus.Pages
                 if (data == null || data.Length == 0)
                     return;
 
-                owner.Dispatcher.BeginInvoke(new Action(() =>
-                    WriteDataLog("TX", data, true, true, updateCounters: false, writeSessionLog: false)));
+                owner.RunOnUi(() =>
+                    WriteDataLog("TX", data, true, true, updateCounters: false, writeSessionLog: false));
             }
 
             private void MainUart_UartDataRecived(object sender, EventArgs e)
@@ -1178,8 +1223,8 @@ namespace llcom_plus.Pages
                 if (data == null || data.Length == 0)
                     return;
 
-                owner.Dispatcher.BeginInvoke(new Action(() =>
-                    WriteDataLog("RX", data, HexMode, false, updateCounters: false, writeSessionLog: false)));
+                owner.RunOnUi(() =>
+                    WriteDataLog("RX", data, HexMode, false, updateCounters: false, writeSessionLog: false));
             }
 
             private string FormatData(byte[] data)
@@ -1264,7 +1309,7 @@ namespace llcom_plus.Pages
 
             private void EnsureSessionLogOpen()
             {
-                if (Global.setting == null || !Global.setting.sessionLogEnabled || !serial.IsOpen)
+                if (Global.setting == null || !Global.setting.sessionLogEnabled || !IsOpen)
                     return;
 
                 lock (sessionLogLock)
@@ -1393,6 +1438,13 @@ namespace llcom_plus.Pages
             {
                 try { return Global.GetEncoding(); }
                 catch { return Encoding.UTF8; }
+            }
+
+            private static bool IsClosedSerialException(Exception ex)
+            {
+                return ex is ObjectDisposedException ||
+                    ex is IOException ||
+                    ex is InvalidOperationException;
             }
         }
     }

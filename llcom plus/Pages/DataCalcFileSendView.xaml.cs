@@ -93,11 +93,8 @@ namespace llcom_plus.Pages
                 return;
             }
 
-            if (!Global.IsActiveSerialTargetOpen())
-            {
-                Tools.MessageBox.Show(TryFindResource("DataCalcPortNotOpen") as string ?? "Please open the serial port first.");
+            if (!Global.EnsureActiveSerialTargetOpen())
                 return;
-            }
 
             var cts = new CancellationTokenSource();
             sendCts = cts;

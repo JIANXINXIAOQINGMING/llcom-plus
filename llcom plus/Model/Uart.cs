@@ -14,6 +14,7 @@ namespace llcom_plus.Model
     {
         private const int SerialWriteTimeoutMilliseconds = 5000;
         private const int SerialDisposeTimeoutMilliseconds = 1500;
+        private const int MaxRetiredSerialPorts = 8;
 
         //废弃的串口对象，存放处，尝试fix[System.ObjectDisposedException: 已关闭 Safe handle]
         //https://drdump.com/Problem.aspx?ProblemID=524533
@@ -25,6 +26,7 @@ namespace llcom_plus.Model
         public event EventHandler UartDataRawSent;
         private Stream lastPortBaseStream = null;
         private readonly object sendLock = new object();
+        private readonly object receiveLock = new object();
         private bool _rts = false;
         private bool _dtr = true;
 
@@ -38,7 +40,7 @@ namespace llcom_plus.Model
             {
                 _rts = value;
                 if (!IsHardwareFlowControl())
-                    Tools.Global.uart.serial.RtsEnable = value;
+                    TryApplyControlLine(port => port.RtsEnable = value);
             }
         }
         public bool Dtr
@@ -49,7 +51,8 @@ namespace llcom_plus.Model
             }
             set
             {
-                Tools.Global.uart.serial.DtrEnable = _dtr = value;
+                _dtr = value;
+                TryApplyControlLine(port => port.DtrEnable = value);
             }
         }
 
@@ -91,10 +94,19 @@ namespace llcom_plus.Model
             var oldSerial = serial;
             var oldBaseStream = lastPortBaseStream;
             lastPortBaseStream = null;
+            lock (receiveLock)
+            {
+                if (ReferenceEquals(pendingReceivePort, oldSerial))
+                    pendingReceivePort = null;
+            }
             DisposeSerialResources(oldSerial, oldBaseStream, waitForDispose);
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]new");
-            lock(useless)//存起来
+            lock(useless)//短暂保留旧对象，避免系统回调还在引用；同时限制数量避免长期增长。
+            {
                 useless.Add(oldSerial);
+                while (useless.Count > MaxRetiredSerialPorts)
+                    useless.RemoveAt(0);
+            }
             serial = new SerialPort();
             //声明接收到事件
             serial.DataReceived += Serial_DataReceived;
@@ -106,6 +118,16 @@ namespace llcom_plus.Model
         {
             Action dispose = () =>
             {
+                try
+                {
+                    if (port != null)
+                        port.DataReceived -= Serial_DataReceived;
+                }
+                catch (Exception e)
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.DataReceived unsubscribe error:{e.Message}");
+                }
+
                 try
                 {
                     Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose");
@@ -170,21 +192,73 @@ namespace llcom_plus.Model
             if (port == null)
                 return;
 
-            var handshake = GetHandshake();
-            if (handshake == Handshake.RequestToSend)
+            try
             {
-                try
+                var handshake = GetHandshake();
+                if (handshake == Handshake.RequestToSend)
                 {
-                    port.RtsEnable = false;
+                    try
+                    {
+                        port.RtsEnable = false;
+                    }
+                    catch
+                    {
+                    }
                 }
-                catch
-                {
-                }
+                port.Handshake = handshake;
+                if (handshake != Handshake.RequestToSend)
+                    port.RtsEnable = Rts;
+                port.DtrEnable = Dtr;
             }
-            port.Handshake = handshake;
-            if (handshake != Handshake.RequestToSend)
-                port.RtsEnable = Rts;
-            port.DtrEnable = Dtr;
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+            }
+        }
+
+        private void TryApplyControlLine(Action<SerialPort> apply)
+        {
+            try
+            {
+                var port = serial;
+                if (port != null)
+                    apply(port);
+            }
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+            }
+        }
+
+        private void SetSerialOption(Action<SerialPort> apply)
+        {
+            try
+            {
+                apply(serial);
+            }
+            catch (ObjectDisposedException)
+            {
+                refreshSerialDevice(waitForDispose: false);
+                apply(serial);
+            }
+        }
+
+        public void SetBaudRate(int baudRate)
+        {
+            SetSerialOption(port => port.BaudRate = baudRate);
+        }
+
+        public void SetParity(Parity parity)
+        {
+            SetSerialOption(port => port.Parity = parity);
+        }
+
+        public void SetDataBits(int dataBits)
+        {
+            SetSerialOption(port => port.DataBits = dataBits);
+        }
+
+        public void SetStopBits(StopBits stopBits)
+        {
+            SetSerialOption(port => port.StopBits = stopBits);
         }
 
         private bool IsHardwareFlowControl()
@@ -213,7 +287,14 @@ namespace llcom_plus.Model
         /// <returns></returns>
         public string GetName()
         {
-            return serial.PortName;
+            try
+            {
+                return serial?.PortName ?? "";
+            }
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+                return "";
+            }
         }
 
         /// <summary>
@@ -222,7 +303,15 @@ namespace llcom_plus.Model
         /// <returns></returns>
         public void SetName(string s)
         {
-            serial.PortName = s;
+            try
+            {
+                serial.PortName = s;
+            }
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+                refreshSerialDevice(waitForDispose: false);
+                serial.PortName = s;
+            }
         }
 
         /// <summary>
@@ -231,7 +320,14 @@ namespace llcom_plus.Model
         /// <returns></returns>
         public bool IsOpen()
         {
-            return serial.IsOpen;
+            try
+            {
+                return serial?.IsOpen == true;
+            }
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -239,7 +335,7 @@ namespace llcom_plus.Model
         /// </summary>
         public void Open()
         {
-            string temp = serial.PortName;
+            string temp = GetName();
             Tools.Logger.AddUartLogDebug($"[UartOpen]refreshSerialDevice");
             refreshSerialDevice();
             serial.PortName = temp;
@@ -338,27 +434,19 @@ namespace llcom_plus.Model
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var port = serial;
-            if (port == null || !port.IsOpen)
-                throw new IOException("Serial port is not open.");
-
-            var portName = port.PortName;
-            var stream = port.BaseStream;
-            var timeout = port.WriteTimeout > 0 ? port.WriteTimeout : SerialWriteTimeoutMilliseconds;
-            IAsyncResult asyncResult = null;
+            var portName = "";
 
             try
             {
-                asyncResult = stream.BeginWrite(data, offset, count, null, null);
-                if (asyncResult.AsyncWaitHandle.WaitOne(timeout))
-                {
-                    stream.EndWrite(asyncResult);
-                    return;
-                }
+                var port = serial;
+                portName = port?.PortName ?? "";
+                if (port == null || !port.IsOpen)
+                    throw new IOException("Serial port is not open.");
 
-                refreshSerialDevice(waitForDispose: false);
-                Tools.Global.NotifyUartPortClosed(portName);
-                throw new TimeoutException($"Serial write timed out after {timeout} ms.");
+                Tools.Logger.AddUartLogDebug(
+                    $"[UartWrite]port={portName},baud={port.BaudRate},parity={port.Parity},dataBits={port.DataBits},stopBits={port.StopBits},handshake={port.Handshake},dtr={SafeGetDtr(port)},rts={SafeGetRts(port)},bytes={count}");
+                port.Write(data, offset, count);
+                cancellationToken.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException)
             {
@@ -372,6 +460,37 @@ namespace llcom_plus.Model
             {
                 throw new OperationCanceledException("Serial write canceled.", ex, cancellationToken);
             }
+            catch (Exception ex) when (IsClosedSerialException(UnwrapSerialException(ex)))
+            {
+                var cause = UnwrapSerialException(ex);
+                refreshSerialDevice(waitForDispose: false);
+                Tools.Global.NotifyUartPortClosed(portName);
+                throw new IOException("Serial port was closed while writing.", cause);
+            }
+        }
+
+        private static Exception UnwrapSerialException(Exception ex)
+        {
+            return ex is AggregateException aggregate ? aggregate.GetBaseException() : ex;
+        }
+
+        private static bool SafeGetDtr(SerialPort port)
+        {
+            try { return port?.DtrEnable == true; }
+            catch { return false; }
+        }
+
+        private static bool SafeGetRts(SerialPort port)
+        {
+            try { return port?.RtsEnable == true; }
+            catch { return false; }
+        }
+
+        private static bool IsClosedSerialException(Exception ex)
+        {
+            return ex is ObjectDisposedException ||
+                ex is IOException ||
+                ex is InvalidOperationException;
         }
 
         private static bool ByteArrayEquals(byte[] first, byte[] second)
@@ -389,10 +508,13 @@ namespace llcom_plus.Model
         }
 
         //收到串口事件的信号量
-        public EventWaitHandle WaitUartReceive = new AutoResetEvent(true);
+        public EventWaitHandle WaitUartReceive = new AutoResetEvent(false);
+        private SerialPort pendingReceivePort = null;
         //接收到事件
         private void Serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
+            lock (receiveLock)
+                pendingReceivePort = sender as SerialPort;
             WaitUartReceive.Set();
         }
 
@@ -411,18 +533,25 @@ namespace llcom_plus.Model
                     System.Threading.Thread.Sleep(Tools.Global.setting.timeout);//等待时间
                 else
                     System.Threading.Thread.Sleep(10);//等待时间默认给个10ms吧，防止中文被分割
+                if (Tools.Global.isMainWindowsClosed)
+                    return;
                 List<byte> result = new List<byte>();
                 while (true)//循环读
                 {
-                    if (serial == null || !serial.IsOpen)//串口被关了，不读了
-                        break;
+                    SerialPort readPort;
+                    lock (receiveLock)
+                        readPort = pendingReceivePort ?? serial;
+
                     try
                     {
-                        int length = serial.BytesToRead;
+                        if (readPort == null || !readPort.IsOpen)//串口被关了，不读了
+                            break;
+
+                        int length = readPort.BytesToRead;
                         if (length == 0)//没数据，退出去
                             break;
                         byte[] rev = new byte[length];
-                        serial.Read(rev, 0, length);//读数据
+                        readPort.Read(rev, 0, length);//读数据
                         if (rev.Length == 0)
                             break;
                         result.AddRange(rev);//加到list末尾
@@ -440,6 +569,8 @@ namespace llcom_plus.Model
                         System.Threading.Thread.Sleep(10);//等待时间默认给个10ms吧，防止中文被分割
                     }
                 }
+                if (Tools.Global.isMainWindowsClosed)
+                    return;
                 Tools.Global.setting.ReceivedCount += result.Count;
                 if (result.Count > 0)
                     try

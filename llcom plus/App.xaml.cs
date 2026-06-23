@@ -15,6 +15,10 @@ namespace llcom_plus
     /// </summary>
     public partial class App : Application
     {
+        private static readonly object CrashReportLock = new object();
+        private static string lastCrashReportSignature = "";
+        private static DateTime lastCrashReportTime = DateTime.MinValue;
+
         static App()
         {
             Tools.StartupProfiler.Begin();
@@ -29,13 +33,13 @@ namespace llcom_plus
         protected override void OnStartup(StartupEventArgs e)
         {
             Tools.StartupProfiler.Mark("App.OnStartup enter");
-            base.OnStartup(e);
-            Tools.StartupProfiler.Mark("App.OnStartup base completed");
 #if DEBUG
 #else
             AppDomain.CurrentDomain.UnhandledException += CurrentDomainOnUnhandledException;
             Application.Current.DispatcherUnhandledException += DispatcherOnUnhandledException;
 #endif
+            base.OnStartup(e);
+            Tools.StartupProfiler.Mark("App.OnStartup base completed");
             Tools.StartupProfiler.Mark("App.OnStartup exit");
         }
 
@@ -51,6 +55,9 @@ namespace llcom_plus
 
         public static void SendReport(Exception exception, string developerMessage = "", bool silent = true)
         {
+            if (exception == null || IsDuplicateCrashReport(exception))
+                return;
+
             if(exception.GetType() == typeof(System.ComponentModel.Win32Exception))
             {
                 Tools.MessageBox.Show($"internal error from system!\r\n{exception.Message}\r\nexit!");
@@ -76,7 +83,30 @@ namespace llcom_plus
             };
             //reportCrash.Silent = silent;
             reportCrash.CaptureScreen = true;
-            reportCrash.Send(exception);
+            try
+            {
+                reportCrash.Send(exception);
+            }
+            catch (Exception reportException)
+            {
+                Tools.MessageBox.Show("BUG上报窗口打开失败：\r\n" + reportException.Message);
+            }
+        }
+
+        private static bool IsDuplicateCrashReport(Exception exception)
+        {
+            var signature = exception.GetType().FullName + "|" + exception.Message + "|" + exception.StackTrace;
+            lock (CrashReportLock)
+            {
+                var now = DateTime.UtcNow;
+                if (signature == lastCrashReportSignature &&
+                    (now - lastCrashReportTime).TotalSeconds < 3)
+                    return true;
+
+                lastCrashReportSignature = signature;
+                lastCrashReportTime = now;
+                return false;
+            }
         }
     }
 }

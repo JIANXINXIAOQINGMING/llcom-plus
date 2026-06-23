@@ -709,7 +709,7 @@ namespace llcom_plus.Model
             {
                 try
                 {
-                    Tools.Global.uart.serial.BaudRate = value;
+                    Tools.Global.uart.SetBaudRate(value);
                     _baudRate = value;
                     Save();
                 }
@@ -818,7 +818,7 @@ namespace llcom_plus.Model
                 try
                 {
                     _parity = value;
-                    Tools.Global.uart.serial.Parity = (Parity)value;
+                    Tools.Global.uart.SetParity((Parity)value);
                     Save();
                 }
                 catch (Exception e)
@@ -852,7 +852,7 @@ namespace llcom_plus.Model
                 try
                 {
                     _dataBits = value;
-                    Tools.Global.uart.serial.DataBits = value;
+                    Tools.Global.uart.SetDataBits(value);
                     Save();
                 }
                 catch (Exception e)
@@ -873,7 +873,7 @@ namespace llcom_plus.Model
                 try
                 {
                     _stopBit = value;
-                    Tools.Global.uart.serial.StopBits = (StopBits)value;
+                    Tools.Global.uart.SetStopBits((StopBits)value);
                     Save();
                 }
                 catch (Exception e)

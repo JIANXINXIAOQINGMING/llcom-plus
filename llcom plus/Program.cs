@@ -15,6 +15,7 @@ namespace llcom_plus
             StartupProfiler.Mark("Program.Main App created");
 
             StartupProfiler.Measure("Program.Main App.InitializeComponent", app.InitializeComponent);
+            StartupProfiler.Measure("Program.Main single instance lock", Global.EnsureSingleInstance);
             StartupProfiler.Mark("Program.Main App.Run begin");
             app.Run();
             StartupProfiler.Mark("Program.Main exit");

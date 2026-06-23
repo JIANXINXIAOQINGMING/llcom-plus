@@ -55,18 +55,37 @@ namespace llcom_plus.Tools
                     try
                     {
                         if (uart?.IsOpen() == true)
-                            uart.Close();
+                            uart.Close(waitForDispose: true);
                     }
                     catch (Exception e)
                     {
                         Logger.AddUartLogDebug($"[ProgramClosed]uart close error:{e.Message}");
                     }
                     uart?.WaitUartReceive.Set();
+                    NotifyProgramClosed();
                     Logger.StopSessionLog();
                     Logger.CloseUartLog();
                     Logger.CloseScriptLog();
-                    ProgramClosedEvent?.Invoke(null,EventArgs.Empty);
                     ReleaseSingleInstanceMutex();
+                }
+            }
+        }
+
+        private static void NotifyProgramClosed()
+        {
+            var handlers = ProgramClosedEvent;
+            if (handlers == null)
+                return;
+
+            foreach (EventHandler handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(null, EventArgs.Empty);
+                }
+                catch (Exception e)
+                {
+                    Logger.AddUartLogDebug($"[ProgramClosed]handler error:{e.Message}");
                 }
             }
         }
@@ -199,6 +218,7 @@ namespace llcom_plus.Tools
         }
 
         public static Func<bool> IsActiveSerialTargetOpenRequest;
+        public static Func<bool> EnsureActiveSerialTargetOpenRequest;
         public static Func<byte[], CancellationToken, bool> SendRawDataToActiveTargetRequest;
         public static event EventHandler<byte[]> ActiveSerialTargetReceivedEvent;
         public static void NotifyActiveSerialTargetReceived(byte[] data)
@@ -213,6 +233,14 @@ namespace llcom_plus.Tools
         {
             if (IsActiveSerialTargetOpenRequest != null)
                 return IsActiveSerialTargetOpenRequest();
+
+            return uart?.IsOpen() == true;
+        }
+
+        public static bool EnsureActiveSerialTargetOpen()
+        {
+            if (EnsureActiveSerialTargetOpenRequest != null)
+                return EnsureActiveSerialTargetOpenRequest();
 
             return uart?.IsOpen() == true;
         }
@@ -379,8 +407,11 @@ namespace llcom_plus.Tools
             StartupProfiler.Mark("Global.Initial exit");
         }
 
-        private static void EnsureSingleInstance()
+        internal static void EnsureSingleInstance()
         {
+            if (singleInstanceMutexOwned && singleInstanceMutex != null)
+                return;
+
             var normalizedPath = Regex.Replace(
                 (AppPath ?? "").TrimEnd('\\').ToUpperInvariant(),
                 @"[^A-Z0-9]+",

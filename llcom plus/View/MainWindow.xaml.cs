@@ -151,6 +151,7 @@ namespace llcom_plus
                         Tools.Global.UartPortClosedEvent += Global_UartPortClosedEvent;
                         Tools.Global.SerialSplitScreenChangedEvent += Global_SerialSplitScreenChangedEvent;
                         Tools.Global.IsActiveSerialTargetOpenRequest = IsActiveSerialTargetOpenForTools;
+                        Tools.Global.EnsureActiveSerialTargetOpenRequest = EnsureActiveSerialTargetOpenForTools;
                         Tools.Global.SendRawDataToActiveTargetRequest = SendRawDataToActiveTargetForTools;
                     });
 
@@ -547,6 +548,61 @@ namespace llcom_plus
                 return mainSplitPortPage?.IsSlotOpen(GetSelectedSerialSplitSlot()) == true;
 
             return Tools.Global.uart.IsOpen();
+        }
+
+        private bool EnsureActiveSerialTargetOpenForTools()
+        {
+            if (!Dispatcher.CheckAccess())
+                return Dispatcher.Invoke(new Func<bool>(EnsureActiveSerialTargetOpenForTools));
+
+            if (IsSerialSplitModeActive())
+            {
+                if (mainSplitPortPage == null)
+                    ApplySerialSplitLayout();
+                return mainSplitPortPage?.EnsureSlotOpen(GetSelectedSerialSplitSlot()) == true;
+            }
+
+            if (Tools.Global.uart.IsOpen())
+                return true;
+
+            return OpenSelectedPortBlocking();
+        }
+
+        private bool OpenSelectedPortBlocking()
+        {
+            if (isOpeningPort)
+                return Tools.Global.uart.IsOpen();
+
+            ApplySelectedUartProfile();
+            var port = GetSelectedPortName();
+            if (string.IsNullOrWhiteSpace(port))
+            {
+                ShowOpenPortFailed("未选择串口。");
+                return false;
+            }
+
+            isOpeningPort = true;
+            try
+            {
+                forcusClosePort = false;
+                Tools.Global.uart.SetName(port);
+                Tools.Global.uart.Open();
+                Tools.Logger.StartSessionLog(port);
+                openClosePortTextBlock.Text = TryFindResource("OpenPort_close") as string ?? "?!";
+                serialPortsListComboBox.IsEnabled = false;
+                statusTextBlock.Text = TryFindResource("OpenPort_open") as string ?? "?!";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Tools.Logger.AddUartLogDebug($"[OpenSelectedPortBlocking]open error:{ex}");
+                ShowOpenPortFailed(ex.Message);
+                return false;
+            }
+            finally
+            {
+                isOpeningPort = false;
+            }
         }
 
         private bool SendRawDataToActiveTargetForTools(byte[] data, CancellationToken token)
@@ -1243,11 +1299,15 @@ namespace llcom_plus
             if (lastScriptFile != "")
                 saveScriptFile(lastScriptFile);
             Tools.Global.isMainWindowsClosed = true;
-            foreach (Window win in App.Current.Windows)
+            foreach (Window win in App.Current.Windows.Cast<Window>().Where(win => win != this).ToList())
             {
-                if (win != this)
+                try
                 {
                     win.Close();
+                }
+                catch (Exception ex)
+                {
+                    Tools.Logger.AddUartLogDebug($"[MainWindowClosing]window close error:{ex.Message}");
                 }
             }
             e.Cancel = false;//正常关闭
@@ -1296,85 +1356,124 @@ namespace llcom_plus
         private bool? toSendDataIsHex = null;
         private bool toSendDataApplySendProcessing = true;
         private string toSendDataSessionStringLogOverride = null;
+
+        private void ShowOpenPortFailed(string detail = null)
+        {
+            var message = TryFindResource("ErrorOpenPort") as string ?? "串口打开失败！";
+            if (!string.IsNullOrWhiteSpace(detail))
+                message += "\r\n" + detail;
+
+            Action show = () =>
+            {
+                openClosePortTextBlock.Text = TryFindResource("OpenPort_open") as string ?? "?!";
+                serialPortsListComboBox.IsEnabled = true;
+                statusTextBlock.Text = TryFindResource("OpenPort_close") as string ?? "?!";
+                Tools.MessageBox.Show(message);
+            };
+
+            if (Dispatcher.CheckAccess())
+                show();
+            else
+                Dispatcher.BeginInvoke(show);
+        }
+
         private void openPort()
         {
             Tools.Logger.AddUartLogDebug($"[openPort]{isOpeningPort},{serialPortsListComboBox.SelectedItem}");
             if (IsSerialSplitModeRequested())
-                return;
-            if (isOpeningPort)
-                return;
-            ApplySelectedUartProfile();
-            if (serialPortsListComboBox.SelectedItem != null)
             {
-                string[] ports;//获取所有串口列表
+                Tools.Logger.AddUartLogDebug("[openPort]skip split mode");
+                return;
+            }
+            if (isOpeningPort)
+            {
+                Tools.Logger.AddUartLogDebug("[openPort]skip opening");
+                return;
+            }
+            ApplySelectedUartProfile();
+            if (serialPortsListComboBox.SelectedItem == null)
+            {
+                Tools.Logger.AddUartLogDebug("[openPort]no selected port");
+                ShowOpenPortFailed("未选择串口。");
+                return;
+            }
+
+            isOpeningPort = true;
+            string[] ports;//获取所有串口列表
+            try
+            {
+                Tools.Logger.AddUartLogDebug($"[openPort]GetPortNames");
+                ports = SerialPort.GetPortNames();
+                Tools.Logger.AddUartLogDebug($"[openPort]GetPortNames{ports.Length}");
+            }
+            catch(Exception e)
+            {
+                isOpeningPort = false;
+                Tools.Logger.AddUartLogDebug($"[openPort]GetPortNames Exception:{e}");
+                ShowOpenPortFailed(e.Message);
+                return;
+            }
+
+            string port = "";//最终串口名
+            foreach (string p in ports)//循环查找符合名称串口
+            {
+                //有些人遇到了微软库的bug，所以需要手动从0x00截断
+                var pp = p;
+                if (p.IndexOf("\0") > 0)
+                    pp = p.Substring(0, p.IndexOf("\0"));
+                if ((serialPortsListComboBox.SelectedItem as string).Contains($"({pp})"))//如果和选中项目匹配
+                {
+                    port = pp;
+                    break;
+                }
+            }
+            Tools.Logger.AddUartLogDebug($"[openPort]PortName:{port},isOpeningPort:{isOpeningPort}");
+            if (port == "")
+            {
+                isOpeningPort = false;
+                ShowOpenPortFailed("当前选择的串口不在系统串口列表中，请刷新串口后重试。");
+                return;
+            }
+
+            Task.Run(() =>
+            {
                 try
                 {
-                    Tools.Logger.AddUartLogDebug($"[openPort]GetPortNames");
-                    ports = SerialPort.GetPortNames();
-                    Tools.Logger.AddUartLogDebug($"[openPort]GetPortNames{ports.Length}");
+                    forcusClosePort = false;//不再强制关闭串口
+                    Tools.Logger.AddUartLogDebug($"[openPort]SetName");
+                    Tools.Global.uart.SetName(port);
+                    Tools.Logger.AddUartLogDebug($"[openPort]open");
+                    Tools.Global.uart.Open();
+                    Tools.Logger.StartSessionLog(port);
+                    Tools.Logger.AddUartLogDebug($"[openPort]change show");
+                    this.Dispatcher.Invoke(new Action(delegate
+                    {
+                        openClosePortTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
+                        serialPortsListComboBox.IsEnabled = false;
+                        statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
+                    }));
+                    Tools.Logger.AddUartLogDebug($"[openPort]check to send");
+                    if (toSendData != null)
+                    {
+                        sendUartData(toSendData, toSendDataIsHex, toSendDataApplySendProcessing, toSendDataSessionStringLogOverride);
+                        toSendData = null;
+                        toSendDataIsHex = null;
+                        toSendDataApplySendProcessing = true;
+                        toSendDataSessionStringLogOverride = null;
+                    }
+                    Tools.Logger.AddUartLogDebug($"[openPort]done");
                 }
                 catch(Exception e)
                 {
-                    ports = new string[0];
-                    Tools.Logger.AddUartLogDebug($"[openPort]GetPortNames Exception:{e.Message}");
+                    Tools.Logger.AddUartLogDebug($"[openPort]open error:{e}");
+                    ShowOpenPortFailed(e.Message);
                 }
-                string port = "";//最终串口名
-                foreach (string p in ports)//循环查找符合名称串口
+                finally
                 {
-                    //有些人遇到了微软库的bug，所以需要手动从0x00截断
-                    var pp = p;
-                    if (p.IndexOf("\0") > 0)
-                        pp = p.Substring(0, p.IndexOf("\0"));
-                    if ((serialPortsListComboBox.SelectedItem as string).Contains($"({pp})"))//如果和选中项目匹配
-                    {
-                        port = pp;
-                        break;
-                    }
+                    isOpeningPort = false;
+                    Tools.Logger.AddUartLogDebug($"[openPort]all done");
                 }
-                Tools.Logger.AddUartLogDebug($"[openPort]PortName:{port},isOpeningPort:{isOpeningPort}");
-                if (port != "")
-                {
-                    Task.Run(() =>
-                    {
-                        isOpeningPort = true;
-                        try
-                        {
-                            forcusClosePort = false;//不再强制关闭串口
-                            Tools.Logger.AddUartLogDebug($"[openPort]SetName");
-                            Tools.Global.uart.SetName(port);
-                            Tools.Logger.AddUartLogDebug($"[openPort]open");
-                            Tools.Global.uart.Open();
-                            Tools.Logger.StartSessionLog(port);
-                            Tools.Logger.AddUartLogDebug($"[openPort]change show");
-                            this.Dispatcher.Invoke(new Action(delegate
-                            {
-                                openClosePortTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
-                                serialPortsListComboBox.IsEnabled = false;
-                                statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
-                            }));
-                            Tools.Logger.AddUartLogDebug($"[openPort]check to send");
-                            if (toSendData != null)
-                            {
-                                sendUartData(toSendData, toSendDataIsHex, toSendDataApplySendProcessing, toSendDataSessionStringLogOverride);
-                                toSendData = null;
-                                toSendDataIsHex = null;
-                                toSendDataApplySendProcessing = true;
-                                toSendDataSessionStringLogOverride = null;
-                            }
-                            Tools.Logger.AddUartLogDebug($"[openPort]done");
-                        }
-                        catch(Exception e)
-                        {
-                            Tools.Logger.AddUartLogDebug($"[openPort]open error:{e.Message}");
-                            //串口打开失败！
-                            Tools.MessageBox.Show(TryFindResource("ErrorOpenPort") as string ?? "?!");
-                        }
-                        isOpeningPort = false;
-                        Tools.Logger.AddUartLogDebug($"[openPort]all done");
-                    });
-
-                }
-            }
+            });
         }
         private void OpenClosePortButton_Click(object sender, RoutedEventArgs e)
         {
@@ -1444,9 +1543,10 @@ namespace llcom_plus
                     int br = 0;
                     Tuple<bool, string> ret = Tools.InputDialog.OpenDialog(TryFindResource("ShowBaudRate") as string ?? "?!",
                         "115200", TryFindResource("OtherRate") as string ?? "?!");
-                    if (!ret.Item1 || !int.TryParse(ret.Item2,out br))//啥都没选
+                    if (!ret.Item1 || !int.TryParse(ret.Item2,out br) || br <= 0)//啥都没选
                     {
                         Tools.MessageBox.Show(TryFindResource("OtherRateFail") as string ?? "?!");
+                        return;
                     }
                     if (IsSerialSplitModeActive())
                     {
@@ -2713,7 +2813,7 @@ namespace llcom_plus
                 return;
             }
 
-            if (e.Key == Key.C || e.Key == Key.V)
+            if (e.Key == Key.C || e.Key == Key.V || e.Key == Key.X)
                 return;
 
             if (e.Key >= Key.A && e.Key <= Key.Z && IsSerialSplitModeActive())

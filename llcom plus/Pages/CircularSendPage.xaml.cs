@@ -262,11 +262,8 @@ namespace llcom_plus.Pages
             if (loopCts != null)
                 return;
 
-            if (!Global.IsActiveSerialTargetOpen())
-            {
-                Tools.MessageBox.Show(TryFindResource("CircularSendPortNotOpen") as string ?? "请先打开串口");
+            if (!Global.EnsureActiveSerialTargetOpen())
                 return;
-            }
 
             if (!TryReadRunTimes(out var runTimes) || !TryReadDefaultDelay(out var defaultDelay))
                 return;
@@ -355,6 +352,9 @@ namespace llcom_plus.Pages
 
             try
             {
+                if (!Global.EnsureActiveSerialTargetOpen())
+                    return;
+
                 var step = new CircularSendStep(item, item.Command.Trim(), item.Hex, 0);
                 SendStep(step);
                 item.Status = TryFindResource("CircularSendSentOnce") as string ?? "已发送";

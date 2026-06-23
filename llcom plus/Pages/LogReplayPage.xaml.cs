@@ -84,7 +84,7 @@ namespace llcom_plus.Pages
             if (Steps.Count == 0)
                 return;
 
-            if (!Global.IsActiveSerialTargetOpen())
+            if (!Global.EnsureActiveSerialTargetOpen())
             {
                 ReplayStatusTextBlock.Text = TryFindResource("LogReplayPortNotOpen") as string ?? "Please open the serial port first";
                 return;

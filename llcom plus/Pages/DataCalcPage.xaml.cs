@@ -55,6 +55,9 @@ namespace llcom_plus.Pages
                 return;
             }
 
+            if (!Global.EnsureActiveSerialTargetOpen())
+                return;
+
             if (!Global.RequestSendRawData(data))
                 Tools.MessageBox.Show(TryFindResource("DataCalcSendUnavailable") as string ?? "Serial sender is unavailable.");
         }
