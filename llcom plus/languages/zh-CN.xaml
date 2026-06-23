@@ -103,7 +103,15 @@
     <system:String x:Key="AboutUpdateDownloading">正在下载...</system:String>
     <system:String x:Key="AboutUpdateNoNewVersion">当前已是最新版本：{0}</system:String>
     <system:String x:Key="AboutUpdateNoAsset">检测到新版本 {0}，但 GitHub Release 中没有可下载 zip，已打开发布页。</system:String>
-    <system:String x:Key="AboutUpdateReady">新版本 {0} 已下载完成，程序将关闭并自动安装更新。</system:String>
+    <system:String x:Key="AboutUpdateFoundTitle">检测到新版本</system:String>
+    <system:String x:Key="AboutUpdateFoundConfirm">检测到新版本。&#x0d;&#x0a;当前版本：{0}&#x0d;&#x0a;最新版本：{1}&#x0d;&#x0a;安装包：{2}&#x0d;&#x0a;大小：{3}&#x0d;&#x0a;&#x0d;&#x0a;是否现在下载并更新？</system:String>
+    <system:String x:Key="AboutUpdateAssetUnknown">未知安装包</system:String>
+    <system:String x:Key="AboutUpdateSizeUnknown">未知</system:String>
+    <system:String x:Key="AboutUpdateProgressTitle">下载更新</system:String>
+    <system:String x:Key="AboutUpdateReady">新版本 {0} 已下载完成。&#x0d;&#x0a;安装包：{1}</system:String>
+    <system:String x:Key="AboutUpdateInstallTitle">安装更新</system:String>
+    <system:String x:Key="AboutUpdateInstallConfirm">是否现在安装？程序将关闭、安装更新，并在安装完成后自动打开。</system:String>
+    <system:String x:Key="AboutUpdateInstallStarting">程序即将关闭。安装完成后会自动重新打开。</system:String>
     <system:String x:Key="AboutUpdateFailed">检查或安装更新失败。</system:String>
     <system:String x:Key="AboutUpdateMsix">商店/MSIX 版本请通过商店或发布页更新。</system:String>
     <system:String x:Key="AboutOriginalDevelopers">原开发者：chenxuuu、whc2001</system:String>

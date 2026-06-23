@@ -103,7 +103,15 @@
     <system:String x:Key="AboutUpdateDownloading">Downloading...</system:String>
     <system:String x:Key="AboutUpdateNoNewVersion">Already latest version: {0}</system:String>
     <system:String x:Key="AboutUpdateNoAsset">Found version {0}, but no downloadable zip is attached. Opening the release page.</system:String>
-    <system:String x:Key="AboutUpdateReady">Version {0} has been downloaded. The app will close and install it now.</system:String>
+    <system:String x:Key="AboutUpdateFoundTitle">New version available</system:String>
+    <system:String x:Key="AboutUpdateFoundConfirm">Found a new version.&#x0d;&#x0a;Current version: {0}&#x0d;&#x0a;Latest version: {1}&#x0d;&#x0a;Package: {2}&#x0d;&#x0a;Size: {3}&#x0d;&#x0a;&#x0d;&#x0a;Download and update now?</system:String>
+    <system:String x:Key="AboutUpdateAssetUnknown">Unknown package</system:String>
+    <system:String x:Key="AboutUpdateSizeUnknown">Unknown</system:String>
+    <system:String x:Key="AboutUpdateProgressTitle">Download update</system:String>
+    <system:String x:Key="AboutUpdateReady">Version {0} has been downloaded.&#x0d;&#x0a;Package: {1}</system:String>
+    <system:String x:Key="AboutUpdateInstallTitle">Install update</system:String>
+    <system:String x:Key="AboutUpdateInstallConfirm">Install now? The app will close, install the update, and reopen automatically.</system:String>
+    <system:String x:Key="AboutUpdateInstallStarting">The app will close now. It will reopen automatically after the update is installed.</system:String>
     <system:String x:Key="AboutUpdateFailed">Update check or install failed.</system:String>
     <system:String x:Key="AboutUpdateMsix">Please update the Store/MSIX build from the store or release page.</system:String>
     <system:String x:Key="AboutOriginalDevelopers">original developers: chenxuuu、whc2001</system:String>

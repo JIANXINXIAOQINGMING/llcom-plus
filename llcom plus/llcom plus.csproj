@@ -492,6 +492,17 @@
     <Compile Include="$(IntermediateOutputPath)AppVersion.g.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="LoadAppVersionFromProps" BeforeTargets="GenerateAppVersionInfo;SyncRepositoryVersionFiles;CreateReleaseZip">
+    <XmlPeek
+      XmlInputPath="$(MSBuildProjectDirectory)\..\Version.props"
+      Query="/msb:Project/msb:PropertyGroup/msb:AppVersion/text()"
+      Namespaces="&lt;Namespace Prefix='msb' Uri='http://schemas.microsoft.com/developer/msbuild/2003' /&gt;"
+      Condition="Exists('$(MSBuildProjectDirectory)\..\Version.props')">
+      <Output TaskParameter="Result" PropertyName="AppVersion" />
+    </XmlPeek>
+    <Error Condition="'$(AppVersion)' == ''" Text="AppVersion is empty. Check $(MSBuildProjectDirectory)\..\Version.props." />
+    <Message Importance="High" Text="AppVersion -> $(AppVersion)" />
+  </Target>
   <Target Name="GenerateAppVersionInfo" BeforeTargets="CoreCompile">
     <ItemGroup>
       <AppVersionAssemblyAttribute Include="System.Reflection.AssemblyVersionAttribute">
@@ -540,11 +551,13 @@
     </PropertyGroup>
     <ItemGroup>
       <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
     </ItemGroup>
     <MakeDir Directories="$(MSBuildProjectDirectory)\..\artifacts\release" />
     <RemoveDir Directories="$(ReleasePackageRoot)" Condition="Exists('$(ReleasePackageRoot)')" />
     <MakeDir Directories="$(ReleasePackageRoot)" />
     <Copy SourceFiles="@(ReleasePackageFile)" DestinationFiles="@(ReleasePackageFile->'$(ReleasePackageRoot)\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Delete Files="@(OldReleasePackageZip)" Condition="'@(OldReleasePackageZip)' != ''" />
     <Delete Files="$(ReleasePackageZip)" Condition="Exists('$(ReleasePackageZip)')" />
     <ZipDirectory SourceDirectory="$(ReleasePackageRoot)" DestinationFile="$(ReleasePackageZip)" />
     <Message Importance="High" Text="Release zip -> $(ReleasePackageZip)" />

@@ -115,7 +115,21 @@
     <ProjectReference Include="..\llcom plus\llcom plus.csproj" />
   </ItemGroup>
   <Import Project="$(WapProjPath)\Microsoft.DesktopBridge.targets" />
+  <Target Name="LoadAppVersionFromProps" BeforeTargets="SyncAppxManifestVersion">
+    <XmlPeek
+      XmlInputPath="$(MSBuildProjectDirectory)\..\Version.props"
+      Query="/msb:Project/msb:PropertyGroup/msb:AppVersion/text()"
+      Namespaces="&lt;Namespace Prefix='msb' Uri='http://schemas.microsoft.com/developer/msbuild/2003' /&gt;"
+      Condition="Exists('$(MSBuildProjectDirectory)\..\Version.props')">
+      <Output TaskParameter="Result" PropertyName="AppVersion" />
+    </XmlPeek>
+    <Error Condition="'$(AppVersion)' == ''" Text="AppVersion is empty. Check $(MSBuildProjectDirectory)\..\Version.props." />
+    <Message Importance="High" Text="AppVersion -> $(AppVersion)" />
+  </Target>
   <Target Name="SyncAppxManifestVersion" BeforeTargets="Build">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AppxManifest" />
+  </Target>
+  <Target Name="SyncAppxIconAssets" BeforeTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Appx-Icons.ps1&quot; -IconPath &quot;$(MSBuildProjectDirectory)\..\llcom plus\Assets\AppIcon.ico&quot; -ImagesPath &quot;$(MSBuildProjectDirectory)\Images&quot;" />
   </Target>
 </Project>

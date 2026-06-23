@@ -20,14 +20,20 @@ namespace llcom_plus.Tools
 
         public static async Task<GitHubReleaseInfo> CheckLatestAsync()
         {
+            GitHubReleaseInfo info;
             try
             {
-                return await CheckLatestFromApiAsync().ConfigureAwait(false);
+                info = await CheckLatestFromApiAsync().ConfigureAwait(false);
             }
             catch
             {
-                return await CheckLatestFromRedirectAsync().ConfigureAwait(false);
+                info = await CheckLatestFromRedirectAsync().ConfigureAwait(false);
             }
+
+            if (info != null && info.AssetSizeBytes <= 0 && !string.IsNullOrWhiteSpace(info.AssetDownloadUrl))
+                info.AssetSizeBytes = await TryGetAssetSizeAsync(info.AssetDownloadUrl).ConfigureAwait(false);
+
+            return info;
         }
 
         private static async Task<GitHubReleaseInfo> CheckLatestFromApiAsync()
@@ -57,6 +63,7 @@ namespace llcom_plus.Tools
                     ReleaseUrl = root["html_url"]?.ToString() ?? "https://github.com/" + Repository + "/releases",
                     AssetName = asset?.Name,
                     AssetDownloadUrl = asset?.DownloadUrl,
+                    AssetSizeBytes = asset?.SizeBytes ?? 0,
                 };
             }
         }
@@ -91,12 +98,20 @@ namespace llcom_plus.Tools
                         AssetName = assetName,
                         AssetDownloadUrl = asset?.DownloadUrl ?? ("https://github.com/" + Repository + "/releases/download/" +
                                            Uri.EscapeDataString(tag) + "/" + Uri.EscapeDataString(assetName)),
+                        AssetSizeBytes = asset?.SizeBytes ?? 0,
                     };
                 }
             }
         }
 
-        public static async Task<string> DownloadAndPrepareInstallAsync(GitHubReleaseInfo release)
+        public static async Task<string> DownloadAndPrepareInstallAsync(GitHubReleaseInfo release, IProgress<GitHubDownloadProgress> progress = null)
+        {
+            var zipPath = await DownloadUpdateAsync(release, progress).ConfigureAwait(false);
+            StartInstallAfterExit(zipPath);
+            return zipPath;
+        }
+
+        public static async Task<string> DownloadUpdateAsync(GitHubReleaseInfo release, IProgress<GitHubDownloadProgress> progress = null)
         {
             if (release == null || string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
                 throw new InvalidOperationException("Release asset is missing.");
@@ -112,20 +127,27 @@ namespace llcom_plus.Tools
                 {
                     client.Timeout = TimeSpan.FromMinutes(5);
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("llcom-plus-updater");
-                    using (var response = await client.GetAsync(release.AssetDownloadUrl).ConfigureAwait(false))
+                    using (var response = await client.GetAsync(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
                     {
                         response.EnsureSuccessStatusCode();
+                        var totalBytes = response.Content.Headers.ContentLength ?? release.AssetSizeBytes;
+                        progress?.Report(new GitHubDownloadProgress(0, totalBytes));
                         using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         using (var output = File.Create(zipPath))
                         {
-                            await input.CopyToAsync(output).ConfigureAwait(false);
+                            var buffer = new byte[81920];
+                            long bytesReceived = 0;
+                            int bytesRead;
+                            while ((bytesRead = await input.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+                            {
+                                await output.WriteAsync(buffer, 0, bytesRead).ConfigureAwait(false);
+                                bytesReceived += bytesRead;
+                                progress?.Report(new GitHubDownloadProgress(bytesReceived, totalBytes));
+                            }
                         }
                     }
                 }
 
-                var scriptPath = Path.Combine(tempRoot, "install-update.ps1");
-                File.WriteAllText(scriptPath, BuildInstallScript(zipPath), new UTF8Encoding(false));
-                StartInstaller(scriptPath);
                 return zipPath;
             }
             catch
@@ -133,6 +155,17 @@ namespace llcom_plus.Tools
                 TryDeleteDirectory(tempRoot);
                 throw;
             }
+        }
+
+        public static void StartInstallAfterExit(string zipPath)
+        {
+            if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath))
+                throw new FileNotFoundException("Update package is missing.", zipPath);
+
+            var tempRoot = Path.GetDirectoryName(zipPath);
+            var scriptPath = Path.Combine(tempRoot, "install-update.ps1");
+            File.WriteAllText(scriptPath, BuildInstallScript(zipPath), new UTF8Encoding(false));
+            StartInstaller(scriptPath);
         }
 
         private static GitHubReleaseAsset SelectReleaseAsset(JArray assets)
@@ -146,7 +179,8 @@ namespace llcom_plus.Tools
                 .Select(asset => new GitHubReleaseAsset
                 {
                     Name = asset["name"]?.ToString(),
-                    DownloadUrl = asset["browser_download_url"]?.ToString()
+                    DownloadUrl = asset["browser_download_url"]?.ToString(),
+                    SizeBytes = asset["size"]?.ToObject<long?>() ?? 0,
                 })
                 .Where(asset => !string.IsNullOrWhiteSpace(asset.DownloadUrl) &&
                                 (asset.Name ?? "").EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
@@ -175,7 +209,7 @@ namespace llcom_plus.Tools
                     return new GitHubReleaseAsset
                     {
                         Name = name,
-                        DownloadUrl = cleanUrl
+                        DownloadUrl = cleanUrl,
                     };
                 })
                 .GroupBy(asset => asset.DownloadUrl, StringComparer.OrdinalIgnoreCase)
@@ -212,6 +246,28 @@ namespace llcom_plus.Tools
             var build = version.Build >= 0 ? version.Build : 0;
             var revision = version.Revision >= 0 ? version.Revision : 0;
             return $"{version.Major}.{version.Minor}.{build}.{revision}";
+        }
+
+        private static async Task<long> TryGetAssetSizeAsync(string url)
+        {
+            try
+            {
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                using (var client = new HttpClient())
+                using (var request = new HttpRequestMessage(HttpMethod.Head, url))
+                {
+                    client.Timeout = TimeSpan.FromSeconds(20);
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("llcom-plus-updater");
+                    using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+                    {
+                        return response.IsSuccessStatusCode ? response.Content.Headers.ContentLength ?? 0 : 0;
+                    }
+                }
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static string BuildInstallScript(string zipPath)
@@ -314,6 +370,7 @@ try {{
         public string ReleaseUrl { get; set; }
         public string AssetName { get; set; }
         public string AssetDownloadUrl { get; set; }
+        public long AssetSizeBytes { get; set; }
         public bool HasUpdate => Version != null && CurrentVersion != null && Version > CurrentVersion;
     }
 
@@ -321,5 +378,19 @@ try {{
     {
         public string Name { get; set; }
         public string DownloadUrl { get; set; }
+        public long SizeBytes { get; set; }
+    }
+
+    internal sealed class GitHubDownloadProgress
+    {
+        public GitHubDownloadProgress(long bytesReceived, long totalBytes)
+        {
+            BytesReceived = bytesReceived;
+            TotalBytes = totalBytes;
+        }
+
+        public long BytesReceived { get; }
+        public long TotalBytes { get; }
+        public double Percent => TotalBytes > 0 ? Math.Min(100, BytesReceived * 100d / TotalBytes) : 0;
     }
 }
