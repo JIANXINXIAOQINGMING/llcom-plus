@@ -109,7 +109,7 @@
     <system:String x:Key="AboutOriginalDevelopers">原开发者：chenxuuu、whc2001</system:String>
     <system:String x:Key="AboutOriginalGitHubText">本项目基于原 llcom plus 开源项目，遵循 Apache 2.0 协议</system:String>
     <system:String x:Key="AboutOriginalGitHubButton">前往原项目 GitHub</system:String>
-    <system:String x:Key="AboutDevelopers">开发者：lawrence</system:String>
+    <system:String x:Key="AboutDevelopers">开发者：lawrence.liu</system:String>
     <system:String x:Key="AboutTranslator">简体中文为原版语言</system:String>
     <system:String x:Key="AboutGitHubText">项目仓库</system:String>
     <system:String x:Key="AboutGitHubButton">前往 GitHub 仓库</system:String>

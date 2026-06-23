@@ -14,6 +14,10 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      PROJECT_PATH: llcom plus\llcom plus.csproj
+      SOLUTION_PATH: llcom plus.sln
+      RELEASE_ARTIFACT_DIR: artifacts\release
 
     steps:
       - name: Checkout
@@ -26,48 +30,40 @@ jobs:
         uses: NuGet/setup-nuget@v2
 
       - name: Restore NuGet packages
-        run: nuget restore llcom.sln
+        run: nuget restore "${{ env.SOLUTION_PATH }}"
+
+      - name: Clean release artifacts
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "${{ env.RELEASE_ARTIFACT_DIR }}" -ErrorAction SilentlyContinue
 
       - name: Build
-        run: msbuild llcom/llcom.csproj /p:Configuration=Release /p:Platform=x64 /v:normal
-
-      - name: Clean build output
-        shell: cmd
-        run: |
-          cd llcom\bin\x64\Release
-          del /q *.xml 2>nul
-          del /q *.pdb 2>nul
-          del /q *.config 2>nul
+        run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x64 /v:normal
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: llcom_x64
-          path: llcom/bin/x64/Release/
+          name: llcom-plus-release-x64
+          path: artifacts/release/*.zip
+          if-no-files-found: error
 
       # -------- 以下步骤仅在打 tag 时执行 --------
 
-      - name: Copy core_script into Release folder
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: cmd
-        run: |
-          xcopy /e /r /y "llcom\DefaultFiles\core_script" "llcom\bin\x64\Release\core_script\"
-
-      - name: Package zip for release
+      - name: Prepare release files
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path temp
-          Compress-Archive -Path llcom\bin\x64\Release\* -Force -DestinationPath temp\llcom.zip
-          Copy-Item llcom\changlog\index.html     temp\changelog.html
-          Copy-Item llcom\changlog\autoUpdate.xml temp\autoUpdate.xml
+          Copy-Item "${{ env.RELEASE_ARTIFACT_DIR }}\*.zip" temp\
+          Copy-Item changlog\index.html temp\changelog.html
+          Copy-Item changlog\autoUpdate.xml temp\autoUpdate.xml
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           draft: false
-          files: temp/llcom.zip
+          files: artifacts/release/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

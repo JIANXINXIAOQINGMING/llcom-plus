@@ -10,6 +10,7 @@ using System.Windows;
 [assembly: AssemblyTitle("llcom plus - 能跑JavaScript脚本的开源串口调试工具！")]
 [assembly: AssemblyDescription("llcom plus")]
 [assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("lawrence.liu")]
 [assembly: AssemblyProduct("llcom plus")]
 [assembly: AssemblyCopyright("Apache 2 license")]
 [assembly: AssemblyTrademark("chenxublog.com")]

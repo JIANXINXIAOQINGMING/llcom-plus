@@ -109,7 +109,7 @@
     <system:String x:Key="AboutOriginalDevelopers">original developers: chenxuuu、whc2001</system:String>
     <system:String x:Key="AboutOriginalGitHubText">Based on the original llcom plus open-source project under Apache 2.0</system:String>
     <system:String x:Key="AboutOriginalGitHubButton">Open original GitHub project</system:String>
-    <system:String x:Key="AboutDevelopers">developers: lawrence</system:String>
+    <system:String x:Key="AboutDevelopers">developers: lawrence.liu</system:String>
     <system:String x:Key="AboutTranslator">translators: chenxuuu</system:String>
     <system:String x:Key="AboutGitHubText">Project repository</system:String>
     <system:String x:Key="AboutGitHubButton">Open GitHub repository</system:String>
