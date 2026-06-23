@@ -79,30 +79,33 @@ namespace llcom_plus.Pages
 
                 var assetName = string.IsNullOrWhiteSpace(release.AssetName) ? ResourceText("AboutUpdateAssetUnknown", "Unknown package") : release.AssetName;
                 var sizeText = FormatByteSize(release.AssetSizeBytes);
-                var updateConfirm = System.Windows.MessageBox.Show(
-                    Window.GetWindow(this),
-                    string.Format(
-                        ResourceText("AboutUpdateFoundConfirm", "Found a new version.\r\nCurrent version: {0}\r\nLatest version: {1}\r\nPackage: {2}\r\nSize: {3}\r\n\r\nDownload and update now?"),
-                        release.CurrentVersion,
-                        release.Version,
-                        assetName,
-                        sizeText),
-                    ResourceText("AboutUpdateFoundTitle", "New version available"),
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-                if (updateConfirm != MessageBoxResult.Yes)
-                    return;
+                var hasCachedPackage = Tools.GitHubReleaseUpdater.TryGetCachedUpdatePackage(release, out var zipPath);
+                if (!hasCachedPackage)
+                {
+                    var updateConfirm = System.Windows.MessageBox.Show(
+                        Window.GetWindow(this),
+                        string.Format(
+                            ResourceText("AboutUpdateFoundConfirm", "Found a new version.\r\nCurrent version: {0}\r\nLatest version: {1}\r\nPackage: {2}\r\nSize: {3}\r\n\r\nDownload and update now?"),
+                            release.CurrentVersion,
+                            release.Version,
+                            assetName,
+                            sizeText),
+                        ResourceText("AboutUpdateFoundTitle", "New version available"),
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+                    if (updateConfirm != MessageBoxResult.Yes)
+                        return;
 
-                CheckUpdateButton.Content = ResourceText("AboutUpdateDownloading", "Downloading...");
-                var zipPath = await DownloadUpdateWithProgressAsync(release);
-                Tools.MessageBox.Show(string.Format(
-                    ResourceText("AboutUpdateReady", "Version {0} has been downloaded.\r\nPackage: {1}"),
-                    release.Version,
-                    zipPath));
+                    CheckUpdateButton.Content = ResourceText("AboutUpdateDownloading", "Downloading...");
+                    zipPath = await DownloadUpdateWithProgressAsync(release);
+                }
 
                 var installConfirm = System.Windows.MessageBox.Show(
                     Window.GetWindow(this),
-                    ResourceText("AboutUpdateInstallConfirm", "Install now? The app will close, install the update, and reopen automatically."),
+                    string.Format(
+                        ResourceText("AboutUpdateInstallConfirm", "Version {0} has been downloaded.\r\nPackage: {1}\r\n\r\nRestart and install now? The app will reopen automatically after installation.\r\nIf you choose No, the package will be kept for next time; closing the app will install it without reopening."),
+                        release.Version,
+                        zipPath),
                     ResourceText("AboutUpdateInstallTitle", "Install update"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question);
@@ -110,8 +113,12 @@ namespace llcom_plus.Pages
                     return;
 
                 Tools.GitHubReleaseUpdater.StartInstallAfterExit(zipPath);
-                Tools.MessageBox.Show(ResourceText("AboutUpdateInstallStarting", "The app will close now. It will reopen automatically after the update is installed."));
                 shouldShutdown = true;
+                System.Threading.Tasks.Task.Run(async () =>
+                {
+                    await System.Threading.Tasks.Task.Delay(1500);
+                    Environment.Exit(0);
+                });
                 Application.Current.Shutdown();
             }
             catch (Exception ex)

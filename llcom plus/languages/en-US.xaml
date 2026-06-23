@@ -108,10 +108,8 @@
     <system:String x:Key="AboutUpdateAssetUnknown">Unknown package</system:String>
     <system:String x:Key="AboutUpdateSizeUnknown">Unknown</system:String>
     <system:String x:Key="AboutUpdateProgressTitle">Download update</system:String>
-    <system:String x:Key="AboutUpdateReady">Version {0} has been downloaded.&#x0d;&#x0a;Package: {1}</system:String>
     <system:String x:Key="AboutUpdateInstallTitle">Install update</system:String>
-    <system:String x:Key="AboutUpdateInstallConfirm">Install now? The app will close, install the update, and reopen automatically.</system:String>
-    <system:String x:Key="AboutUpdateInstallStarting">The app will close now. It will reopen automatically after the update is installed.</system:String>
+    <system:String x:Key="AboutUpdateInstallConfirm">Version {0} has been downloaded.&#x0d;&#x0a;Package: {1}&#x0d;&#x0a;&#x0d;&#x0a;Restart and install now? The app will reopen automatically after installation.&#x0d;&#x0a;Choose No to keep the package for next time; closing the app will install it without reopening.</system:String>
     <system:String x:Key="AboutUpdateFailed">Update check or install failed.</system:String>
     <system:String x:Key="AboutUpdateMsix">Please update the Store/MSIX build from the store or release page.</system:String>
     <system:String x:Key="AboutOriginalDevelopers">original developers: chenxuuu、whc2001</system:String>

@@ -108,10 +108,8 @@
     <system:String x:Key="AboutUpdateAssetUnknown">未知安装包</system:String>
     <system:String x:Key="AboutUpdateSizeUnknown">未知</system:String>
     <system:String x:Key="AboutUpdateProgressTitle">下载更新</system:String>
-    <system:String x:Key="AboutUpdateReady">新版本 {0} 已下载完成。&#x0d;&#x0a;安装包：{1}</system:String>
     <system:String x:Key="AboutUpdateInstallTitle">安装更新</system:String>
-    <system:String x:Key="AboutUpdateInstallConfirm">是否现在安装？程序将关闭、安装更新，并在安装完成后自动打开。</system:String>
-    <system:String x:Key="AboutUpdateInstallStarting">程序即将关闭。安装完成后会自动重新打开。</system:String>
+    <system:String x:Key="AboutUpdateInstallConfirm">新版本 {0} 已下载完成。&#x0d;&#x0a;安装包：{1}&#x0d;&#x0a;&#x0d;&#x0a;是否现在重启并安装？安装完成后会自动打开。&#x0d;&#x0a;选择“否”会保留安装包，下次检查更新不再重复下载；关闭软件时会自动安装且不会自动打开。</system:String>
     <system:String x:Key="AboutUpdateFailed">检查或安装更新失败。</system:String>
     <system:String x:Key="AboutUpdateMsix">商店/MSIX 版本请通过商店或发布页更新。</system:String>
     <system:String x:Key="AboutOriginalDevelopers">原开发者：chenxuuu、whc2001</system:String>

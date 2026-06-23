@@ -1298,6 +1298,7 @@ namespace llcom_plus
             //自动保存脚本
             if (lastScriptFile != "")
                 saveScriptFile(lastScriptFile);
+            Tools.GitHubReleaseUpdater.TryStartPendingInstallOnExit();
             Tools.Global.isMainWindowsClosed = true;
             foreach (Window win in App.Current.Windows.Cast<Window>().Where(win => win != this).ToList())
             {
