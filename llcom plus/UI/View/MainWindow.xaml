@@ -1,0 +1,1350 @@
+<Window
+    x:Class="llcom_plus.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:adonisExtensions="clr-namespace:AdonisUI.Extensions;assembly=AdonisUI"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:fa="http://schemas.fontawesome.io/icons/"
+    xmlns:local="clr-namespace:llcom_plus"
+    xmlns:local_page="clr-namespace:llcom_plus.Pages"
+    xmlns:local_tool="clr-namespace:llcom_plus.Tools"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="{DynamicResource AppTitle}"
+    Width="1440"
+    Height="820"
+    MinWidth="1120"
+    MinHeight="680"
+    Icon="pack://application:,,,/Resources/Assets/AppIcon.ico"
+    SnapsToDevicePixels="True"
+    UseLayoutRounding="True"
+    adonisExtensions:RippleExtension.FadeInDuration="0"
+    adonisExtensions:RippleExtension.FadeOutDuration="0"
+    Activated="Window_Activated"
+    Deactivated="Window_Deactivated"
+    Loaded="Window_Loaded"
+    SourceInitialized="Window_SourceInitialized"
+    mc:Ignorable="d">
+    <Window.Style>
+        <Style BasedOn="{StaticResource AppGlassWindowStyle}" TargetType="Window" />
+    </Window.Style>
+    <Window.Resources>
+        <RoutedUICommand x:Key="SendUartData" Text="SendUartData" />
+        <local_page:boolVisibe x:Key="boolVisibeConverter" />
+        <local_page:boolNotVisibe x:Key="boolNotVisibeConverter" />
+        <local_page:rsTooltip x:Key="rsToolTipConverter" />
+        <local_page:rsOpacity x:Key="rsOpacityConverter" />
+        <local_page:boolOpacity x:Key="boolOpacityConverter" />
+        <Style x:Key="GlassPanelStyle" BasedOn="{StaticResource AppGlassCardStyle}" TargetType="{x:Type Border}">
+            <Setter Property="CornerRadius" Value="18" />
+        </Style>
+        <Style x:Key="GlassPanelTightStyle" BasedOn="{StaticResource GlassPanelStyle}" TargetType="{x:Type Border}">
+            <Setter Property="CornerRadius" Value="13" />
+        </Style>
+        <Style x:Key="FloatingGlassShadowStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{DynamicResource AppGlassShadowCasterBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect
+                        BlurRadius="30"
+                        Direction="270"
+                        Opacity="0.72"
+                        RenderingBias="Quality"
+                        ShadowDepth="12"
+                        Color="{DynamicResource AppShadowColor}" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FloatingGlassHighlightStyle" TargetType="{x:Type Border}">
+            <Setter Property="Margin" Value="1" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassHighlightBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Panel.ZIndex" Value="20" />
+        </Style>
+        <Style x:Key="GlassButtonStyle" BasedOn="{StaticResource {x:Type Button}}" TargetType="{x:Type Button}">
+            <Setter Property="Background" Value="{DynamicResource AppGlassControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,4" />
+        </Style>
+        <Style x:Key="GlassTextBoxStyle" BasedOn="{StaticResource {x:Type TextBox}}" TargetType="{x:Type TextBox}">
+            <Setter Property="Background" Value="{DynamicResource AppGlassInputBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="7,5" />
+        </Style>
+        <Style x:Key="ComposerShadowStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{DynamicResource AppGlassShadowCasterBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect
+                        BlurRadius="24"
+                        Direction="270"
+                        Opacity="0.38"
+                        RenderingBias="Quality"
+                        ShadowDepth="7"
+                        Color="{DynamicResource AppShadowColor}" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ComposerTextBoxStyle" BasedOn="{StaticResource GlassTextBoxStyle}" TargetType="{x:Type TextBox}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TextBox}">
+                        <Border Background="{TemplateBinding Background}">
+                            <ScrollViewer
+                                x:Name="PART_ContentHost"
+                                Margin="{TemplateBinding Padding}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ComposerToolButtonStyle" BasedOn="{StaticResource GlassButtonStyle}" TargetType="{x:Type Button}">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+            <Setter Property="Padding" Value="9,4" />
+            <Setter Property="Background" Value="{DynamicResource AppGlassControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
+        </Style>
+        <Style x:Key="ComposerSendButtonStyle" BasedOn="{StaticResource AppAccentButtonStyle}" TargetType="{x:Type Button}">
+            <Setter Property="MinWidth" Value="64" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="14,5" />
+        </Style>
+        <Style x:Key="GlassTabControlStyle" TargetType="{x:Type TabControl}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TabControl}">
+                        <Grid KeyboardNavigation.TabNavigation="Local">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border
+                                Grid.Row="0"
+                                HorizontalAlignment="Left"
+                                Margin="0,0,0,18"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0">
+                                <TabPanel
+                                    IsItemsHost="True"
+                                    KeyboardNavigation.TabIndex="1"
+                                    Panel.ZIndex="1" />
+                            </Border>
+                            <Border Grid.Row="1" Background="Transparent">
+                                <ContentPresenter
+                                    x:Name="PART_SelectedContentHost"
+                                    ContentSource="SelectedContent"
+                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GlassTabItemStyle" TargetType="{x:Type TabItem}">
+            <Setter Property="Background" Value="{DynamicResource AppGlassControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
+            <Setter Property="MinWidth" Value="104" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Margin" Value="4,2" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TabItem}">
+                        <Border
+                            x:Name="Chrome"
+                            MinHeight="31"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="9">
+                            <ContentPresenter
+                                Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                ContentSource="Header"
+                                RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppGlassControlHoverBackground}" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppGlassFocusBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppPopupBackground}" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ToolListBoxStyle" BasedOn="{StaticResource {x:Type ListBox}}" TargetType="{x:Type ListBox}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        </Style>
+        <Style x:Key="ToolListItemStyle" TargetType="{x:Type ListBoxItem}">
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
+            <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="UseLayoutRounding" Value="True" />
+            <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+            <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
+            <Setter Property="TextOptions.TextHintingMode" Value="Fixed" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                        <Border
+                            x:Name="Chrome"
+                            MinHeight="38"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{DynamicResource AppGlassControlBackground}"
+                            BorderBrush="{DynamicResource AppGlassBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="9">
+                            <ContentPresenter
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="Center"
+                                TextElement.Foreground="{TemplateBinding Foreground}"
+                                RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppGlassControlHoverBackground}" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppGlassFocusBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppPopupBackground}" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="StatusPillStyle" TargetType="{x:Type Border}">
+            <Setter Property="Margin" Value="5,0,0,0" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="Background" Value="{DynamicResource AppGlassControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="9" />
+        </Style>
+        <Style x:Key="StatusToggleButtonStyle" BasedOn="{StaticResource {x:Type Button}}" TargetType="{x:Type Button}">
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Background" Value="{DynamicResource AppGlassControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="StatusLabelStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource AppGlassMutedBrush}" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+        </Style>
+        <Style x:Key="StatusValueStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
+        </Style>
+    </Window.Resources>
+    <Window.InputBindings>
+        <KeyBinding
+            Key="Return"
+            Command="{StaticResource SendUartData}"
+            Gesture="Ctrl+Return" />
+    </Window.InputBindings>
+    <Window.CommandBindings>
+        <CommandBinding Command="{StaticResource SendUartData}" Executed="SendUartData_Executed" />
+    </Window.CommandBindings>
+    <Grid
+        Name="MainGrid"
+        Background="{DynamicResource AppWindowBackgroundBrush}"
+        ClipToBounds="True"
+        IsEnabled="False"
+        SizeChanged="MainGrid_SizeChanged">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="MainLogBaseColumn" Width="430" MinWidth="430" />
+            <ColumnDefinition x:Name="MainLogFlexibleColumn" Width="*" />
+            <ColumnDefinition x:Name="RightToolsToggleColumn" Width="Auto" />
+            <ColumnDefinition x:Name="RightToolsColumn" Width="760" MinWidth="650" />
+        </Grid.ColumnDefinitions>
+
+        <!--  A static, cached wallpaper blur gives every translucent card a frosted
+              backdrop without applying expensive effects to the live log controls.  -->
+        <Grid
+            Grid.RowSpan="3"
+            Grid.ColumnSpan="4"
+            ClipToBounds="True"
+            IsHitTestVisible="False">
+            <Image
+                Width="1920"
+                Height="1920"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                CacheMode="BitmapCache"
+                Opacity="{DynamicResource AppBackdropImageOpacity}"
+                RenderOptions.BitmapScalingMode="HighQuality"
+                Stretch="Uniform">
+                <Image.Source>
+                    <BitmapImage
+                        CacheOption="OnLoad"
+                        DecodePixelWidth="1920"
+                        UriSource="pack://application:,,,/Resources/Assets/AppBackground.png" />
+                </Image.Source>
+                <Image.Effect>
+                    <BlurEffect Radius="8" RenderingBias="Performance" />
+                </Image.Effect>
+            </Image>
+            <Border Background="{DynamicResource AppAmbientTopBrush}" />
+            <Border Background="{DynamicResource AppAmbientBottomBrush}" />
+            <Border Background="{DynamicResource AppWindowOverlayBrush}" />
+        </Grid>
+
+        <!--  收发数据显示  -->
+        <Border
+            Grid.Row="0"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            Margin="10,10,6,6"
+            CornerRadius="18"
+            Style="{StaticResource FloatingGlassShadowStyle}" />
+        <Border
+            Grid.Row="0"
+            Grid.Column="0"
+            Margin="10,10,6,6"
+            Padding="6"
+            Style="{StaticResource GlassPanelStyle}" Grid.ColumnSpan="2">
+            <Frame
+                Name="dataShowFrame"
+                Background="Transparent"
+                BorderBrush="#00000000"
+                BorderThickness="0.5"
+                FocusVisualStyle="{x:Null}"
+                GotFocus="uartDataFlowDocument_GotFocus"
+                LostFocus="uartDataFlowDocument_LostFocus"
+                NavigationUIVisibility="Hidden"
+                PreviewKeyDown="uartDataFlowDocument_PreviewKeyDown"
+                PreviewTextInput="uartDataFlowDocument_PreviewTextInput" />
+        </Border>
+        <Border
+            Grid.Row="0"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            Margin="10,10,6,6"
+            CornerRadius="18"
+            Style="{StaticResource FloatingGlassHighlightStyle}" />
+
+        <!--  发送数据区  -->
+        <Border
+            Grid.Row="1"
+            Grid.ColumnSpan="2"
+            Margin="14,6,10,6"
+            CornerRadius="20"
+            Style="{StaticResource ComposerShadowStyle}" />
+        <Border
+            Grid.Row="1"
+            Grid.ColumnSpan="2"
+            Margin="10,4,6,8"
+            Padding="8,7"
+            Background="{DynamicResource AppGlassPanelBackground}"
+            BorderBrush="{DynamicResource AppGlassHighlightBrush}"
+            BorderThickness="1"
+            CornerRadius="20">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBox
+                Name="toSendDataTextBox"
+                MinHeight="68"
+                Style="{StaticResource ComposerTextBoxStyle}"
+                VerticalContentAlignment="Top"
+                AcceptsReturn="True"
+                FontFamily="Consolas"
+                PreviewKeyDown="ToSendDataTextBox_PreviewKeyDown"
+                Text="{Binding dataToSend}"
+                TextChanged="ToSendDataTextBox_TextChanged"
+                TextWrapping="Wrap"
+                LostFocus="ToSendDataTextBox_LostFocus"
+                VerticalScrollBarVisibility="Auto" />
+                <Popup
+                Name="sendSuggestPopup"
+                AllowsTransparency="True"
+                Placement="Top"
+                PlacementTarget="{Binding ElementName=toSendDataTextBox}"
+                StaysOpen="False"
+                VerticalOffset="-4">
+                    <Border
+                    Padding="3"
+                    Background="{DynamicResource AppPopupBackground}"
+                    BorderBrush="{DynamicResource AppGlassBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                        <ListBox
+                        Name="sendSuggestListBox"
+                        MinHeight="26"
+                        MaxHeight="180"
+                        Width="{Binding ElementName=toSendDataTextBox, Path=ActualWidth}"
+                        FontFamily="Consolas"
+                        HorizontalContentAlignment="Stretch"
+                        MouseDoubleClick="SendSuggestListBox_MouseDoubleClick">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MinHeight="24">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Margin="2,0,8,0"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding SendText}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Margin="8,0,4,0"
+                                            VerticalAlignment="Center"
+                                            Opacity="0.72"
+                                            Text="{Binding ButtonText}"
+                                            TextAlignment="Right"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                </Popup>
+                <Grid Grid.Row="1" Margin="2,2,2,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button
+                    Name="clearLogButton"
+                    Style="{StaticResource ComposerToolButtonStyle}"
+                    Click="ClearLogButton_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <fa:FontAwesome Margin="0,0,6,0" VerticalAlignment="Center" Icon="Eraser" />
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource ClearLog}" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                    Name="FlowControlButton"
+                    Grid.Column="1"
+                    Style="{StaticResource ComposerToolButtonStyle}"
+                    Click="FlowControlButton_Click"
+                    ToolTip="{DynamicResource FlowControlButtonTip}">
+                        <StackPanel Orientation="Horizontal">
+                            <fa:FontAwesome Margin="0,0,6,0" VerticalAlignment="Center" Icon="Exchange" />
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource FlowControlButton}" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                    Name="MoreSettingButton"
+                    Grid.Column="2"
+                    Style="{StaticResource ComposerToolButtonStyle}"
+                    Click="MoreSettingButton_Click"
+                    ToolTip="{DynamicResource MoreSettingsTip}">
+                        <StackPanel Orientation="Horizontal">
+                            <fa:FontAwesome Margin="0,0,6,0" VerticalAlignment="Center" Icon="Cog" />
+                            <TextBlock VerticalAlignment="Center" Text="{DynamicResource MoreSettings}" />
+                        </StackPanel>
+                    </Button>
+                    <Border
+                        Grid.Column="4"
+                        Width="1"
+                        Height="22"
+                        Margin="8,0,10,0"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource AppGlassBorderBrush}" />
+                    <Button
+                    Name="sendDataButton"
+                    Grid.Column="5"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource ComposerSendButtonStyle}"
+                    Command="{StaticResource SendUartData}"
+                    ToolTip="{DynamicResource SendDataButtonTip}"
+                    Content="{DynamicResource SendDataButton}" />
+                </Grid>
+            </Grid>
+        </Border>
+        <!--  底部状态栏  -->
+        <Border
+            Grid.Row="2"
+            Grid.ColumnSpan="4"
+            Margin="10,0,10,10"
+            Padding="4"
+            Background="Transparent"
+            BorderBrush="Transparent"
+            BorderThickness="0"
+            Style="{StaticResource GlassPanelTightStyle}">
+            <WrapPanel VerticalAlignment="Center">
+                <Button
+                Name="refreshPortButton"
+                MinHeight="32"
+                Margin="0,0,8,0"
+                Style="{StaticResource GlassButtonStyle}"
+                Click="RefreshPortButton_Click"
+                Content="{DynamicResource RefreshPortButton}"
+                IsEnabled="{Binding ElementName=serialPortsListComboBox, Path=IsEnabled}" />
+                <StackPanel
+                Name="serialSplitSendTargetPanel"
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Orientation="Horizontal">
+                    <TextBlock
+                    Margin="0,0,6,0"
+                    VerticalAlignment="Center"
+                    Text="{DynamicResource SplitSendTarget}" />
+                    <ComboBox
+                    Name="serialSplitSendTargetComboBox"
+                    MinWidth="88"
+                    MaxWidth="240"
+                    MinHeight="32"
+                    SelectionChanged="SerialSplitSendTargetComboBox_SelectionChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock
+                                    Text="{Binding Text}"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="NoWrap"
+                                    ToolTip="{Binding Text}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+                <StackPanel
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Orientation="Horizontal">
+                    <TextBlock
+                    Margin="0,0,6,0"
+                    VerticalAlignment="Center"
+                    Text="{DynamicResource ShowPorts}" />
+                    <ComboBox
+                    Name="serialPortsListComboBox"
+                    MinWidth="96"
+                    MaxWidth="280"
+                    MinHeight="32"
+                    SelectionChanged="SerialPortsListComboBox_SelectionChanged" />
+                </StackPanel>
+                <StackPanel
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Orientation="Horizontal">
+                    <TextBlock
+                    Margin="0,0,6,0"
+                    VerticalAlignment="Center"
+                    Text="{DynamicResource ShowBaudRate}" />
+                    <ComboBox
+                    Name="baudRateComboBox"
+                    MinWidth="72"
+                    MaxWidth="110"
+                    MinHeight="32"
+                    DropDownClosed="BaudRateComboBox_Changed"
+                    DropDownOpened="BaudRateComboBox_Changed">
+                        <ComboBoxItem Content="110" />
+                        <ComboBoxItem Content="330" />
+                        <ComboBoxItem Content="600" />
+                        <ComboBoxItem Content="1200" />
+                        <ComboBoxItem Content="2400" />
+                        <ComboBoxItem Content="4800" />
+                        <ComboBoxItem Content="9600" />
+                        <ComboBoxItem Content="14400" />
+                        <ComboBoxItem Content="19200" />
+                        <ComboBoxItem Content="38400" />
+                        <ComboBoxItem Content="56000" />
+                        <ComboBoxItem Content="57600" />
+                        <ComboBoxItem Content="115200" />
+                        <ComboBoxItem Content="128000" />
+                        <ComboBoxItem Content="230400" />
+                        <ComboBoxItem Content="256000" />
+                        <ComboBoxItem Content="460800" />
+                        <ComboBoxItem Content="500000" />
+                        <ComboBoxItem Content="128000" />
+                        <ComboBoxItem Content="512000" />
+                        <ComboBoxItem Content="600000" />
+                        <ComboBoxItem Content="750000" />
+                        <ComboBoxItem Content="921600" />
+                        <ComboBoxItem Content="1000000" />
+                        <ComboBoxItem Content="1500000" />
+                        <ComboBoxItem Content="2000000" />
+                        <ComboBoxItem Content="3000000" />
+                        <ComboBoxItem Content="{DynamicResource OtherRate}" />
+                    </ComboBox>
+                </StackPanel>
+                    <Button
+                        Name="connectionStatusButton"
+                        Click="ConnectionStatusButton_Click"
+                        Style="{StaticResource StatusToggleButtonStyle}"
+                        ToolTip="{DynamicResource ConnectionStatusToggleTip}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource ShowStatus}" />
+                            <TextBlock Name="statusTextBlock" Style="{StaticResource StatusValueStyle}" Text="{DynamicResource OpenPort_close}" />
+                        </StackPanel>
+                    </Button>
+                    <Border Margin="0,0,8,0" Style="{StaticResource StatusPillStyle}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock
+                            Cursor="Cross"
+                            MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusLabelStyle}"
+                            Text="{DynamicResource SentCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                            <TextBlock
+                            Name="sentCountTextBlock"
+                            Cursor="Cross"
+                            MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusValueStyle}"
+                            Text="{Binding SentCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource StatusPillStyle}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock
+                            Cursor="Cross"
+                            MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusLabelStyle}"
+                            Text="{DynamicResource ReceivedCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                            <TextBlock
+                            Name="receivedCountTextBlock"
+                            Cursor="Cross"
+                            MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
+                            Style="{StaticResource StatusValueStyle}"
+                            Text="{Binding ReceivedCount}"
+                            ToolTip="{DynamicResource ClearCountTip}" />
+                        </StackPanel>
+                    </Border>
+            </WrapPanel>
+        </Border>
+        <!--  中间改变分割大小的东西  -->
+        <GridSplitter
+            x:Name="RightToolsGridSplitter"
+            Grid.RowSpan="2"
+            Grid.Column="2"
+            Width="8"
+            Margin="0,10,0,8"
+            DragCompleted="RightToolsGridSplitter_DragCompleted"
+            DragDelta="RightToolsGridSplitter_DragDelta"
+            HorizontalAlignment="Center"
+            ResizeBehavior="PreviousAndNext"
+            ResizeDirection="Columns"
+            Background="{DynamicResource AppSplitterBrush}" />
+        <Button
+            x:Name="RightToolsToggleButton"
+            Grid.RowSpan="2"
+            Grid.Column="2"
+            Width="28"
+            Height="76"
+            Margin="0,10,0,8"
+            Padding="0"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Click="RightToolsToggleButton_Click"
+            Panel.ZIndex="2"
+            Style="{StaticResource GlassButtonStyle}"
+            ToolTip="{DynamicResource CollapseRightTools}">
+            <fa:FontAwesome
+                x:Name="RightToolsToggleIcon"
+                Icon="AngleDoubleRight" />
+        </Button>
+
+        <!--  右侧脚本、快捷发送  -->
+        <Border
+            Grid.RowSpan="2"
+            Grid.Column="3"
+            MinWidth="580"
+            Margin="10,12,12,8"
+            CornerRadius="18"
+            Style="{StaticResource FloatingGlassShadowStyle}" />
+        <Border
+            x:Name="RightToolsPanel"
+            Grid.RowSpan="2"
+            Grid.Column="3"
+            MinWidth="580"
+            Margin="10,12,12,8"
+            Padding="12"
+            Style="{StaticResource GlassPanelStyle}">
+            <TabControl
+            Name="MainTabControl"
+            Background="Transparent"
+            BorderThickness="0"
+            Style="{StaticResource GlassTabControlStyle}"
+            ItemContainerStyle="{StaticResource GlassTabItemStyle}"
+            SelectionChanged="MainTabControl_SelectionChanged">
+                <TabItem Name="QuickSendTab" Header="{DynamicResource QuickSendCard}" Margin="0,3,0,-9" Width="118">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.Resources>
+                            <Style x:Key="toSendListStyle" TargetType="{x:Type ListBoxItem}">
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                                            <Grid Name="ItemGrid" Margin="0,3,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="28" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="44" />
+                                                    <ColumnDefinition Width="38" />
+                                                    <ColumnDefinition Width="46" />
+                                                    <ColumnDefinition Width="40" />
+                                                    <ColumnDefinition Width="0" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid
+                                                Margin="1"
+                                                Background="Transparent"
+                                                Cursor="Cross"
+                                                MouseRightButtonDown="TextBlock_MouseRightButtonDown"
+                                                Tag="{Binding}" />
+                                                <TextBlock
+                                                Grid.Column="0"
+                                                Margin="2"
+                                                HorizontalAlignment="Center"
+                                                Cursor="Cross"
+                                                MouseRightButtonDown="TextBlock_MouseRightButtonDown"
+                                                Tag="{Binding}"
+                                                Text="{Binding id}"
+                                                ToolTip="{DynamicResource QuickSendIdTip}" />
+                                                <TextBox
+                                                Grid.Column="1"
+                                                Margin="0,0,2,0"
+                                                HorizontalAlignment="Stretch"
+                                                MinWidth="60"
+                                                PreviewKeyDown="QuickSendTextBox_PreviewKeyDown"
+                                                Text="{Binding text, UpdateSourceTrigger=PropertyChanged}" />
+                                                <Button
+                                                Grid.Column="2"
+                                                MinWidth="58"
+                                                Margin="0,0,2,0"
+                                                Padding="10,0"
+                                                HorizontalAlignment="Left"
+                                                Click="knowSendDataButton_click"
+                                                MouseRightButtonDown="QuickSendButton_MouseRightButtonDown"
+                                                Content="{Binding commit}"
+                                                Cursor="Cross"
+                                                Tag="{Binding}"
+                                                ToolTip="{DynamicResource QuickSendButtonTip}" />
+                                                <CheckBox
+                                                Grid.Column="3"
+                                                Margin="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsChecked="{Binding hex}" />
+                                                <CheckBox
+                                                Grid.Column="4"
+                                                Margin="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsChecked="{Binding appendCrlf}"
+                                                ToolTip="{DynamicResource QuickSendAppendCrlfTip}" />
+                                                <CheckBox
+                                                Grid.Column="5"
+                                                Margin="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsChecked="{Binding disableSuggestion}"
+                                                ToolTip="{DynamicResource QuickSendDisableSuggestionTip}" />
+                                                <TextBlock
+                                                Name="recvScriptSet"
+                                                Grid.Column="6"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Opacity="{Binding recvScriptPath, Converter={StaticResource rsOpacityConverter}}"
+                                                MouseLeftButtonDown="ScriptIcon_Click"
+                                                MouseRightButtonDown="ScriptIcon_RightClick"
+                                                Tag="{Binding}">
+                                                <fa:FontAwesome Foreground="{DynamicResource AppIconBrush}" Icon="FileText">
+                                                    <fa:FontAwesome.Style>
+                                                        <Style TargetType="fa:FontAwesome">
+                                                            <Setter Property="FontSize" Value="16"/>
+                                                            <Style.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter Property="FontSize" Value="20"/>
+                                                                </Trigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </fa:FontAwesome.Style>
+                                                </fa:FontAwesome>
+                                                    <TextBlock.ToolTip>
+                                                        <MultiBinding Converter="{StaticResource rsToolTipConverter}">
+                                                            <Binding Path="recvScriptPath" UpdateSourceTrigger="PropertyChanged"/>
+                                                            <Binding Path="commit" UpdateSourceTrigger="PropertyChanged" Delay="1000"/>
+                                                        </MultiBinding>
+                                                    </TextBlock.ToolTip>
+                                                </TextBlock>
+                                                <TextBlock
+                                                Visibility="Collapsed"
+                                                Name="recvScriptPara"
+                                                Grid.Column="8"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Opacity="{Binding recvScriptPara, Converter={StaticResource rsOpacityConverter}}"
+                                                MouseLeftButtonUp="ScriptParaIcon_Click"
+                                                MouseRightButtonDown="ScriptParaIcon_RightClick"
+                                                Tag="{Binding}"
+                                                ToolTip="{DynamicResource QuickSendRecvScriptParaSet}">
+                                                <fa:FontAwesome Foreground="{DynamicResource AppIconBrush}" Icon="Cog">
+                                                    <fa:FontAwesome.Style>
+                                                        <Style TargetType="fa:FontAwesome">
+                                                            <Setter Property="FontSize" Value="18"/>
+                                                            <Style.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter Property="FontSize" Value="22"/>
+                                                                </Trigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </fa:FontAwesome.Style>
+                                                </fa:FontAwesome>
+                                                </TextBlock>
+                                                <Button
+                                                Grid.Column="7"
+                                                Width="28"
+                                                Height="24"
+                                                Margin="3,0,0,0"
+                                                Padding="0"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Click="RemoveSendListItemButton_Click"
+                                                Content="−"
+                                                FontSize="18"
+                                                FontWeight="Bold"
+                                                Foreground="{DynamicResource AppDangerBrush}"
+                                                Style="{StaticResource GlassButtonStyle}"
+                                                Tag="{Binding}"
+                                                ToolTip="{DynamicResource QuickSendRemoveItem}" />
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="true">
+                                                    <Setter TargetName="ItemGrid" Property="Background" Value="Transparent" />
+                                                </Trigger>
+                                                <Trigger Property="Selector.IsSelected" Value="true">
+                                                    <Setter TargetName="ItemGrid" Property="Background" Value="Transparent" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </Grid.Resources>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,8">
+                                <ComboBox
+                                Name="QuickListSelectComboBox"
+                                MinWidth="170"
+                                MaxWidth="260"
+                                MaxDropDownHeight="280"
+                                HorizontalAlignment="Left"
+                                SelectionChanged="QuickListSelectComboBox_SelectionChanged" />
+                                <TextBox
+                                Name="QuickListNameTextBox"
+                                MinWidth="180"
+                                MaxWidth="280"
+                                Margin="8,0,0,0"
+                                VerticalContentAlignment="Center"
+                                TextChanged="QuickListNameTextBox_TextChanged"
+                                ToolTip="{DynamicResource QuickSendListNameTip}" />
+                            </DockPanel>
+                            <Grid Grid.Row="1" Margin="0,0,18,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="28" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="42" />
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="38" />
+                                    <ColumnDefinition Width="46" />
+                                    <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="0" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                Grid.Column="0"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendId}" />
+                                <TextBlock
+                                Grid.Column="1"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendContent}" />
+                                <TextBlock
+                                Grid.Column="3"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendHex}" />
+                                <TextBlock
+                                Grid.Column="4"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendAppendCrlf}" />
+                                <TextBlock
+                                Grid.Column="5"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendDisableSuggestion}" />
+                                <TextBlock
+                                Grid.Column="6"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource QuickSendRecvScript}" />
+                            </Grid>
+                        </Grid>
+                        <ListBox
+                        Name="toSendList"
+                        Grid.Row="1"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="0"
+                        ItemContainerStyle="{StaticResource toSendListStyle}"
+                        ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                        ScrollViewer.VerticalScrollBarVisibility="Auto"
+                        VirtualizingPanel.CacheLength="1,2"
+                        VirtualizingPanel.CacheLengthUnit="Page"
+                        VirtualizingPanel.IsVirtualizing="True"
+                        VirtualizingPanel.VirtualizationMode="Recycling" />
+                        <Popup Name="recvScriptPopup" Placement="Bottom" VerticalOffset="5" StaysOpen="True">
+                            <ComboBox Name="recvScriptCombo" Width="250" DropDownClosed="recvScriptCombo_DropDownClosed"/>
+                        </Popup>
+                        <Popup Name="recvScriptParaPopup" Placement="Bottom" VerticalOffset="5" StaysOpen="False">
+                            <Grid Background="{DynamicResource AppPopupBackground}">
+                                <Border
+                                BorderBrush="{DynamicResource AppGlassBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                    <TextBox
+                                    Name="recvScriptParaBox" 
+                                    Margin="3"
+                                    Width="250" Height="100" 
+                                    AcceptsReturn="True"
+                                    HorizontalContentAlignment="Left"
+                                    TextWrapping="Wrap"
+                                    VerticalContentAlignment="Top"
+                                    VerticalScrollBarVisibility="Auto" />
+                                </Border>
+                                <Grid HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,1,3,0" Background="Transparent">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Name="rsParaConfirm" Grid.Column="0" Tag="{Binding ElementName=recvScriptParaBox}" MouseLeftButtonUp="ScriptParaConfirm_Click">
+                                    <fa:FontAwesome Icon="Check" Foreground="{DynamicResource AppSuccessBrush}" FontSize="18"/>
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Setter Property="Opacity" Value="0.25"/>
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Opacity" Value="0.8"/>
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Name="rsParaCancel" Grid.Column="1" MouseLeftButtonUp="ScriptParaCancel_Click">
+                                    <fa:FontAwesome Icon="Times" Foreground="{DynamicResource AppDangerBrush}" FontSize="18"/>
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Setter Property="Opacity" Value="0.25"/>
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Opacity" Value="0.8"/>
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </Grid>
+                        </Popup>
+                        <StackPanel Grid.Row="2">
+                            <Button
+                            Name="addSendListButton"
+                            Height="34"
+                            Margin="3,8,3,3"
+                            Click="AddSendListButton_Click"
+                            Content="＋"
+                            FontSize="22"
+                            FontWeight="Bold"
+                            Style="{StaticResource GlassButtonStyle}"
+                            ToolTip="{DynamicResource QuickSendAdd}" />
+                            <Grid Margin="0,0,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button
+                                Name="QuickSendImportButton"
+                                Margin="3"
+                                Click="QuickSendImportButton_Click"
+                                Content="{DynamicResource QuickSendImport}" />
+                                <Button
+                                Name="QuickSendExportButton"
+                                Grid.Column="1"
+                                Margin="3"
+                                Click="QuickSendExportButton_Click"
+                                Content="{DynamicResource QuickSendExport}" />
+                                <Button
+                                Name="QuickSendExportAllButton"
+                                Grid.Column="2"
+                                Margin="3"
+                                Click="QuickSendExportAllButton_Click"
+                                Content="{DynamicResource QuickSendExportAll}" />
+                            </Grid>
+                            <Grid Margin="0,0,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button
+                                Name="AddQuickSendPageButton"
+                                Grid.Column="0"
+                                Margin="3"
+                                Click="AddQuickSendPageButton_Click"
+                                Content="{DynamicResource QuickSendAddPage}" />
+                                <Button
+                                Name="DeleteQuickSendPageButton"
+                                Grid.Column="1"
+                                Margin="3"
+                                Click="DeleteQuickSendPageButton_Click"
+                                Content="{DynamicResource QuickSendDeletePage}" />
+                            </Grid>
+
+                        </StackPanel>
+                    </Grid>
+                </TabItem>
+                <TabItem Name="ScriptTab" Header="{DynamicResource ScriptCard}" Margin="0,2,0,-8" Width="118">
+                    <Grid>
+                        <!--  脚本编辑界面  -->
+                        <Grid Name="scriptEditorGrid" Visibility="Visible">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="auto" />
+                                <RowDefinition Height="auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <WrapPanel Margin="0,0,0,5" Orientation="Horizontal">
+                                <ComboBox
+                                Name="scriptFileList"
+                                Width="260"
+                                SelectionChanged="ScriptFileList_SelectionChanged" />
+                                <Button
+                                Name="newScriptButton"
+                                Margin="3,0,0,0"
+                                Click="NewScriptButton_Click"
+                                ToolTip="{DynamicResource ScriptNewScript}">
+                                    <Grid>
+                                        <fa:FontAwesome Foreground="{DynamicResource AppInfoBrush}" Icon="File" />
+                                        <fa:FontAwesome Icon="FileCodeOutline" />
+                                    </Grid>
+                                </Button>
+                                <Button
+                                Name="runScriptButton"
+                                Margin="2,0,0,0"
+                                Click="RunScriptButton_Click"
+                                ToolTip="{DynamicResource ScriptRunScript}">
+                                    <fa:FontAwesome Foreground="{DynamicResource AppSuccessBrush}" Icon="Play" />
+                                </Button>
+                                <Button
+                                Name="openScriptFolderButton"
+                                Margin="2,0,0,0"
+                                Click="OpenScriptFolderButton_Click"
+                                ToolTip="{DynamicResource ScriptOpenFolder}">
+                                    <Grid>
+                                        <fa:FontAwesome Foreground="{DynamicResource AppWarningBrush}" Icon="FolderOpen" />
+                                        <fa:FontAwesome Icon="FolderOutlinepenOutline" />
+                                    </Grid>
+                                </Button>
+                                <Button
+                                Name="refreshScriptListButton"
+                                Margin="2,0,0,0"
+                                Click="RefreshScriptListButton_Click"
+                                ToolTip="{DynamicResource ScriptRefreshList}">
+                                    <fa:FontAwesome Foreground="{DynamicResource AppSuccessBrush}" Icon="Refresh" />
+                                </Button>
+                                <Button
+                                Name="apiDocumentButton"
+                                Margin="2,0,0,0"
+                                Click="ApiDocumentButton_Click"
+                                ToolTip="{DynamicResource ScriptApiReference}">
+                                    <fa:FontAwesome Foreground="{DynamicResource AppIconBrush}" Icon="Book" />
+                                </Button>
+                            </WrapPanel>
+                            <WrapPanel
+                            Name="newScriptFileWrapPanel"
+                            Grid.Row="1"
+                            Margin="3"
+                            Visibility="Collapsed">
+                                <TextBlock VerticalAlignment="Center" Text="{DynamicResource ScriptFileName}" />
+                                <TextBox
+                                Name="newScriptFileNameTextBox"
+                                Width="90"
+                                Text="new script" />
+                                <Button
+                                Name="newScriptFileButton"
+                                Margin="3,0,0,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Click="NewScriptFileButton_Click"
+                                ToolTip="{DynamicResource ScriptConfirmCreate}">
+                                    <fa:FontAwesome Foreground="{DynamicResource AppSuccessBrush}" Icon="Check" />
+                                </Button>
+                                <Button
+                                Name="newScriptFileCancelButton"
+                                Margin="3,0,0,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Click="NewScriptFileCancelButton_Click"
+                                ToolTip="{DynamicResource ScriptCancel}">
+                                    <fa:FontAwesome Foreground="{DynamicResource AppDangerBrush}" Icon="Ban" />
+                                </Button>
+                            </WrapPanel>
+                            <avalonEdit:TextEditor
+                            xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
+                            Name="textEditor"
+                            Grid.Row="2"
+                            FontFamily="Consolas"
+                            FontSize="10pt"
+                            Background="{DynamicResource AppCodeBackgroundBrush}"
+                            Foreground="{DynamicResource AppGlassTextBrush}"
+                            LineNumbersForeground="{DynamicResource AppGlassMutedBrush}"
+                            LostFocus="TextEditor_LostFocus"
+                            ShowLineNumbers="True"
+                            TextChanged="textEditor_TextChanged" />
+                        </Grid>
+                        <!--  脚本编辑界面END  -->
+
+                        <!--  脚本运行日志界面  -->
+                        <Grid Name="scriptLogShowGrid" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="auto" />
+                            </Grid.RowDefinitions>
+                            <TextBox
+                            Name="scriptLogTextBox"
+                            VerticalContentAlignment="Top"
+                            IsReadOnly="true"
+                            MouseLeave="scriptLogTextBox_MouseLeave"
+                            TextWrapping="Wrap"
+                            VerticalScrollBarVisibility="Auto" />
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="auto" />
+                                    <ColumnDefinition Width="auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button
+                                Name="stopScriptButton"
+                                Margin="0,3,3,3"
+                                Click="StopScriptButton_Click"
+                                Foreground="{DynamicResource AppDangerBrush}"
+                                ToolTip="{DynamicResource ScriptStop}">
+                                    <fa:FontAwesome Name="stopScriptOrExitIcon" Icon="Stop" />
+                                </Button>
+                                <Button
+                                Name="pauseScriptPrintButton"
+                                Grid.Column="1"
+                                Margin="0,3,3,3"
+                                Click="PauseScriptPrintButton_Click"
+                                Foreground="{DynamicResource AppSuccessBrush}"
+                                MouseRightButtonUp="pauseScriptPrintButton_MouseRightButtonUp"
+                                ToolTip="{DynamicResource ScriptPause}">
+                                    <fa:FontAwesome Name="pauseScriptPrintIcon" Icon="Pause" />
+                                </Button>
+                                <TextBox
+                                Name="runOneLineScriptTextBox"
+                                Grid.Column="2"
+                                Margin="0,3"
+                                KeyDown="RunOneLineScriptTextBox_KeyDown" />
+                                <Button
+                                Name="sendScriptCommandButton"
+                                Grid.Column="3"
+                                Margin="3,3,0,3"
+                                Click="SendScriptCommandButton_Click"
+                                Foreground="{DynamicResource AppInfoBrush}"
+                                ToolTip="{DynamicResource ScriptSendCommand}">
+                                    <fa:FontAwesome Icon="ArrowUp" />
+                                </Button>
+                            </Grid>
+                        </Grid>
+                        <!--  脚本运行日志界面END  -->
+                    </Grid>
+                </TabItem>
+                <TabItem Name="ToolsTab" Header="{DynamicResource ToolsTab}" Margin="0,2,0,-8" Width="118">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border
+                        Grid.Column="0"
+                        Padding="6"
+                        Style="{StaticResource GlassPanelTightStyle}">
+                            <ListBox
+                            Name="ToolListBox"
+                            ItemContainerStyle="{StaticResource ToolListItemStyle}"
+                            SelectionChanged="ToolListBox_SelectionChanged"
+                            Style="{StaticResource ToolListBoxStyle}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock
+                                            Foreground="{DynamicResource AppGlassTextBrush}"
+                                            Text="{Binding Title}"
+                                            TextOptions.TextFormattingMode="Display"
+                                            TextOptions.TextHintingMode="Fixed"
+                                            TextOptions.TextRenderingMode="ClearType" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+                        <Border
+                        Grid.Column="2"
+                        Padding="8"
+                        Background="{DynamicResource AppToolContentBackground}"
+                        BorderBrush="{DynamicResource AppGlassBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition x:Name="ToolContentColumn" Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <ContentControl
+                                    Name="ToolContentHost"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </TabItem>
+                <TabItem Name="AboutTab" Header="{DynamicResource AboutCard}" Margin="0,2,0,-8" Width="118">
+                    <Frame Name="aboutFrame" NavigationUIVisibility="Hidden" />
+                </TabItem>
+            </TabControl>
+        </Border>
+        <Border
+            Grid.RowSpan="2"
+            Grid.Column="3"
+            MinWidth="580"
+            Margin="10,12,12,8"
+            CornerRadius="18"
+            Style="{StaticResource FloatingGlassHighlightStyle}" />
+
+        <Grid
+            x:Name="RightTopActions"
+            Grid.Column="3"
+            Margin="0,18,20,0"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top">
+            <Border Style="{StaticResource FloatingGlassShadowStyle}" CornerRadius="15" />
+            <Border
+                Padding="4"
+                Background="{DynamicResource AppGlassPanelBackground}"
+                BorderBrush="{DynamicResource AppGlassHighlightBrush}"
+                BorderThickness="1"
+                CornerRadius="15">
+                <StackPanel Orientation="Horizontal">
+                    <Button
+                        Name="ThemeToggleMenuItem"
+                        Width="36"
+                        Height="36"
+                        Margin="0,0,4,0"
+                        Padding="0"
+                        Click="ThemeToggleMenuItem_Click"
+                        ToolTip="{DynamicResource DarkMode}">
+                        <fa:FontAwesome
+                            Name="ThemeToggleIcon"
+                            Width="16"
+                            Height="16"
+                            FontSize="16"
+                            Foreground="{DynamicResource AppAccentBrush}"
+                            Icon="Adjust" />
+                    </Button>
+                    <Button
+                        Name="LanguageMenuButton"
+                        Width="36"
+                        Height="36"
+                        Padding="0"
+                        Click="LanguageMenuButton_Click"
+                        ToolTip="{DynamicResource ChangeLanguage}">
+                        <fa:FontAwesome
+                            Width="16"
+                            Height="16"
+                            FontSize="16"
+                            Foreground="{DynamicResource AppInfoBrush}"
+                            Icon="Globe" />
+                        <Button.ContextMenu>
+                            <ContextMenu Placement="Bottom" VerticalOffset="6">
+                                <MenuItem
+                                    Click="MenuItem_Click"
+                                    Header="简体中文"
+                                    Tag="zh-CN" />
+                                <MenuItem
+                                    Click="MenuItem_Click"
+                                    Header="English"
+                                    Tag="en-US" />
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource FloatingGlassHighlightStyle}" CornerRadius="15" />
+        </Grid>
+    </Grid>
+</Window>

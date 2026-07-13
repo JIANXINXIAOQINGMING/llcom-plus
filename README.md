@@ -4,7 +4,7 @@
 
 <p align="center">
     <br>
-    <img src="./llcom plus/Assets/AppIcon.ico" width="150"/>
+    <img src="./llcom plus/Resources/Assets/AppIcon.ico" width="150"/>
     <br>
 </p>
 

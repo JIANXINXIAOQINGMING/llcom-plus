@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props" Condition="Exists('..\packages\PropertyChanged.Fody.3.4.0\build\PropertyChanged.Fody.props')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
@@ -32,13 +32,13 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>1</ApplicationRevision>
-    <ApplicationVersion>$(AppVersion)</ApplicationVersion>
+    <ApplicationVersion>$(BinaryVersion)</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <PublishWizardCompleted>true</PublishWizardCompleted>
     <BootstrapperEnabled>true</BootstrapperEnabled>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <ApplicationIcon>Resources\Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
     <DebugSymbols>true</DebugSymbols>
@@ -234,158 +234,169 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
-    <Compile Include="Model\LinePlotPoint.cs" />
-    <Compile Include="Pages\Convert.cs" />
-    <Compile Include="Pages\ConvertPage.xaml.cs">
+    <Compile Include="Core\Model\LinePlotPoint.cs" />
+    <Compile Include="UI\Pages\Convert.cs" />
+    <Compile Include="UI\Pages\ConvertPage.xaml.cs">
       <DependentUpon>ConvertPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\CircularSendPage.xaml.cs">
+    <Compile Include="UI\Pages\CircularSendPage.xaml.cs">
       <DependentUpon>CircularSendPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\DataCalcPage.xaml.cs">
+    <Compile Include="UI\Pages\DataCalcPage.xaml.cs">
       <DependentUpon>DataCalcPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\DataCalcFileSendView.xaml.cs">
+    <Compile Include="UI\Pages\DataCalcFileSendView.xaml.cs">
       <DependentUpon>DataCalcFileSendView.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\EncodingFixPage.xaml.cs">
+    <Compile Include="UI\Pages\EncodingFixPage.xaml.cs">
       <DependentUpon>EncodingFixPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\LogReplayPage.xaml.cs">
+    <Compile Include="UI\Pages\LogReplayPage.xaml.cs">
       <DependentUpon>LogReplayPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\MqttTestPage.xaml.cs">
+    <Compile Include="UI\Pages\MqttTestPage.xaml.cs">
       <DependentUpon>MqttTestPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\MultiPortPage.xaml.cs">
+    <Compile Include="UI\Pages\MultiPortPage.xaml.cs">
       <DependentUpon>MultiPortPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\PlotPage.xaml.cs">
+    <Compile Include="UI\Pages\PlotPage.xaml.cs">
       <DependentUpon>PlotPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\SerialMonitorPage.xaml.cs">
+    <Compile Include="UI\Pages\SerialMonitorPage.xaml.cs">
       <DependentUpon>SerialMonitorPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\SocketClientPage.xaml.cs">
+    <Compile Include="UI\Pages\SocketClientPage.xaml.cs">
       <DependentUpon>SocketClientPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\WinUSBPage.xaml.cs">
+    <Compile Include="UI\Pages\WinUSBPage.xaml.cs">
       <DependentUpon>WinUSBPage.xaml</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
-    <Compile Include="Tools\InputDialog.cs" />
-    <Compile Include="Tools\DataCalcResult.cs" />
-    <Compile Include="Tools\CipherSuitePicker.cs" />
-    <Compile Include="Tools\GitHubReleaseUpdater.cs" />
-    <Compile Include="Tools\OpenSslCli.cs" />
-    <Compile Include="Tools\OpenSslMessageExplainer.cs" />
-    <Compile Include="Tools\StartupProfiler.cs" />
-    <Compile Include="Tools\Win32.cs" />
-    <Compile Include="HttpTools\HeaderParser.cs" />
-    <Compile Include="HttpTools\HttpRequestService.cs" />
-    <Compile Include="HttpTools\HttpToolModels.cs" />
-    <Compile Include="View\InputDialogWindow.xaml.cs">
+    <Compile Include="Core\Tools\InputDialog.cs" />
+    <Compile Include="Core\Tools\AppInfo.cs" />
+    <Compile Include="Core\Tools\DataCalcResult.cs" />
+    <Compile Include="Core\Tools\CipherSuitePicker.cs" />
+    <Compile Include="Core\Tools\GitHubReleaseUpdater.cs" />
+    <Compile Include="Core\Tools\OpenSslCli.cs" />
+    <Compile Include="Core\Tools\OpenSslMessageExplainer.cs" />
+    <Compile Include="Core\Tools\EditorTheme.cs" />
+    <Compile Include="Core\Tools\SshCli.cs" />
+    <Compile Include="Core\Tools\StartupProfiler.cs" />
+    <Compile Include="Core\Tools\Win32.cs" />
+    <Compile Include="Core\HttpTools\HeaderParser.cs" />
+    <Compile Include="Core\HttpTools\HttpRequestService.cs" />
+    <Compile Include="Core\HttpTools\HttpToolModels.cs" />
+    <Compile Include="UI\View\InputDialogWindow.xaml.cs">
       <DependentUpon>InputDialogWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="View\FlowControlWindow.xaml.cs">
+    <Compile Include="UI\View\FlowControlWindow.xaml.cs">
       <DependentUpon>FlowControlWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="View\DataCalcWindow.xaml.cs">
+    <Compile Include="UI\View\DataCalcWindow.xaml.cs">
       <DependentUpon>DataCalcWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="View\HttpToolWindow.xaml.cs">
+    <Compile Include="UI\View\HttpToolWindow.xaml.cs">
       <DependentUpon>HttpToolWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="ScriptEnv\ScriptApis.cs" />
-    <Compile Include="ScriptEnv\JavaScriptLoader.cs" />
-    <Compile Include="ScriptEnv\JavaScriptRunEnv.cs" />
-    <Compile Include="Model\Settings.cs" />
-    <Compile Include="Model\ToSendData.cs" />
-    <Compile Include="Model\Uart.cs" />
-    <Compile Include="Pages\AboutPage.xaml.cs">
+    <Compile Include="Core\ScriptEnv\ScriptApis.cs" />
+    <Compile Include="Core\ScriptEnv\JavaScriptLoader.cs" />
+    <Compile Include="Core\ScriptEnv\JavaScriptRunEnv.cs" />
+    <Compile Include="Core\Model\Settings.cs" />
+    <Compile Include="Core\Model\ToSendData.cs" />
+    <Compile Include="Core\Model\Uart.cs" />
+    <Compile Include="UI\Pages\AboutPage.xaml.cs">
       <DependentUpon>AboutPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Pages\DataShowPage.xaml.cs">
+    <Compile Include="UI\Pages\DataShowPage.xaml.cs">
       <DependentUpon>DataShowPage.xaml</DependentUpon>
     </Compile>
-    <Compile Include="View\SettingWindow.xaml.cs">
+    <Compile Include="UI\View\SettingWindow.xaml.cs">
       <DependentUpon>SettingWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Tools\Global.cs" />
-    <Compile Include="Tools\Logger.cs" />
-    <Page Include="languages\en-US.xaml">
+    <Compile Include="Core\Tools\Global.cs" />
+    <Compile Include="Core\Tools\Logger.cs" />
+    <Page Include="Resources\Languages\en-US.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="languages\zh-CN.xaml">
+    <Page Include="Resources\Languages\zh-CN.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\ConvertPage.xaml">
+    <Page Include="Resources\Themes\Palette.Light.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\CircularSendPage.xaml">
+    <Page Include="Resources\Themes\Palette.Dark.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\DataCalcPage.xaml">
+    <Page Include="UI\Pages\ConvertPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\DataCalcFileSendView.xaml">
+    <Page Include="UI\Pages\CircularSendPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\EncodingFixPage.xaml">
+    <Page Include="UI\Pages\DataCalcPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\LogReplayPage.xaml">
+    <Page Include="UI\Pages\DataCalcFileSendView.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\MqttTestPage.xaml">
+    <Page Include="UI\Pages\EncodingFixPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\MultiPortPage.xaml">
+    <Page Include="UI\Pages\LogReplayPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\PlotPage.xaml">
+    <Page Include="UI\Pages\MqttTestPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\SerialMonitorPage.xaml">
+    <Page Include="UI\Pages\MultiPortPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\SocketClientPage.xaml">
+    <Page Include="UI\Pages\PlotPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\WinUSBPage.xaml">
+    <Page Include="UI\Pages\SerialMonitorPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="View\InputDialogWindow.xaml">
+    <Page Include="UI\Pages\SocketClientPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="View\FlowControlWindow.xaml">
+    <Page Include="UI\Pages\WinUSBPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="View\DataCalcWindow.xaml">
+    <Page Include="UI\View\InputDialogWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="View\HttpToolWindow.xaml">
+    <Page Include="UI\View\FlowControlWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="View\MainWindow.xaml">
+    <Page Include="UI\View\DataCalcWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\View\HttpToolWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\View\MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
@@ -393,19 +404,19 @@
       <DependentUpon>App.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="View\MainWindow.xaml.cs">
+    <Compile Include="UI\View\MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
-    <Page Include="Pages\AboutPage.xaml">
+    <Page Include="UI\Pages\AboutPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="Pages\DataShowPage.xaml">
+    <Page Include="UI\Pages\DataShowPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="View\SettingWindow.xaml">
+    <Page Include="UI\View\SettingWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -428,22 +439,22 @@
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
-    <Resource Include="DefaultFiles\LICENSE" />
-    <Resource Include="DefaultFiles\user_script_run\AT控制TCP连接-快发模式.js" />
-    <Resource Include="DefaultFiles\user_script_run\AT控制TCP连接-慢发模式.js" />
-    <Resource Include="DefaultFiles\user_script_run\example.js" />
-    <Resource Include="DefaultFiles\user_script_run\循环发送快捷发送区数据.js" />
-    <Resource Include="DefaultFiles\user_script_run\channel-demo.js" />
-    <Resource Include="DefaultFiles\user_script_send_convert\16进制数据.js" />
-    <Resource Include="DefaultFiles\user_script_send_convert\GPS NMEA.js" />
-    <Resource Include="DefaultFiles\user_script_send_convert\加上换行回车.js" />
-    <Resource Include="DefaultFiles\user_script_send_convert\解析换行回车的转义字符.js" />
-    <Resource Include="DefaultFiles\user_script_send_convert\default.js" />
-    <Resource Include="DefaultFiles\user_script_send_convert\checksum.js" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\default.js" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线.js" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线-多条.js" />
-    <Resource Include="DefaultFiles\user_script_recv_convert\绘制曲线-解析结构体.js" />
+    <Resource Include="Resources\DefaultFiles\LICENSE" />
+    <Resource Include="Resources\DefaultFiles\user_script_run\AT控制TCP连接-快发模式.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_run\AT控制TCP连接-慢发模式.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_run\example.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_run\循环发送快捷发送区数据.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_run\channel-demo.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_send_convert\16进制数据.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_send_convert\GPS NMEA.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_send_convert\加上换行回车.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_send_convert\解析换行回车的转义字符.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_send_convert\default.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_send_convert\checksum.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_recv_convert\default.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_recv_convert\绘制曲线.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_recv_convert\绘制曲线-多条.js" />
+    <Resource Include="Resources\DefaultFiles\user_script_recv_convert\绘制曲线-解析结构体.js" />
     <None Include="packages.config" />
     <None Include="..\JavaScriptApi.md">
       <Link>JavaScriptApi.md</Link>
@@ -458,8 +469,9 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="Assets\AppIcon.ico" />
-    <Resource Include="Assets\AppBackground.png" />
+    <Resource Include="Resources\Assets\AppIcon.ico" />
+    <Resource Include="Resources\Assets\AppBackground.png" />
+    <Resource Include="Resources\Themes\JavaScript.Dark.xshd" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="FodyWeavers.xml" />
@@ -481,12 +493,12 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Native\x86\serial_monitor.dll" />
-    <None Include="Native\x64\serial_monitor.dll" />
+    <None Include="Runtime\Native\x86\serial_monitor.dll" />
+    <None Include="Runtime\Native\x64\serial_monitor.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="DefaultFiles\libusb-1.0-x64.dll" />
-    <Resource Include="DefaultFiles\libusb-1.0-x86.dll" />
+    <Resource Include="Resources\DefaultFiles\libusb-1.0-x64.dll" />
+    <Resource Include="Resources\DefaultFiles\libusb-1.0-x86.dll" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="$(IntermediateOutputPath)AppVersion.g.cs" />
@@ -501,15 +513,17 @@
       <Output TaskParameter="Result" PropertyName="AppVersion" />
     </XmlPeek>
     <Error Condition="'$(AppVersion)' == ''" Text="AppVersion is empty. Check $(MSBuildProjectDirectory)\..\Version.props." />
-    <Message Importance="High" Text="AppVersion -> $(AppVersion)" />
+    <Error Condition="'$(BinaryVersion)' == ''" Text="BinaryVersion is empty. Check $(MSBuildProjectDirectory)\..\Version.props." />
+    <Error Condition="'$(AppxVersion)' == ''" Text="AppxVersion is empty. Check $(MSBuildProjectDirectory)\..\Version.props." />
+    <Message Importance="High" Text="Version -> public $(AppVersion), binary $(BinaryVersion), appx $(AppxVersion)" />
   </Target>
   <Target Name="GenerateAppVersionInfo" BeforeTargets="CoreCompile">
     <ItemGroup>
       <AppVersionAssemblyAttribute Include="System.Reflection.AssemblyVersionAttribute">
-        <_Parameter1>$(AppVersion)</_Parameter1>
+        <_Parameter1>$(BinaryVersion)</_Parameter1>
       </AppVersionAssemblyAttribute>
       <AppVersionAssemblyAttribute Include="System.Reflection.AssemblyFileVersionAttribute">
-        <_Parameter1>$(AppVersion)</_Parameter1>
+        <_Parameter1>$(BinaryVersion)</_Parameter1>
       </AppVersionAssemblyAttribute>
       <AppVersionAssemblyAttribute Include="System.Reflection.AssemblyInformationalVersionAttribute">
         <_Parameter1>$(AppVersion)</_Parameter1>
@@ -521,12 +535,12 @@
       OutputFile="$(IntermediateOutputPath)AppVersion.g.cs" />
   </Target>
   <Target Name="SyncRepositoryVersionFiles" BeforeTargets="Build">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AutoUpdate -AppxManifest" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AppxVersion &quot;$(AppxVersion)&quot; -AutoUpdate -AppxManifest" />
   </Target>
   <Target Name="ResolveNativeRuntimeFiles">
     <ItemGroup>
-      <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Native\x86\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x86' Or '$(Platform)' == 'x86'" />
-      <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Native\x64\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x64' Or '$(Platform)' == 'x64'" />
+      <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\Native\x86\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x86' Or '$(Platform)' == 'x86'" />
+      <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\Native\x64\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x64' Or '$(Platform)' == 'x64'" />
     </ItemGroup>
     <Error Condition="'@(NativeRuntimeFile)' == ''" Text="No native runtime files configured for PlatformTarget=$(PlatformTarget), Platform=$(Platform)." />
     <Error Condition="'@(NativeRuntimeFile)' != '' And !Exists('%(NativeRuntimeFile.Identity)')" Text="Missing native runtime file: %(NativeRuntimeFile.Identity)" />
@@ -534,9 +548,9 @@
   <Target Name="CopyNativeRuntimeFiles" AfterTargets="Build" DependsOnTargets="ResolveNativeRuntimeFiles">
     <Copy SourceFiles="@(NativeRuntimeFile)" DestinationFiles="@(NativeRuntimeFile->'$(TargetDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
-  <Target Name="CopyOpenSslRuntimeFiles" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\OpenSSL')">
+  <Target Name="CopyOpenSslRuntimeFiles" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\Runtime\OpenSSL')">
     <ItemGroup>
-      <OpenSslRuntimeFile Include="$(MSBuildProjectDirectory)\OpenSSL\**\*" />
+      <OpenSslRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\OpenSSL\**\*" />
     </ItemGroup>
     <MakeDir Directories="$(TargetDir)OpenSSL" />
     <Copy SourceFiles="@(OpenSslRuntimeFile)" DestinationFiles="@(OpenSslRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />

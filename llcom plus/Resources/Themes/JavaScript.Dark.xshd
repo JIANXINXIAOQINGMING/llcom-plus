@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<SyntaxDefinition
+    name="JavaScript Dark"
+    extensions=".js"
+    xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+    <Color name="Digits" foreground="#B5CEA8" />
+    <Color name="Comment" foreground="#6A9955" />
+    <Color name="String" foreground="#CE9178" />
+    <Color name="Regex" foreground="#D16969" />
+    <Color name="Keyword" foreground="#569CD6" fontWeight="bold" />
+    <Color name="Intrinsic" foreground="#4EC9B0" />
+    <Color name="Literal" foreground="#C586C0" />
+    <Color name="GlobalFunction" foreground="#DCDCAA" />
+    <RuleSet ignoreCase="false">
+        <Keywords color="Keyword">
+            <Word>async</Word><Word>await</Word><Word>break</Word><Word>case</Word>
+            <Word>catch</Word><Word>class</Word><Word>const</Word><Word>continue</Word>
+            <Word>debugger</Word><Word>default</Word><Word>delete</Word><Word>do</Word>
+            <Word>else</Word><Word>export</Word><Word>extends</Word><Word>finally</Word>
+            <Word>for</Word><Word>from</Word><Word>function</Word><Word>get</Word>
+            <Word>if</Word><Word>import</Word><Word>in</Word><Word>instanceof</Word>
+            <Word>let</Word><Word>new</Word><Word>of</Word><Word>return</Word>
+            <Word>set</Word><Word>static</Word><Word>super</Word><Word>switch</Word>
+            <Word>this</Word><Word>throw</Word><Word>try</Word><Word>typeof</Word>
+            <Word>var</Word><Word>void</Word><Word>while</Word><Word>with</Word>
+            <Word>yield</Word>
+        </Keywords>
+        <Keywords color="Intrinsic">
+            <Word>Array</Word><Word>Boolean</Word><Word>Date</Word><Word>Error</Word>
+            <Word>Function</Word><Word>JSON</Word><Word>Map</Word><Word>Math</Word>
+            <Word>Number</Word><Word>Object</Word><Word>Promise</Word><Word>RegExp</Word>
+            <Word>Set</Word><Word>String</Word><Word>Symbol</Word>
+        </Keywords>
+        <Keywords color="Literal">
+            <Word>false</Word><Word>null</Word><Word>true</Word><Word>undefined</Word>
+            <Word>NaN</Word><Word>Infinity</Word>
+        </Keywords>
+        <Keywords color="GlobalFunction">
+            <Word>decodeURI</Word><Word>decodeURIComponent</Word><Word>encodeURI</Word>
+            <Word>encodeURIComponent</Word><Word>eval</Word><Word>isFinite</Word>
+            <Word>isNaN</Word><Word>parseFloat</Word><Word>parseInt</Word>
+        </Keywords>
+        <Span color="Comment"><Begin>//</Begin></Span>
+        <Span color="Comment" multiline="true"><Begin>/\*</Begin><End>\*/</End></Span>
+        <Span color="String" multiline="true"><Begin>&quot;</Begin><End>&quot;</End><RuleSet><Span begin="\\" end="." /></RuleSet></Span>
+        <Span color="String" multiline="true"><Begin>'</Begin><End>'</End><RuleSet><Span begin="\\" end="." /></RuleSet></Span>
+        <Span color="String" multiline="true"><Begin>`</Begin><End>`</End><RuleSet><Span begin="\\" end="." /></RuleSet></Span>
+        <Span color="Regex"><Begin>(?&lt;!([})\]\w]+\s*))/</Begin><End>/[gimuy]*</End></Span>
+        <Rule color="Digits">\b0[xX][0-9a-fA-F]+|\b0[bB][01]+|(\b\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?</Rule>
+    </RuleSet>
+</SyntaxDefinition>

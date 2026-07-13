@@ -43,6 +43,14 @@ namespace llcom_plus
             Tools.StartupProfiler.Mark("App.OnStartup exit");
         }
 
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+            var darkMode = Tools.Global.setting?.darkMode ?? Tools.Global.IsDarkTheme;
+            foreach (Window window in Windows)
+                Tools.Win32.ApplyWindowTheme(window, darkMode, !(window is MainWindow));
+        }
+
         private void DispatcherOnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs dispatcherUnhandledExceptionEventArgs)
         {
             SendReport(dispatcherUnhandledExceptionEventArgs.Exception);

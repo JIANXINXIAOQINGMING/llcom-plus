@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Version,
 
+    [string]$AppxVersion = "",
+
     [switch]$AutoUpdate,
     [switch]$AppxManifest
 )
@@ -12,6 +14,9 @@ param(
 $ErrorActionPreference = "Stop"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
+if ([string]::IsNullOrWhiteSpace($AppxVersion)) {
+    $AppxVersion = $Version
+}
 
 function Update-TextFile {
     param(
@@ -50,7 +55,7 @@ if ($AppxManifest) {
         [regex]::Replace(
             $text,
             '(<Identity\b[^>]*\bVersion=")[^"]+(")',
-            { param($m) $m.Groups[1].Value + $Version + $m.Groups[2].Value },
+            { param($m) $m.Groups[1].Value + $AppxVersion + $m.Groups[2].Value },
             1)
     }
 }

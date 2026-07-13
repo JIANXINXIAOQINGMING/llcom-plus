@@ -1,0 +1,77 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <LinearGradientBrush x:Key="AppWindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Offset="0" Color="#FF09101A" />
+        <GradientStop Offset="0.5" Color="#FF101A28" />
+        <GradientStop Offset="1" Color="#FF171525" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="AppTitleBarBrush" Color="#FF09101A" />
+    <RadialGradientBrush x:Key="AppAmbientTopBrush" Center="0.32,0.28" GradientOrigin="0.32,0.28" RadiusX="0.72" RadiusY="0.72">
+        <GradientStop Offset="0" Color="#69306CA8" />
+        <GradientStop Offset="0.58" Color="#24306CA8" />
+        <GradientStop Offset="1" Color="#00306CA8" />
+    </RadialGradientBrush>
+    <RadialGradientBrush x:Key="AppAmbientBottomBrush" Center="0.66,0.72" GradientOrigin="0.66,0.72" RadiusX="0.74" RadiusY="0.74">
+        <GradientStop Offset="0" Color="#594D225F" />
+        <GradientStop Offset="0.6" Color="#214D225F" />
+        <GradientStop Offset="1" Color="#004D225F" />
+    </RadialGradientBrush>
+    <sys:Double x:Key="AppBackdropImageOpacity">0.22</sys:Double>
+    <SolidColorBrush x:Key="AppWindowOverlayBrush" Color="#3F050A12" />
+
+    <LinearGradientBrush x:Key="AppGlassPanelBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="#B14C5D70" />
+        <GradientStop Offset="0.42" Color="#962A394C" />
+        <GradientStop Offset="1" Color="#7D121C2A" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AppGlassHighlightBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Offset="0" Color="#C9FFFFFF" />
+        <GradientStop Offset="0.48" Color="#609ED8FF" />
+        <GradientStop Offset="1" Color="#30FFFFFF" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="AppGlassShadowCasterBrush" Color="#76253649" />
+    <SolidColorBrush x:Key="AppGlassPanelBorderBrush" Color="#72FFFFFF" />
+    <SolidColorBrush x:Key="AppGlassInputBackground" Color="#D6131A24" />
+    <SolidColorBrush x:Key="AppGlassControlBackground" Color="#BD293544" />
+    <SolidColorBrush x:Key="AppGlassControlHoverBackground" Color="#E33A4859" />
+    <SolidColorBrush x:Key="AppGlassControlPressedBackground" Color="#D51A2430" />
+    <SolidColorBrush x:Key="AppGlassBorderBrush" Color="#708FA3BA" />
+    <SolidColorBrush x:Key="AppGlassFocusBorderBrush" Color="#ED0A84FF" />
+    <SolidColorBrush x:Key="AppGlassTextBrush" Color="#FFF2F6FA" />
+    <SolidColorBrush x:Key="AppGlassMutedBrush" Color="#FFADB9C8" />
+    <Color x:Key="AppShadowColor">#D0000000</Color>
+
+    <SolidColorBrush x:Key="AppAccentBrush" Color="#FF0A84FF" />
+    <SolidColorBrush x:Key="AppAccentHoverBrush" Color="#FF2997FF" />
+    <SolidColorBrush x:Key="AppAccentPressedBrush" Color="#FF006EDB" />
+    <SolidColorBrush x:Key="AppAccentSoftBrush" Color="#470A84FF" />
+    <SolidColorBrush x:Key="AppAccentTextBrush" Color="#FFFFFFFF" />
+
+    <SolidColorBrush x:Key="AppTabStripBackground" Color="#66121B28" />
+    <SolidColorBrush x:Key="AppTabStripBorderBrush" Color="#45FFFFFF" />
+    <LinearGradientBrush x:Key="AppToolContentBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="#A52A394C" />
+        <GradientStop Offset="1" Color="#78111A27" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="AppPopupBackground" Color="#F51B2532" />
+    <SolidColorBrush x:Key="AppReadOnlyBackground" Color="#D51B2530" />
+    <SolidColorBrush x:Key="AppSelectedItemBackground" Color="#570A84FF" />
+    <SolidColorBrush x:Key="AppSplitterBrush" Color="#5CFFFFFF" />
+    <SolidColorBrush x:Key="AppCodeBackgroundBrush" Color="#F20B111A" />
+
+    <SolidColorBrush x:Key="AppDataSentBrush" Color="#FFFF9F9A" />
+    <SolidColorBrush x:Key="AppDataReceivedBrush" Color="#FF8EE8AA" />
+    <SolidColorBrush x:Key="AppDataSentSoftBrush" Color="#FFFFB4B0" />
+    <SolidColorBrush x:Key="AppDataReceivedSoftBrush" Color="#FFA6F0BA" />
+    <SolidColorBrush x:Key="AppSuccessBrush" Color="#FF30D158" />
+    <SolidColorBrush x:Key="AppDangerBrush" Color="#FFFF453A" />
+    <SolidColorBrush x:Key="AppWarningBrush" Color="#FFFFD60A" />
+    <SolidColorBrush x:Key="AppInfoBrush" Color="#FF64D2FF" />
+    <SolidColorBrush x:Key="AppIconBrush" Color="#FFC5CED9" />
+    <SolidColorBrush x:Key="AppDataGridLineBrush" Color="#495F7187" />
+    <SolidColorBrush x:Key="AppDataGridRowBackground" Color="#C71A2532" />
+    <SolidColorBrush x:Key="AppDataGridAlternateRowBackground" Color="#B8212E3D" />
+</ResourceDictionary>

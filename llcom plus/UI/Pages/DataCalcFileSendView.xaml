@@ -1,0 +1,129 @@
+<UserControl
+    x:Class="llcom_plus.Pages.DataCalcFileSendView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    d:DesignHeight="450"
+    d:DesignWidth="820"
+    mc:Ignorable="d">
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button
+                Name="SelectFileButton"
+                MinWidth="90"
+                Height="32"
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Click="SelectFileButton_Click"
+                Content="{DynamicResource DataCalcSelectFile}" />
+            <TextBox
+                Name="FilePathTextBox"
+                Grid.Column="1"
+                Height="32"
+                VerticalContentAlignment="Center"
+                FontFamily="Consolas"
+                IsReadOnly="True"
+                Text="{DynamicResource DataCalcNoFileSelected}" />
+        </Grid>
+
+        <WrapPanel
+            Grid.Row="1"
+            Margin="0,14,0,14"
+            ItemHeight="36"
+            VerticalAlignment="Center">
+            <TextBlock
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                FontWeight="SemiBold"
+                Text="{DynamicResource DataCalcSource}" />
+            <ComboBox
+                Name="SourceComboBox"
+                Width="130"
+                Height="32"
+                Margin="0,0,12,0"
+                VerticalContentAlignment="Center"
+                SelectedIndex="0"
+                SelectionChanged="SourceComboBox_SelectionChanged">
+                <ComboBoxItem Content="{DynamicResource DataCalcSourceManual}" />
+                <ComboBoxItem Content="{DynamicResource DataCalcSourceFile}" />
+            </ComboBox>
+            <CheckBox
+                Name="HexInputCheckBox"
+                Height="32"
+                Margin="0,0,12,0"
+                VerticalAlignment="Center"
+                VerticalContentAlignment="Center"
+                Checked="InputSourceChanged"
+                Unchecked="InputSourceChanged"
+                Content="{DynamicResource DataCalcHexInput}" />
+            <Button
+                Name="SendSelectedDataButton"
+                MinWidth="100"
+                Height="32"
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Click="SendSelectedDataButton_Click"
+                Content="{DynamicResource DataCalcSendSelected}" />
+            <Button
+                Name="CalculateDataButton"
+                MinWidth="90"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="CalculateDataButton_Click"
+                Content="{DynamicResource DataCalcCalculate}" />
+        </WrapPanel>
+
+        <Grid Grid.Row="2" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ProgressBar
+                Name="SendProgressBar"
+                Height="10"
+                Maximum="100"
+                Minimum="0"
+                VerticalAlignment="Center"
+                Value="0" />
+            <TextBlock
+                Name="SendProgressTextBlock"
+                Grid.Column="1"
+                MinWidth="150"
+                Margin="10,0,0,0"
+                VerticalAlignment="Center"
+                FontFamily="Consolas"
+                Text="{DynamicResource DataCalcSendProgressIdle}" />
+        </Grid>
+
+        <Grid Grid.Row="3">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <TextBlock
+                Margin="0,0,0,8"
+                FontWeight="SemiBold"
+                Text="{DynamicResource DataCalcManualInput}" />
+            <TextBox
+                Name="ManualDataTextBox"
+                Grid.Row="1"
+                AcceptsReturn="True"
+                FontFamily="Consolas"
+                TextChanged="ManualDataTextBox_TextChanged"
+                TextWrapping="Wrap"
+                VerticalScrollBarVisibility="Auto" />
+        </Grid>
+    </Grid>
+</UserControl>

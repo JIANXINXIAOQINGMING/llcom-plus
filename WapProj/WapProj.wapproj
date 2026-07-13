@@ -118,18 +118,18 @@
   <Target Name="LoadAppVersionFromProps" BeforeTargets="SyncAppxManifestVersion">
     <XmlPeek
       XmlInputPath="$(MSBuildProjectDirectory)\..\Version.props"
-      Query="/msb:Project/msb:PropertyGroup/msb:AppVersion/text()"
+      Query="/msb:Project/msb:PropertyGroup/msb:AppxVersion/text()"
       Namespaces="&lt;Namespace Prefix='msb' Uri='http://schemas.microsoft.com/developer/msbuild/2003' /&gt;"
       Condition="Exists('$(MSBuildProjectDirectory)\..\Version.props')">
-      <Output TaskParameter="Result" PropertyName="AppVersion" />
+      <Output TaskParameter="Result" PropertyName="AppxVersion" />
     </XmlPeek>
-    <Error Condition="'$(AppVersion)' == ''" Text="AppVersion is empty. Check $(MSBuildProjectDirectory)\..\Version.props." />
-    <Message Importance="High" Text="AppVersion -> $(AppVersion)" />
+    <Error Condition="'$(AppxVersion)' == ''" Text="AppxVersion is empty. Check $(MSBuildProjectDirectory)\..\Version.props." />
+    <Message Importance="High" Text="AppxVersion -> $(AppxVersion)" />
   </Target>
   <Target Name="SyncAppxManifestVersion" BeforeTargets="Build">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AppxManifest" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AppxVersion &quot;$(AppxVersion)&quot; -AppxManifest" />
   </Target>
   <Target Name="SyncAppxIconAssets" BeforeTargets="Build">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Appx-Icons.ps1&quot; -IconPath &quot;$(MSBuildProjectDirectory)\..\llcom plus\Assets\AppIcon.ico&quot; -ImagesPath &quot;$(MSBuildProjectDirectory)\Images&quot;" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Appx-Icons.ps1&quot; -IconPath &quot;$(MSBuildProjectDirectory)\..\llcom plus\Resources\Assets\AppIcon.ico&quot; -ImagesPath &quot;$(MSBuildProjectDirectory)\Images&quot;" />
   </Target>
 </Project>

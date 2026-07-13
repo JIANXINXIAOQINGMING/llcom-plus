@@ -9,8 +9,8 @@
 #   .\build.ps1 -Arch All -Config Debug
 #
 # Outputs:
-#   x64  ->  ..\llcom plus\Native\x64\serial_monitor.dll
-#   x86  ->  ..\llcom plus\Native\x86\serial_monitor.dll
+#   x64  ->  ..\llcom plus\Runtime\Native\x64\serial_monitor.dll
+#   x86  ->  ..\llcom plus\Runtime\Native\x86\serial_monitor.dll
 
 param(
     [string]$Config = "Release",
@@ -52,7 +52,7 @@ function Build-For {
         throw "Build succeeded but DLL not found at: $dllSrc"
     }
 
-    $dstRoot = Join-Path $scriptDir "..\llcom plus\Native\$dstDir"
+    $dstRoot = Join-Path $scriptDir "..\llcom plus\Runtime\Native\$dstDir"
     New-Item -ItemType Directory -Force -Path $dstRoot | Out-Null
     $dst = Join-Path $dstRoot "serial_monitor.dll"
     Copy-Item -Force $dllSrc $dst

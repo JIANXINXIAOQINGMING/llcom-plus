@@ -2,6 +2,8 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!-- Single source of truth for the application version. -->
   <PropertyGroup>
-    <AppVersion>1.1.1.7</AppVersion>
+    <AppVersion>1.2.1</AppVersion>
+    <BinaryVersion>1.2.1.0</BinaryVersion>
+    <AppxVersion>1.2.1.0</AppxVersion>
   </PropertyGroup>
 </Project>

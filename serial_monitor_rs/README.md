@@ -2,7 +2,7 @@
 
 Rust rewrite of the closed-source `serial_monitor.dll` used by [llcom](https://github.com/chenxuuu/llcom).
 
-Maintains full API compatibility with the original DLL so it drops in as a replacement in `llcom plus/Native/x64/` or `llcom plus/Native/x86/`.
+Maintains full API compatibility with the original DLL so it drops in as a replacement in `llcom plus/Runtime/Native/x64/` or `llcom plus/Runtime/Native/x86/`.
 
 ---
 
@@ -56,7 +56,7 @@ cd serial_monitor_rs
 .\build.ps1
 ```
 
-This builds `serial_monitor.dll` (x64 release) and copies it to `llcom plus/Native/x64/serial_monitor.dll`.
+This builds `serial_monitor.dll` (x64 release) and copies it to `llcom plus/Runtime/Native/x64/serial_monitor.dll`.
 
 ### Manual build
 
@@ -107,7 +107,7 @@ public struct Udata {
 
 用 Rust 重写的 `serial_monitor.dll`，替换 [llcom](https://github.com/chenxuuu/llcom) 原先使用的同名闭源 DLL。
 
-保持与原 DLL 完全相同的导出接口，可直接覆盖 `llcom plus/Native/x64/` 或 `llcom plus/Native/x86/` 目录下的旧文件。
+保持与原 DLL 完全相同的导出接口，可直接覆盖 `llcom plus/Runtime/Native/x64/` 或 `llcom plus/Runtime/Native/x86/` 目录下的旧文件。
 
 ---
 
@@ -161,7 +161,7 @@ cd serial_monitor_rs
 .\build.ps1
 ```
 
-脚本会依次编译 Hook DLL 和主 DLL（x64 release），并将 `serial_monitor.dll` 复制到 `llcom plus/Native/x64/`。
+脚本会依次编译 Hook DLL 和主 DLL（x64 release），并将 `serial_monitor.dll` 复制到 `llcom plus/Runtime/Native/x64/`。
 
 ### 手动编译
 
@@ -224,6 +224,6 @@ public struct Udata {
 
 ## How llcom plus integrates it
 
-`llcom plus/llcom plus.csproj` copies the platform-specific DLL from `llcom plus/Native/x64/` or `llcom plus/Native/x86/` into the application output directory during build.
+`llcom plus/llcom plus.csproj` copies the platform-specific DLL from `llcom plus/Runtime/Native/x64/` or `llcom plus/Runtime/Native/x86/` into the application output directory during build.
 
 After building this Rust project, rebuild the C# project so the selected native DLL is copied next to `llcom plus.exe`.

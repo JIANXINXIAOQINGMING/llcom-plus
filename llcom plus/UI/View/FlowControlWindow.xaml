@@ -1,0 +1,68 @@
+<Window
+    x:Class="llcom_plus.FlowControlWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:adonisExtensions="clr-namespace:AdonisUI.Extensions;assembly=AdonisUI"
+    Title="{DynamicResource FlowControlWindowTitle}"
+    Width="380"
+    MinWidth="360"
+    MinHeight="245"
+    SizeToContent="Height"
+    adonisExtensions:RippleExtension.FadeInDuration="0"
+    adonisExtensions:RippleExtension.FadeOutDuration="0"
+    Loaded="Window_Loaded"
+    ResizeMode="NoResize"
+    WindowStartupLocation="CenterOwner">
+    <Window.Style>
+        <Style BasedOn="{StaticResource AppGlassWindowStyle}" TargetType="Window" />
+    </Window.Style>
+    <StackPanel Margin="16,14,16,16">
+        <WrapPanel Margin="0,0,0,10">
+            <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingFlowControl}" />
+            <ComboBox
+                Width="190"
+                Margin="8,0,0,0"
+                SelectedIndex="{Binding flowControl}">
+                <ComboBoxItem Content="{DynamicResource SettingFlowNone}" />
+                <ComboBoxItem Content="{DynamicResource SettingFlowHardware}" />
+                <ComboBoxItem Content="{DynamicResource SettingFlowSoftware}" />
+            </ComboBox>
+        </WrapPanel>
+
+        <GroupBox
+            HorizontalAlignment="Stretch"
+            Header="{DynamicResource SettingSendThrottle}">
+            <StackPanel Margin="8">
+                <WrapPanel Margin="0,2">
+                    <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingSendThrottlePacket}" />
+                    <TextBox
+                        Width="70"
+                        Margin="8,0,4,0"
+                        Text="{Binding sendThrottlePacketSize, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingByte}" />
+                </WrapPanel>
+                <WrapPanel Margin="0,8,0,2">
+                    <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingSendThrottleDelay}" />
+                    <TextBox
+                        Width="70"
+                        Margin="8,0,4,0"
+                        Text="{Binding sendThrottleDelayMs, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingMsShort}" />
+                </WrapPanel>
+                <TextBlock
+                    Margin="0,8,0,0"
+                    FontSize="12"
+                    Text="{DynamicResource SettingSendThrottleTip}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </GroupBox>
+
+        <Button
+            Name="ConfirmButton"
+            MinWidth="80"
+            Margin="0,12,0,0"
+            HorizontalAlignment="Right"
+            Click="CloseButton_Click"
+            Content="{DynamicResource InputDialogConfirm}" />
+    </StackPanel>
+</Window>
