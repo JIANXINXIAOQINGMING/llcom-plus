@@ -113,10 +113,23 @@ namespace llcom_plus.Pages
                 return;
 
             var popupChild = LogOptionsPopup.Child as UIElement;
-            if (LogOptionsButton.IsMouseOver || (popupChild?.IsMouseOver ?? false))
+            var placementTarget = LogOptionsPopup.PlacementTarget as UIElement;
+            if (LogOptionsButton.IsMouseOver || (placementTarget?.IsMouseOver ?? false) || (popupChild?.IsMouseOver ?? false))
                 return;
 
             LogOptionsButton.IsChecked = false;
+        }
+
+        public void ToggleOptions(UIElement placementTarget)
+        {
+            if (placementTarget == null)
+                return;
+
+            LogOptionsPopup.PlacementTarget = placementTarget;
+            LogOptionsPopup.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+            LogOptionsPopup.HorizontalOffset = 0;
+            LogOptionsPopup.VerticalOffset = -6;
+            LogOptionsButton.IsChecked = LogOptionsButton.IsChecked != true;
         }
 
         private void Logger_DataClearEvent(object sender, EventArgs e)

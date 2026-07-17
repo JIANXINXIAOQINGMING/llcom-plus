@@ -40,6 +40,20 @@
     <SolidColorBrush x:Key="AppGlassControlBackground" Color="#C4FFFFFF" />
     <SolidColorBrush x:Key="AppGlassControlHoverBackground" Color="#F2FFFFFF" />
     <SolidColorBrush x:Key="AppGlassControlPressedBackground" Color="#D1E8F2FF" />
+    <LinearGradientBrush x:Key="AppFloatingGlassBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="#8AFFFFFF" />
+        <GradientStop Offset="0.48" Color="#66FFFFFF" />
+        <GradientStop Offset="1" Color="#50EAF3FB" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="AppFloatingGlassBorderBrush" Color="#C8FFFFFF" />
+    <SolidColorBrush x:Key="AppFloatingGlassControlBackground" Color="#78FFFFFF" />
+    <SolidColorBrush x:Key="AppFloatingGlassControlBorderBrush" Color="#70788DA3" />
+    <LinearGradientBrush x:Key="AppFloatingContentBackground" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Offset="0" Color="#B8FFFFFF" />
+        <GradientStop Offset="0.5" Color="#94FFFFFF" />
+        <GradientStop Offset="1" Color="#78EAF3FB" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="AppFloatingContentBorderBrush" Color="#D8FFFFFF" />
     <SolidColorBrush x:Key="AppGlassBorderBrush" Color="#66788DA3" />
     <SolidColorBrush x:Key="AppGlassFocusBorderBrush" Color="#D0007AFF" />
     <SolidColorBrush x:Key="AppGlassTextBrush" Color="#FF1D2633" />

@@ -81,6 +81,8 @@ namespace llcom_plus
                     this.Height = Math.Min(Math.Max(PreferredWindowHeight, this.MinHeight), availableHeight);
                 }
             });
+            LocationChanged += MainWindow_PlacementChanged;
+            SizeChanged += MainWindow_PlacementChanged;
             StartupProfiler.Mark("MainWindow ctor exit");
         }
         ObservableCollection<ToSendData> toSendListItems = new ObservableCollection<ToSendData>();
@@ -123,6 +125,7 @@ namespace llcom_plus
             public string Text { get; set; }
             public int SerialSlot { get; set; }
             public bool IsNetwork { get; set; }
+            public bool IsAllSerial { get; set; }
 
             public override string ToString()
             {
@@ -404,6 +407,13 @@ namespace llcom_plus
 
                 serialSplitSendTargetPanel.Visibility = Visibility.Visible;
                 serialSplitSendTargetComboBox.IsEnabled = ShouldEnableSendTargetSelector(count);
+                if (mainSplitPortPage != null)
+                {
+                    mainSplitPortPage.ActiveSlotChanged -= MainSplitPortPage_ActiveSlotChanged;
+                    // 必须在切换回单屏页面之前同步关闭并 Dispose 所有分屏串口，
+                    // 不能再依赖旧页面稍后触发的 Unloaded。
+                    mainSplitPortPage.ReleaseAllPortsForLayoutChange();
+                }
                 mainSplitPortPage = null;
                 appliedSerialSplitScreenCount = 1;
                 if (!(dataShowFrame.Content is Pages.DataShowPage))
@@ -415,9 +425,25 @@ namespace llcom_plus
 
             serialSplitSendTargetPanel.Visibility = Visibility.Visible;
             serialSplitSendTargetComboBox.IsEnabled = ShouldEnableSendTargetSelector(count);
+            var initialFirstPortName = mainSplitPortPage?.GetSlotPortName(1);
+            if (string.IsNullOrWhiteSpace(initialFirstPortName))
+                initialFirstPortName = GetSelectedPortName();
+
+            // 分屏串口全部使用独立 SerialPort。进入分屏前必须释放主大屏的
+            // Global.uart，否则它仍会占用旧端口并把收发事件错误投到窗口 1。
+            if (!ReleaseMainSerialPortBeforeSplit())
+                return;
+
+            if (mainSplitPortPage != null && appliedSerialSplitScreenCount != count)
+            {
+                mainSplitPortPage.ActiveSlotChanged -= MainSplitPortPage_ActiveSlotChanged;
+                mainSplitPortPage.ReleaseAllPortsForLayoutChange();
+                mainSplitPortPage = null;
+            }
+
             if (mainSplitPortPage == null || appliedSerialSplitScreenCount != count)
             {
-                mainSplitPortPage = new Pages.MultiPortPage(count, false);
+                mainSplitPortPage = new Pages.MultiPortPage(count, false, initialFirstPortName);
                 mainSplitPortPage.ActiveSlotChanged += MainSplitPortPage_ActiveSlotChanged;
                 dataShowFrame.Navigate(mainSplitPortPage);
                 appliedSerialSplitScreenCount = count;
@@ -426,6 +452,24 @@ namespace llcom_plus
             if (!IsMainSendTargetSelected())
                 mainSplitPortPage.SetActiveSlot(GetSelectedSerialSplitSlot());
             UpdateSelectedSplitSlotControls();
+        }
+
+        private bool ReleaseMainSerialPortBeforeSplit()
+        {
+            if (!Tools.Global.uart.IsOpen())
+                return true;
+
+            try
+            {
+                CloseMainSerialPortForSwitch();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Tools.Logger.AddUartLogDebug($"[SplitMode]release main uart failed:{ex}");
+                ShowOpenPortFailed(ex.Message);
+                return false;
+            }
         }
 
         private void MainSplitPortPage_ActiveSlotChanged(int slotNumber)
@@ -442,7 +486,10 @@ namespace llcom_plus
             lastSerialSendTargetSlot = Math.Max(1, slotNumber);
             var item = serialSplitSendTargetComboBox.Items
                 .OfType<SendTargetItem>()
-                .FirstOrDefault(target => !target.IsNetwork && target.SerialSlot == lastSerialSendTargetSlot);
+                .FirstOrDefault(target =>
+                    !target.IsNetwork &&
+                    !target.IsAllSerial &&
+                    target.SerialSlot == lastSerialSendTargetSlot);
             if (item != null && !ReferenceEquals(serialSplitSendTargetComboBox.SelectedItem, item))
                 serialSplitSendTargetComboBox.SelectedItem = item;
             else
@@ -475,7 +522,7 @@ namespace llcom_plus
                 return;
 
             var oldTarget = serialSplitSendTargetComboBox.SelectedItem as SendTargetItem;
-            if (oldTarget != null && !oldTarget.IsNetwork)
+            if (oldTarget != null && !oldTarget.IsNetwork && !oldTarget.IsAllSerial)
                 lastSerialSendTargetSlot = Math.Max(1, oldTarget.SerialSlot);
 
             refreshingSendTargetSelector = true;
@@ -495,6 +542,19 @@ namespace llcom_plus
                     });
                 }
 
+                SendTargetItem allSerialItem = null;
+                if (safeCount > 1)
+                {
+                    allSerialItem = new SendTargetItem
+                    {
+                        Text = TryFindResource("SplitSendTargetAll") as string ?? "全部",
+                        SerialSlot = 0,
+                        IsNetwork = false,
+                        IsAllSerial = true
+                    };
+                    serialSplitSendTargetComboBox.Items.Add(allSerialItem);
+                }
+
                 SendTargetItem networkItem = null;
                 if (Tools.Global.HasMainSendTarget)
                 {
@@ -510,13 +570,18 @@ namespace llcom_plus
                 SendTargetItem selected = null;
                 if (networkItem != null && (preferNetworkTarget || oldTarget?.IsNetwork == true))
                     selected = networkItem;
+                else if (allSerialItem != null && oldTarget?.IsAllSerial == true)
+                    selected = allSerialItem;
 
                 if (selected == null)
                 {
                     var serialSlot = Math.Max(1, Math.Min(lastSerialSendTargetSlot, safeCount));
                     selected = serialSplitSendTargetComboBox.Items
                         .OfType<SendTargetItem>()
-                        .FirstOrDefault(target => !target.IsNetwork && target.SerialSlot == serialSlot);
+                        .FirstOrDefault(target =>
+                            !target.IsNetwork &&
+                            !target.IsAllSerial &&
+                            target.SerialSlot == serialSlot);
                 }
 
                 serialSplitSendTargetComboBox.SelectedItem = selected ?? serialSplitSendTargetComboBox.Items.OfType<SendTargetItem>().FirstOrDefault();
@@ -539,11 +604,17 @@ namespace llcom_plus
                    (serialSplitSendTargetComboBox?.SelectedItem as SendTargetItem)?.IsNetwork == true;
         }
 
+        private bool IsAllSerialTargetsSelected()
+        {
+            return IsSerialSplitModeActive() &&
+                   (serialSplitSendTargetComboBox?.SelectedItem as SendTargetItem)?.IsAllSerial == true;
+        }
+
 
         private int GetSelectedSerialSplitSlot()
         {
             var item = serialSplitSendTargetComboBox?.SelectedItem as SendTargetItem;
-            if (item != null && !item.IsNetwork)
+            if (item != null && !item.IsNetwork && !item.IsAllSerial)
             {
                 lastSerialSendTargetSlot = Math.Max(1, item.SerialSlot);
                 return lastSerialSendTargetSlot;
@@ -558,11 +629,17 @@ namespace llcom_plus
                 return;
 
             var item = serialSplitSendTargetComboBox?.SelectedItem as SendTargetItem;
-            if (item != null && !item.IsNetwork)
+            if (item != null && !item.IsNetwork && !item.IsAllSerial)
                 lastSerialSendTargetSlot = Math.Max(1, item.SerialSlot);
 
             if (item?.IsNetwork == true || mainSplitPortPage == null)
                 return;
+
+            if (item?.IsAllSerial == true)
+            {
+                UpdateSelectedSplitSlotControls();
+                return;
+            }
 
             mainSplitPortPage.SetActiveSlot(GetSelectedSerialSplitSlot());
             UpdateSelectedSplitSlotControls();
@@ -576,6 +653,16 @@ namespace llcom_plus
             syncingSerialSplitControls = true;
             try
             {
+                if (IsAllSerialTargetsSelected())
+                {
+                    serialPortsListComboBox.IsEnabled = false;
+                    connectionStatusButton.IsEnabled = false;
+                    baudRateComboBox.IsEnabled = false;
+                    FlowControlButton.IsEnabled = false;
+                    statusTextBlock.Text = TryFindResource("SplitSendTargetAll") as string ?? "全部";
+                    return;
+                }
+
                 var slot = GetSelectedSerialSplitSlot();
                 var isOpen = mainSplitPortPage.IsSlotSelectedPortOpen(slot);
                 var slotPort = mainSplitPortPage.GetSlotPortName(slot);
@@ -644,7 +731,14 @@ namespace llcom_plus
                 return Dispatcher.Invoke(new Func<bool>(IsActiveSerialTargetOpenForTools));
 
             if (IsSerialSplitModeActive())
-                return mainSplitPortPage?.IsSlotSelectedPortOpen(GetSelectedSerialSplitSlot()) == true;
+            {
+                if (mainSplitPortPage == null)
+                    return false;
+                if (IsAllSerialTargetsSelected())
+                    return Enumerable.Range(1, mainSplitPortPage.SlotCount)
+                        .All(mainSplitPortPage.IsSlotSelectedPortOpen);
+                return mainSplitPortPage.IsSlotSelectedPortOpen(GetSelectedSerialSplitSlot());
+            }
 
             return IsSelectedMainSerialPortOpen();
         }
@@ -658,7 +752,16 @@ namespace llcom_plus
             {
                 if (mainSplitPortPage == null)
                     ApplySerialSplitLayout();
-                return mainSplitPortPage?.EnsureSlotOpen(GetSelectedSerialSplitSlot()) == true;
+                if (mainSplitPortPage == null)
+                    return false;
+                if (IsAllSerialTargetsSelected())
+                {
+                    var allOpened = true;
+                    for (var slot = 1; slot <= mainSplitPortPage.SlotCount; slot++)
+                        allOpened = mainSplitPortPage.EnsureSlotOpen(slot) && allOpened;
+                    return allOpened;
+                }
+                return mainSplitPortPage.EnsureSlotOpen(GetSelectedSerialSplitSlot());
             }
 
             if (IsSelectedMainSerialPortOpen())
@@ -726,6 +829,23 @@ namespace llcom_plus
             {
                 if (IsSerialSplitModeActive())
                 {
+                    if (mainSplitPortPage == null)
+                        return false;
+                    if (IsAllSerialTargetsSelected())
+                    {
+                        var allSent = true;
+                        for (var broadcastSlot = 1; broadcastSlot <= mainSplitPortPage.SlotCount; broadcastSlot++)
+                        {
+                            var broadcastDisplayAsHex = mainSplitPortPage.IsSlotHexMode(broadcastSlot);
+                            allSent = mainSplitPortPage.SendBytesBlocking(
+                                broadcastSlot,
+                                data,
+                                broadcastDisplayAsHex,
+                                token) && allSent;
+                        }
+                        return allSent;
+                    }
+
                     var slot = GetSelectedSerialSplitSlot();
                     var displayAsHex = mainSplitPortPage?.IsSlotHexMode(slot) ?? Tools.Global.setting.hexSend;
                     return mainSplitPortPage?.SendBytesBlocking(slot, data, displayAsHex, token) == true;
@@ -742,6 +862,8 @@ namespace llcom_plus
             var targetSlot = 1;
             var splitMode = false;
             var splitDisplayAsHex = false;
+            var allSerialTargets = false;
+            var allSplitTargets = new List<Tuple<int, bool>>();
             var mainReady = false;
             Dispatcher.Invoke(new Action(() =>
             {
@@ -749,11 +871,26 @@ namespace llcom_plus
                 page = mainSplitPortPage;
                 targetSlot = GetSelectedSerialSplitSlot();
                 splitDisplayAsHex = page?.IsSlotHexMode(targetSlot) ?? Tools.Global.setting.hexSend;
+                allSerialTargets = IsAllSerialTargetsSelected();
+                if (splitMode && allSerialTargets && page != null)
+                {
+                    for (var slot = 1; slot <= page.SlotCount; slot++)
+                        allSplitTargets.Add(Tuple.Create(slot, page.IsSlotHexMode(slot)));
+                }
                 mainReady = IsSelectedMainSerialPortOpen();
             }));
 
             if (splitMode)
+            {
+                if (allSerialTargets)
+                {
+                    var allSent = true;
+                    foreach (var target in allSplitTargets)
+                        allSent = page?.SendBytesBlocking(target.Item1, data, target.Item2, token) == true && allSent;
+                    return allSent;
+                }
                 return page?.SendBytesBlocking(targetSlot, data, splitDisplayAsHex, token) == true;
+            }
 
             if (!mainReady)
                 return false;
@@ -1033,7 +1170,9 @@ namespace llcom_plus
                 QuickListSelectComboBox.ItemsSource = GetQuickSendPageSelectorItems();
                 QuickListSelectComboBox.SelectedIndex = Global.setting.quickSendSelect;
                 if (QuickListNameTextBox != null)
-                    QuickListNameTextBox.Text = Global.setting.GetQuickListNameNow();
+                    QuickListNameTextBox.Text = GetLocalizedQuickSendPageName(
+                        Global.setting.GetQuickListNameNow(),
+                        Global.setting.quickSendSelect);
                 DeleteQuickSendPageButton.IsEnabled = Global.setting.GetQuickSendListCount() > 1;
             }
             finally
@@ -1050,11 +1189,60 @@ namespace llcom_plus
             for (int i = 0; i < count; i++)
             {
                 var name = i < names.Count ? names[i] : "";
-                if (string.IsNullOrWhiteSpace(name))
-                    name = $"未命名{i}";
+                name = GetLocalizedQuickSendPageName(name, i);
                 items.Add($"{i + 1}. {name}");
             }
             return items;
+        }
+
+        private string GetLocalizedQuickSendPageName(string name, int index)
+        {
+            var value = name?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(value) &&
+                !value.Equals($"未命名{index}", StringComparison.OrdinalIgnoreCase) &&
+                !value.Equals($"Untitled {index}", StringComparison.OrdinalIgnoreCase) &&
+                !value.Equals($"Untitled{index}", StringComparison.OrdinalIgnoreCase))
+                return name;
+
+            var format = TryFindResource("QuickSendDefaultPageName") as string ?? "未命名{0}";
+            return string.Format(format, index);
+        }
+
+        private void RefreshQuickSendDefaultButtonLabels()
+        {
+            var localizedButtonText = TryFindResource("QuickSendButton") as string ?? "发送";
+            var allLists = Tools.Global.setting.GetAllQuickSendLists();
+            var changed = false;
+            var previousCanSave = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                foreach (var list in allLists.Where(list => list != null))
+                {
+                    foreach (var item in list.Where(item => item != null))
+                    {
+                        var buttonText = item.commit?.Trim() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(buttonText) &&
+                            !buttonText.Equals("发送", StringComparison.OrdinalIgnoreCase) &&
+                            !buttonText.Equals("Send", StringComparison.OrdinalIgnoreCase) &&
+                            !buttonText.Equals("?!", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        if (string.Equals(item.commit, localizedButtonText, StringComparison.Ordinal))
+                            continue;
+
+                        item.commit = localizedButtonText;
+                        changed = true;
+                    }
+                }
+            }
+            finally
+            {
+                canSaveSendList = previousCanSave;
+            }
+
+            if (changed)
+                Tools.Global.setting.SetAllQuickSendLists(allLists);
         }
 
         private void RefreshQuickSendPageSelectorItemsOnly()
@@ -1197,6 +1385,11 @@ namespace llcom_plus
 
             if (IsSerialSplitModeActive())
             {
+                if (IsAllSerialTargetsSelected())
+                {
+                    UpdateSelectedSplitSlotControls();
+                    return;
+                }
                 mainSplitPortPage?.SetSlotPortName(GetSelectedSerialSplitSlot(), GetSelectedPortName());
                 UpdateSelectedSplitSlotControls();
                 return;
@@ -1455,9 +1648,10 @@ namespace llcom_plus
                                     statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
                                 }));
                             }
-                            catch
+                            catch (Exception ex)
                             {
-                                //MessageBox.Show("串口打开失败！");
+                                Tools.Logger.AddUartLogDebug($"[autoReconnect]open error:{ex}");
+                                ShowOpenPortFailed(ex.Message);
                             }
                             isOpeningPort = false;
                         });
@@ -1566,8 +1760,8 @@ namespace llcom_plus
                 saveScriptFile(lastScriptFile);
             Tools.Global.ClearMainSendTarget();
             Tools.Global.ThemeChanged -= Global_ThemeChanged;
-            Tools.GitHubReleaseUpdater.TryStartPendingInstallOnExit();
             Tools.Global.isMainWindowsClosed = true;
+            Tools.GitHubReleaseUpdater.TryStartPendingInstallOnExit();
             foreach (Window win in App.Current.Windows.Cast<Window>().Where(win => win != this).ToList())
             {
                 try
@@ -1590,6 +1784,7 @@ namespace llcom_plus
             if (settingPage == null)
                 settingPage = new SettingWindow { Owner = this };
 
+            PositionOwnedWindow(settingPage);
             settingPage.Show();
             settingPage.Activate();
         }
@@ -1600,8 +1795,35 @@ namespace llcom_plus
             if (flowControlPage == null)
                 flowControlPage = new FlowControlWindow { Owner = this };
 
+            PositionOwnedWindow(flowControlPage);
             flowControlPage.Show();
             flowControlPage.Activate();
+        }
+
+        private void MainWindow_PlacementChanged(object sender, EventArgs e)
+        {
+            if (WindowState == WindowState.Minimized)
+                return;
+            if (settingPage?.IsVisible == true)
+                PositionOwnedWindow(settingPage);
+            if (flowControlPage?.IsVisible == true)
+                PositionOwnedWindow(flowControlPage);
+        }
+
+        private void PositionOwnedWindow(Window window)
+        {
+            if (window == null || WindowState == WindowState.Minimized)
+                return;
+
+            window.Owner = this;
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            var width = window.ActualWidth > 0 ? window.ActualWidth : window.Width;
+            var height = window.ActualHeight > 0 ? window.ActualHeight : window.Height;
+            var workArea = SystemParameters.WorkArea;
+            var left = Left + Math.Max(0, (ActualWidth - width) / 2d);
+            var top = Top + Math.Max(0, (ActualHeight - height) / 2d);
+            window.Left = Math.Max(workArea.Left, Math.Min(left, workArea.Right - width));
+            window.Top = Math.Max(workArea.Top, Math.Min(top, workArea.Bottom - height));
         }
 
         private void ApiDocumentButton_Click(object sender, RoutedEventArgs e)
@@ -1655,6 +1877,34 @@ namespace llcom_plus
                 show();
             else
                 Dispatcher.BeginInvoke(show);
+        }
+
+        private void ClearPendingSendAfterOpenFailure()
+        {
+            toSendData = null;
+            toSendDataIsHex = null;
+            toSendDataApplySendProcessing = true;
+            toSendDataSessionStringLogOverride = null;
+            toSendDataExtraEnterOverride = null;
+        }
+
+        private void SendPendingDataAfterOpen()
+        {
+            if (toSendData == null)
+                return;
+
+            var data = toSendData;
+            var isHex = toSendDataIsHex;
+            var applySendProcessing = toSendDataApplySendProcessing;
+            var sessionStringLogOverride = toSendDataSessionStringLogOverride;
+            var extraEnterOverride = toSendDataExtraEnterOverride;
+            ClearPendingSendAfterOpenFailure();
+            sendUartData(
+                data,
+                isHex,
+                applySendProcessing,
+                sessionStringLogOverride,
+                extraEnterOverride);
         }
 
         private void openPort()
@@ -1736,6 +1986,7 @@ namespace llcom_plus
 
             Task.Run(() =>
             {
+                var portOpened = false;
                 try
                 {
                     forcusClosePort = false;//不再强制关闭串口
@@ -1743,35 +1994,35 @@ namespace llcom_plus
                     Tools.Global.uart.SetName(port);
                     Tools.Logger.AddUartLogDebug($"[openPort]open");
                     Tools.Global.uart.Open();
+                    portOpened = true;
                     Tools.Logger.StartSessionLog(port);
-                    Tools.Logger.AddUartLogDebug($"[openPort]change show");
+                    Tools.Logger.AddUartLogDebug($"[openPort]change show and send pending data");
                     this.Dispatcher.Invoke(new Action(delegate
                     {
                         serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
                         connectionStatusButton.IsEnabled = true;
                         UpdateMainSerialConnectionStatus();
+                        // sendUartData 会读取当前端口下拉框和其它 WPF 状态，必须
+                        // 在 UI 线程执行，不能从串口打开的后台线程直接调用。
+                        SendPendingDataAfterOpen();
                     }));
-                    Tools.Logger.AddUartLogDebug($"[openPort]check to send");
-                    if (toSendData != null)
-                    {
-                        sendUartData(
-                            toSendData,
-                            toSendDataIsHex,
-                            toSendDataApplySendProcessing,
-                            toSendDataSessionStringLogOverride,
-                            toSendDataExtraEnterOverride);
-                        toSendData = null;
-                        toSendDataIsHex = null;
-                        toSendDataApplySendProcessing = true;
-                        toSendDataSessionStringLogOverride = null;
-                        toSendDataExtraEnterOverride = null;
-                    }
                     Tools.Logger.AddUartLogDebug($"[openPort]done");
                 }
                 catch(Exception e)
                 {
-                    Tools.Logger.AddUartLogDebug($"[openPort]open error:{e}");
-                    ShowOpenPortFailed(e.Message);
+                    if (!portOpened)
+                    {
+                        Tools.Logger.AddUartLogDebug($"[openPort]open error:{e}");
+                        ClearPendingSendAfterOpenFailure();
+                        ShowOpenPortFailed(e.Message);
+                    }
+                    else
+                    {
+                        Tools.Logger.AddUartLogDebug($"[openPort]post-open error:{e}");
+                        Dispatcher.BeginInvoke(new Action(() =>
+                            Tools.MessageBox.Show(
+                                $"{TryFindResource("ErrorSendFail") as string ?? "发送失败"}\r\n{e.Message}")));
+                    }
                 }
                 finally
                 {
@@ -1786,8 +2037,23 @@ namespace llcom_plus
             {
                 if (mainSplitPortPage == null)
                     ApplySerialSplitLayout();
-                mainSplitPortPage?.ToggleSlotOpen(GetSelectedSerialSplitSlot());
+                if (IsAllSerialTargetsSelected())
+                {
+                    UpdateSelectedSplitSlotControls();
+                    return;
+                }
+                var slot = GetSelectedSerialSplitSlot();
+                var wasOpen = mainSplitPortPage?.IsSlotSelectedPortOpen(slot) == true;
+                var isOpen = mainSplitPortPage?.ToggleSlotOpen(slot) == true;
                 UpdateSelectedSplitSlotControls();
+                if (!wasOpen && !isOpen)
+                {
+                    var detail = mainSplitPortPage?.GetSlotLastError(slot);
+                    var message = TryFindResource("ErrorOpenPort") as string ?? "串口打开失败！";
+                    if (!string.IsNullOrWhiteSpace(detail))
+                        message += "\r\n" + detail;
+                    Tools.MessageBox.Show(message);
+                }
                 return;
             }
             Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]now:{Tools.Global.uart.IsOpen()}");
@@ -1798,6 +2064,7 @@ namespace llcom_plus
             else//关闭串口逻辑
             {
                 string lastPort = null;//记录一下上次的串口号
+                var closed = false;
                 try
                 {
                     Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]close");
@@ -1806,18 +2073,24 @@ namespace llcom_plus
                     Tools.Global.uart.Close(waitForDispose: true);
                     Tools.Logger.StopSessionLog();
                     Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]close done");
+                    closed = true;
                 }
-                catch
+                catch (Exception ex)
                 {
                     //串口关闭失败！
-                    Tools.MessageBox.Show(TryFindResource("ErrorClosePort") as string ?? "?!");
+                    Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]close error:{ex}");
+                    Tools.MessageBox.Show($"{TryFindResource("ErrorClosePort") as string ?? "?!"}\r\n{ex.Message}");
                 }
                 Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]change show");
                 serialPortsListComboBox.IsEnabled = true;
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0;
-                statusTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
+                if (closed)
+                    statusTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
+                else
+                    UpdateMainSerialConnectionStatus();
                 Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]change show done");
-                refreshPortList(lastPort);
+                if (closed)
+                    refreshPortList(lastPort);
             }
 
         }
@@ -1825,15 +2098,34 @@ namespace llcom_plus
         private void ClearLogButton_Click(object sender, RoutedEventArgs e)
         {
             if (IsSerialSplitModeActive())
-                mainSplitPortPage?.ClearAllLogs();
+            {
+                if (IsAllSerialTargetsSelected())
+                    mainSplitPortPage?.ClearAllLogs();
+                else
+                    mainSplitPortPage?.ClearSlotLog(GetSelectedSerialSplitSlot());
+            }
             else
                 Tools.Logger.ClearData();
+        }
+
+        private void SendAndLogOptionsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (IsSerialSplitModeActive())
+            {
+                mainSplitPortPage?.ToggleExternalOptions(SendAndLogOptionsButton);
+                return;
+            }
+
+            if (dataShowFrame?.Content is Pages.DataShowPage dataShowPage)
+                dataShowPage.ToggleOptions(SendAndLogOptionsButton);
         }
 
         private int lastBaudRateSelectedIndex = -1;
         private void BaudRateComboBox_Changed(object sender, EventArgs e)
         {
             if (syncingSerialSplitControls)
+                return;
+            if (IsAllSerialTargetsSelected())
                 return;
 
             //选的没变
@@ -1898,6 +2190,16 @@ namespace llcom_plus
 
             if (IsSerialSplitModeActive())
             {
+                if (IsAllSerialTargetsSelected())
+                {
+                    _ = SendToAllSplitSlotsAsync(
+                        data,
+                        is_hex,
+                        applySendProcessing,
+                        extraEnterOverride);
+                    return;
+                }
+
                 var targetSlot = GetSelectedSerialSplitSlot();
                 var targetHexMode = mainSplitPortPage?.IsSlotHexMode(targetSlot) ?? Tools.Global.setting.hexSend;
                 var displayAsHex = is_hex ?? targetHexMode;
@@ -1979,6 +2281,88 @@ namespace llcom_plus
             return AppendCrlf(dataConvert, extraEnterOverride ?? Tools.Global.setting.extraEnter);
         }
 
+        private async Task SendToAllSplitSlotsAsync(
+            byte[] sourceData,
+            bool? isHex,
+            bool applySendProcessing,
+            bool? extraEnterOverride)
+        {
+            try
+            {
+                if (mainSplitPortPage == null)
+                    ApplySerialSplitLayout();
+                var page = mainSplitPortPage;
+                if (page == null)
+                    return;
+
+                var preparedTargets = new List<Tuple<int, byte[], bool>>();
+                var failures = new List<string>();
+                for (var slot = 1; slot <= page.SlotCount; slot++)
+                {
+                    var targetHexMode = page.IsSlotHexMode(slot);
+                    var displayAsHex = isHex ?? targetHexMode;
+                    var data = PrepareUartSendData(
+                        sourceData,
+                        isHex,
+                        applySendProcessing,
+                        targetHexMode,
+                        extraEnterOverride);
+                    if (data == null || data.Length == 0)
+                        continue;
+
+                    if (!page.EnsureSlotOpen(slot))
+                    {
+                        failures.Add(FormatSplitTargetFailure(slot, page.GetSlotLastError(slot)));
+                        continue;
+                    }
+
+                    preparedTargets.Add(Tuple.Create(slot, data, displayAsHex));
+                }
+
+                var pendingSends = preparedTargets
+                    .Select(target => Tuple.Create(
+                        target.Item1,
+                        page.SendBytesAsync(target.Item1, target.Item2, target.Item3)))
+                    .ToList();
+                if (pendingSends.Count > 0)
+                {
+                    var results = await Task.WhenAll(pendingSends.Select(item => item.Item2));
+                    for (var i = 0; i < results.Length; i++)
+                    {
+                        if (!results[i])
+                            failures.Add(FormatSplitTargetFailure(
+                                pendingSends[i].Item1,
+                                TryFindResource("ErrorSendFail") as string ?? "发送失败"));
+                    }
+                }
+
+                UpdateSelectedSplitSlotControls();
+                ShowSplitBroadcastFailures(failures);
+            }
+            catch (Exception ex)
+            {
+                Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n" + ex);
+            }
+        }
+
+        private string FormatSplitTargetFailure(int slot, string detail)
+        {
+            var target = string.Format(
+                TryFindResource("SplitSendTargetItem") as string ?? "窗口 {0}",
+                slot);
+            return string.IsNullOrWhiteSpace(detail) ? target : target + "：" + detail;
+        }
+
+        private void ShowSplitBroadcastFailures(IReadOnlyCollection<string> failures)
+        {
+            if (failures == null || failures.Count == 0)
+                return;
+
+            var title = TryFindResource("SplitSendAllOpenFailed") as string
+                ?? "以下窗口打开失败，其他窗口已继续发送：";
+            Tools.MessageBox.Show(title + "\r\n" + string.Join("\r\n", failures));
+        }
+
         private async Task SendToSelectedSplitSlotAsync(byte[] data, bool displayAsHex, bool autoOpen = true)
         {
             try
@@ -1995,6 +2379,11 @@ namespace llcom_plus
                     if (!mainSplitPortPage.EnsureSlotOpen(slot))
                     {
                         UpdateSelectedSplitSlotControls();
+                        var detail = mainSplitPortPage.GetSlotLastError(slot);
+                        var message = TryFindResource("ErrorOpenPort") as string ?? "串口打开失败！";
+                        if (!string.IsNullOrWhiteSpace(detail))
+                            message += "\r\n" + detail;
+                        Tools.MessageBox.Show(message);
                         return;
                     }
                     UpdateSelectedSplitSlotControls();
@@ -2011,6 +2400,46 @@ namespace llcom_plus
             {
                 Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n" + ex.ToString());
             }
+        }
+
+        private async Task SendPreparedDataToSplitTargetsAsync(
+            byte[] data,
+            bool displayAsHex,
+            bool autoOpen)
+        {
+            if (!IsAllSerialTargetsSelected())
+            {
+                await SendToSelectedSplitSlotAsync(data, displayAsHex, autoOpen);
+                return;
+            }
+
+            if (mainSplitPortPage == null)
+                ApplySerialSplitLayout();
+            var page = mainSplitPortPage;
+            if (page == null)
+                return;
+
+            var readySlots = new List<int>();
+            for (var slot = 1; slot <= page.SlotCount; slot++)
+            {
+                if (autoOpen)
+                {
+                    if (!page.EnsureSlotOpen(slot))
+                        continue;
+                }
+                else if (!page.IsSlotSelectedPortOpen(slot))
+                {
+                    continue;
+                }
+
+                readySlots.Add(slot);
+            }
+
+            var sends = readySlots
+                .Select(slot => page.SendBytesAsync(slot, data, displayAsHex))
+                .ToList();
+            if (sends.Count > 0)
+                await Task.WhenAll(sends);
         }
 
         private void SendUartData_Executed(object sender, ExecutedRoutedEventArgs e)
@@ -2386,15 +2815,47 @@ namespace llcom_plus
 
         private void QuickSendTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (IsCtrlKeyDown() && e.Key == Key.X && sender is TextBox textBox)
+            {
+                textBox.Cut();
+                e.Handled = true;
+                return;
+            }
+
             if (e.Key != Key.Return && e.Key != Key.Enter)
                 return;
 
+            if (!(sender is TextBox quickSendTextBox) || !(quickSendTextBox.DataContext is ToSendData data))
+                return;
+
+            quickSendTextBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            e.Handled = true;
+            SendQuickSendItem(data);
+        }
+
+        private void QuickSendTextBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
             if (!(sender is TextBox textBox) || !(textBox.DataContext is ToSendData data))
                 return;
 
             textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+
+            var title = TryFindResource("QuickSendEditTitle") as string ?? "编辑快捷发送内容";
+            var promptTemplate = TryFindResource("QuickSendEditPrompt") as string
+                ?? "快捷发送 {0} 的内容（支持多行）：";
+            var dialog = new InputDialogWindow(
+                string.Format(promptTemplate, data.id),
+                data.text ?? string.Empty,
+                title)
+            {
+                Owner = this
+            };
+            dialog.EnableMultilineEditor();
+
+            if (dialog.ShowDialog() == true)
+                data.text = dialog.Value ?? string.Empty;
+
             e.Handled = true;
-            SendQuickSendItem(data);
         }
 
         private void SendQuickSendItem(ToSendData data)
@@ -2844,6 +3305,12 @@ namespace llcom_plus
         private void MenuItem_Click(object sender, RoutedEventArgs e)
         {
             Tools.Global.setting.language = ((MenuItem)sender).Tag.ToString();
+            RefreshQuickSendDefaultButtonLabels();
+            RefreshQuickSendPageSelector();
+            if (IsSerialSplitModeActive())
+                UpdateSelectedSplitSlotControls();
+            else
+                UpdateMainSerialConnectionStatus();
             RefreshToolModulesLocalization();
             SetRightToolsCollapsed(rightToolsCollapsed);
             UpdateMainSendTargetUi();
@@ -3175,7 +3642,10 @@ namespace llcom_plus
                 return;
             if (IsSerialSplitModeActive())
             {
-                _ = SendToSelectedSplitSlotAsync(Encoding.ASCII.GetBytes(e.TextComposition.Text), false, autoOpen: false);
+                _ = SendPreparedDataToSplitTargetsAsync(
+                    Encoding.ASCII.GetBytes(e.TextComposition.Text),
+                    false,
+                    autoOpen: false);
                 e.Handled = true;
                 return;
             }
@@ -3205,7 +3675,10 @@ namespace llcom_plus
             if (e.Key >= Key.A && e.Key <= Key.Z && IsSerialSplitModeActive())
                 try
                 {
-                    _ = SendToSelectedSplitSlotAsync(new byte[] { (byte)((int)e.Key - (int)Key.A + 1) }, false, autoOpen: false);
+                    _ = SendPreparedDataToSplitTargetsAsync(
+                        new byte[] { (byte)((int)e.Key - (int)Key.A + 1) },
+                        false,
+                        autoOpen: false);
                     e.Handled = true;
                     return;
                 }

@@ -15,7 +15,6 @@ namespace llcom_plus.Model
 {
     class UartPortProfile
     {
-        public string dataToSend { get; set; } = "uart data";
         public int baudRate { get; set; } = 115200;
         public int showHexFormat { get; set; } = 0;
         public bool hexSend { get; set; } = false;
@@ -38,13 +37,14 @@ namespace llcom_plus.Model
         public bool enterSend { get; set; } = false;
         public bool enableSymbol { get; set; } = true;
         public bool rts { get; set; } = false;
-        public bool dtr { get; set; } = true;
+        public bool dtr { get; set; } = false;
     }
 
     [PropertyChanged.AddINotifyPropertyChangedInterface]
     class Settings
     {
         private const int DefaultQuickSendRows = 10;
+        private const int CurrentUartProfileSchemaVersion = 2;
         public event EventHandler MainWindowTop;
         private string _dataToSend = "uart data";
         private int _baudRate = 115200;
@@ -80,6 +80,7 @@ namespace llcom_plus.Model
         private string _sessionLogFolder = "";
         private bool _darkMode = false;
         public Dictionary<string, UartPortProfile> uartProfiles = new Dictionary<string, UartPortProfile>(StringComparer.OrdinalIgnoreCase);
+        public int uartProfileSchemaVersion { get; set; } = 0;
         [JsonIgnore] private string _activeUartProfileName = "";
         [JsonIgnore] private bool _suspendSave = false;
         [JsonIgnore] private readonly HashSet<string> _uartProfilesPendingWrite = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -217,6 +218,28 @@ namespace llcom_plus.Model
         {
             EnsureUartProfiles();
             EnsureQuickSendListState();
+            MigrateUartProfiles();
+        }
+
+        private void MigrateUartProfiles()
+        {
+            if (uartProfileSchemaVersion >= CurrentUartProfileSchemaVersion)
+                return;
+
+            // v1：旧版把 DTR=true 作为所有串口的默认值；部分设备会因此在
+            // 打开时复位。只对尚未完成 v1 迁移的配置执行一次。
+            foreach (var entry in uartProfiles.Where(i => !string.IsNullOrWhiteSpace(i.Key) && i.Value != null))
+            {
+                if (uartProfileSchemaVersion < 1 && entry.Value.dtr && !entry.Value.rts)
+                    entry.Value.dtr = false;
+
+                // v2：发送框内容改为全局只保存当前一份。标记所有端口配置重写，
+                // 让旧 JSON 中每个 COM 下残留的 dataToSend 字段被清除。
+                _uartProfilesPendingWrite.Add(NormalizePortName(entry.Key));
+            }
+
+            uartProfileSchemaVersion = CurrentUartProfileSchemaVersion;
+            Save(false);
         }
 
         public void SetActiveUartProfile(string portName)
@@ -320,7 +343,6 @@ namespace llcom_plus.Model
         {
             return new UartPortProfile
             {
-                dataToSend = _dataToSend,
                 baudRate = _baudRate,
                 showHexFormat = _showHexFormat,
                 hexSend = _hexSend,
@@ -343,7 +365,7 @@ namespace llcom_plus.Model
                 enterSend = _enterSend,
                 enableSymbol = _enableSymbol,
                 rts = Tools.Global.uart?.Rts ?? false,
-                dtr = Tools.Global.uart?.Dtr ?? true
+                dtr = Tools.Global.uart?.Dtr ?? false
             };
         }
 
@@ -355,7 +377,6 @@ namespace llcom_plus.Model
             _suspendSave = true;
             try
             {
-                dataToSend = profile.dataToSend ?? "uart data";
                 baudRate = profile.baudRate > 0 ? profile.baudRate : 115200;
                 showHexFormat = profile.showHexFormat < 0 || profile.showHexFormat > 2 ? 0 : profile.showHexFormat;
                 hexSend = profile.hexSend;

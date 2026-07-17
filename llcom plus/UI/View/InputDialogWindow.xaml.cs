@@ -39,6 +39,27 @@ namespace llcom_plus
             PromptLabel.Text = prompt;
         }
 
+        public void EnableMultilineEditor()
+        {
+            SizeToContent = SizeToContent.Manual;
+            Width = 720;
+            Height = 480;
+            MinWidth = 520;
+            MinHeight = 360;
+            ResizeMode = ResizeMode.CanResizeWithGrip;
+
+            InputText.Text = Value ?? string.Empty;
+            InputText.AcceptsReturn = true;
+            InputText.AcceptsTab = true;
+            InputText.TextWrapping = TextWrapping.Wrap;
+            InputText.VerticalContentAlignment = VerticalAlignment.Top;
+            InputText.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            InputText.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            InputText.FontFamily = new FontFamily("Consolas");
+            InputText.FontSize = 14;
+            SpellCheck.SetIsEnabled(InputText, false);
+        }
+
         private void Window_SourceInitialized(object sender, EventArgs e)
         {
             IntPtr handle = new WindowInteropHelper(this).Handle;
@@ -50,6 +71,8 @@ namespace llcom_plus
 
         private void OkButton_Click(object sender, RoutedEventArgs e)
         {
+            if (InputText.Visibility == Visibility.Visible)
+                Value = InputText.Text;
             this.DialogResult = true;
             this.Close();
         }
@@ -58,6 +81,15 @@ namespace llcom_plus
         {
             this.DialogResult = false;
             this.Close();
+        }
+
+        private void InputText_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control || e.Key != Key.X)
+                return;
+
+            InputText.Cut();
+            e.Handled = true;
         }
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

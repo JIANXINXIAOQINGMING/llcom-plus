@@ -22,7 +22,7 @@ namespace llcom_plus.Tools
 
             var version = assembly.GetName().Version;
             if (version == null)
-                return "1.2.1";
+                return "1.2.2";
 
             return version.Revision <= 0 ? version.ToString(3) : version.ToString();
         }

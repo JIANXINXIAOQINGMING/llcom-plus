@@ -116,6 +116,7 @@
                 </Border.Effect>
                 <StackPanel>
                     <TextBlock
+                        x:Name="ExternalOptionsTitle"
                         Margin="4,0,4,8"
                         FontWeight="SemiBold"
                         Text="{DynamicResource SendAndLogOptions}" />

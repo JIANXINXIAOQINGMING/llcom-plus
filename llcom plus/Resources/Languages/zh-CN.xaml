@@ -28,6 +28,8 @@
     <system:String x:Key="SplitSendTarget">目标</system:String>
     <system:String x:Key="SerialSendTarget">串口</system:String>
     <system:String x:Key="SplitSendTargetItem">窗口 {0}</system:String>
+    <system:String x:Key="SplitSendTargetAll">全部</system:String>
+    <system:String x:Key="SplitSendAllOpenFailed">以下窗口打开失败，其他窗口已继续发送：</system:String>
     <system:String x:Key="SplitModeStatus">分屏模式</system:String>
     <system:String x:Key="SplitModeConnectionStatus">窗口 {0} · {1}</system:String>
     <system:String x:Key="RefreshPortButton">刷新串口</system:String>
@@ -59,8 +61,11 @@
     <system:String x:Key="QuickSendRecvScriptShow">当前接收脚本为：[{0}]&#10;右击清除脚本</system:String>
     <system:String x:Key="QuickSendRecvScriptParaSet">左击设置脚本参数&#10;右击清除脚本参数</system:String>
     <system:String x:Key="QuickSendAdd">添加新项目</system:String>
+    <system:String x:Key="QuickSendEditTitle">编辑快捷发送内容</system:String>
+    <system:String x:Key="QuickSendEditPrompt">快捷发送 {0} 的内容（支持多行）：</system:String>
     <system:String x:Key="QuickSendRemoveItem">删除这一项</system:String>
     <system:String x:Key="QuickSendPage">页面</system:String>
+    <system:String x:Key="QuickSendDefaultPageName">未命名{0}</system:String>
     <system:String x:Key="QuickSendAddPage">增加页</system:String>
     <system:String x:Key="QuickSendDeletePage">删除页</system:String>
     <system:String x:Key="QuickSendDeletePageBlocked">至少需要保留一个快捷发送页。</system:String>
@@ -107,6 +112,9 @@
     <system:String x:Key="AboutDiscriptionMore">本工具除了具有与其他同类工具所包含的数据收发功能外，还添加了JavaScript运行环境。用户可自行使用JavaScript完成自动化操作，大大提高了串口工具的可用性。</system:String>
     <system:String x:Key="AboutReleaseButton">检查更新</system:String>
     <system:String x:Key="AboutUpdateChecking">正在检查...</system:String>
+    <system:String x:Key="AboutUpdateCheckingLocal">网页端无可用更新，正在检查安装目录中的本地更新包...</system:String>
+    <system:String x:Key="AboutUpdateInstallingLocal">发现本地更新 {0}，正在校验并准备安装...</system:String>
+    <system:String x:Key="AboutUpdateOnlineFailedLocalNone">在线更新检查失败，且安装目录中没有可用的本地更新包。&#x0d;&#x0a;{0}</system:String>
     <system:String x:Key="AboutUpdateDownloading">正在下载...</system:String>
     <system:String x:Key="AboutUpdateNoNewVersion">当前已是最新版本：{0}</system:String>
     <system:String x:Key="AboutUpdateNoAsset">检测到新版本 {0}，但 GitHub Release 中没有可下载 zip，已打开发布页。</system:String>
@@ -285,6 +293,7 @@
     <system:String x:Key="MultiPortSendFailed">发送失败: </system:String>
     <system:String x:Key="MultiPortNotOpen">请先打开串口。</system:String>
     <system:String x:Key="MultiPortPortInUse">该串口已在其它分屏打开。</system:String>
+    <system:String x:Key="MultiPortNoPort">未选择串口。</system:String>
     <system:String x:Key="MultiPortInvalidBaud">波特率无效。</system:String>
     <system:String x:Key="HttpToolTab">HTTP工具</system:String>
     <system:String x:Key="HttpToolOpenWindow">打开HTTP工具</system:String>

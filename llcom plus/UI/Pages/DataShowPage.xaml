@@ -171,7 +171,8 @@
             VerticalAlignment="Bottom"
             Panel.ZIndex="30"
             Style="{StaticResource LogOptionsToggleButtonStyle}"
-            ToolTip="{DynamicResource SendAndLogOptionsTip}">
+            ToolTip="{DynamicResource SendAndLogOptionsTip}"
+            Visibility="Collapsed">
             <fa:FontAwesome Icon="Sliders" FontSize="14" />
         </ToggleButton>
         <Popup

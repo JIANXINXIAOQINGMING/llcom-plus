@@ -28,6 +28,8 @@
     <system:String x:Key="SplitSendTarget">Target</system:String>
     <system:String x:Key="SerialSendTarget">Serial</system:String>
     <system:String x:Key="SplitSendTargetItem">Pane {0}</system:String>
+    <system:String x:Key="SplitSendTargetAll">All</system:String>
+    <system:String x:Key="SplitSendAllOpenFailed">These panes could not be opened; sending continued to the others:</system:String>
     <system:String x:Key="SplitModeStatus">Split mode</system:String>
     <system:String x:Key="SplitModeConnectionStatus">Pane {0} · {1}</system:String>
     <system:String x:Key="RefreshPortButton">Refresh List</system:String>
@@ -59,8 +61,11 @@
     <system:String x:Key="QuickSendRecvScriptShow">Current receive script is: [{0}]&#10;Right click to clear the script</system:String>
     <system:String x:Key="QuickSendRecvScriptParaSet">Left click to set script parameter&#10;Right click to clear the script parameter</system:String>
     <system:String x:Key="QuickSendAdd">Add new</system:String>
+    <system:String x:Key="QuickSendEditTitle">Edit quick send content</system:String>
+    <system:String x:Key="QuickSendEditPrompt">Content for quick send {0} (multiple lines supported):</system:String>
     <system:String x:Key="QuickSendRemoveItem">Remove this item</system:String>
     <system:String x:Key="QuickSendPage">Page</system:String>
+    <system:String x:Key="QuickSendDefaultPageName">Untitled {0}</system:String>
     <system:String x:Key="QuickSendAddPage">Add page</system:String>
     <system:String x:Key="QuickSendDeletePage">Delete page</system:String>
     <system:String x:Key="QuickSendDeletePageBlocked">Keep at least one quick send page.</system:String>
@@ -107,6 +112,9 @@
     <system:String x:Key="AboutDiscriptionMore">llcom plus adds a JavaScript runtime on top of serial data send/receive features, so users can build their own automation flows.</system:String>
     <system:String x:Key="AboutReleaseButton">Check updates</system:String>
     <system:String x:Key="AboutUpdateChecking">Checking...</system:String>
+    <system:String x:Key="AboutUpdateCheckingLocal">No online update is available; checking the installation directory...</system:String>
+    <system:String x:Key="AboutUpdateInstallingLocal">Found local update {0}; validating and preparing installation...</system:String>
+    <system:String x:Key="AboutUpdateOnlineFailedLocalNone">Online update check failed, and no usable local package was found.&#x0d;&#x0a;{0}</system:String>
     <system:String x:Key="AboutUpdateDownloading">Downloading...</system:String>
     <system:String x:Key="AboutUpdateNoNewVersion">Already latest version: {0}</system:String>
     <system:String x:Key="AboutUpdateNoAsset">Found version {0}, but no downloadable zip is attached. Opening the release page.</system:String>
@@ -285,6 +293,7 @@
     <system:String x:Key="MultiPortSendFailed">Send failed: </system:String>
     <system:String x:Key="MultiPortNotOpen">Open the port first.</system:String>
     <system:String x:Key="MultiPortPortInUse">This port is already open in another pane.</system:String>
+    <system:String x:Key="MultiPortNoPort">No serial port is selected.</system:String>
     <system:String x:Key="MultiPortInvalidBaud">Invalid baud rate.</system:String>
     <system:String x:Key="HttpToolTab">HTTP Tool</system:String>
     <system:String x:Key="HttpToolOpenWindow">Open HTTP Tool</system:String>

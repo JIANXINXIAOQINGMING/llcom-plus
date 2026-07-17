@@ -63,6 +63,7 @@
         <TextBox
             x:Name="InputText"
             Margin="5"
+            PreviewKeyDown="InputText_PreviewKeyDown"
             Text="{Binding Value}" />
     </DockPanel>
     </Border>

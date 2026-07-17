@@ -33,22 +33,26 @@ namespace llcom_plus.Pages
         private bool updatingExternalControls;
         private bool suppressSlotProfileSave;
         private bool lockLogs;
+        private bool portsReleased;
         private int activeSlotNumber = 1;
         private Window ownerWindow;
+        private string initialFirstPortName;
 
         public event Action<int> ActiveSlotChanged;
+        public int SlotCount => slotCount;
 
-        public MultiPortPage() : this(MaxSlotCount, true)
+        public MultiPortPage() : this(MaxSlotCount, true, null)
         {
         }
 
-        public MultiPortPage(int slotCount, bool showSlotSendPanel = true)
+        public MultiPortPage(int slotCount, bool showSlotSendPanel = true, string initialFirstPortName = null)
         {
             this.slotCount = Math.Max(1, Math.Min(MaxSlotCount, slotCount));
             this.showSlotSendPanel = showSlotSendPanel;
+            this.initialFirstPortName = NormalizePortName(initialFirstPortName);
             InitializeComponent();
             ToolbarPanel.Visibility = showSlotSendPanel ? Visibility.Visible : Visibility.Collapsed;
-            ExternalOptionsButton.Visibility = showSlotSendPanel ? Visibility.Collapsed : Visibility.Visible;
+            ExternalOptionsButton.Visibility = Visibility.Collapsed;
         }
 
         private void Page_Loaded(object sender, RoutedEventArgs e)
@@ -59,7 +63,9 @@ namespace llcom_plus.Pages
                 ConfigureGridLayout();
                 for (var i = 0; i < slotCount; i++)
                 {
-                    var slot = new PortSlot(this, i + 1, !showSlotSendPanel && i == 0);
+                    // 分屏中的每一路都拥有独立 SerialPort。串口 1 不再复用主大屏
+                    // 的 Global.uart，避免继承旧端口的打开状态和收发事件。
+                    var slot = new PortSlot(this, i + 1, false);
                     slots.Add(slot);
                     AddSlotToGrid(slot);
                 }
@@ -76,8 +82,23 @@ namespace llcom_plus.Pages
             if (ownerWindow != null)
                 ownerWindow.PreviewMouseDown += OwnerWindow_PreviewMouseDown;
             RefreshPorts();
+            ApplyInitialFirstPort();
             UpdateStatus();
             ActiveSlotChanged?.Invoke(activeSlotNumber);
+        }
+
+        private void ApplyInitialFirstPort()
+        {
+            if (string.IsNullOrWhiteSpace(initialFirstPortName))
+                return;
+
+            var slot = GetSlot(1);
+            if (slot != null && !slot.IsOpen)
+            {
+                slot.SetPortName(initialFirstPortName);
+                ApplyPortProfile(slot);
+            }
+            initialFirstPortName = string.Empty;
         }
 
         private void BindExternalGlobalOptions()
@@ -181,7 +202,7 @@ namespace llcom_plus.Pages
         private void Page_Unloaded(object sender, RoutedEventArgs e)
         {
             ExternalOptionsButton.IsChecked = false;
-            CloseAll(closeMainUart: showSlotSendPanel, detachMainUart: true);
+            ReleaseAllPortsForLayoutChange();
             if (ownerWindow != null)
             {
                 ownerWindow.PreviewMouseDown -= OwnerWindow_PreviewMouseDown;
@@ -200,10 +221,24 @@ namespace llcom_plus.Pages
                 return;
 
             var popupChild = ExternalOptionsPopup.Child as UIElement;
-            if (ExternalOptionsButton.IsMouseOver || (popupChild?.IsMouseOver ?? false))
+            var placementTarget = ExternalOptionsPopup.PlacementTarget as UIElement;
+            if (ExternalOptionsButton.IsMouseOver || (placementTarget?.IsMouseOver ?? false) || (popupChild?.IsMouseOver ?? false))
                 return;
 
             ExternalOptionsButton.IsChecked = false;
+        }
+
+        public void ToggleExternalOptions(UIElement placementTarget)
+        {
+            if (placementTarget == null || showSlotSendPanel)
+                return;
+
+            RefreshExternalControls();
+            ExternalOptionsPopup.PlacementTarget = placementTarget;
+            ExternalOptionsPopup.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+            ExternalOptionsPopup.HorizontalOffset = 0;
+            ExternalOptionsPopup.VerticalOffset = -6;
+            ExternalOptionsButton.IsChecked = ExternalOptionsButton.IsChecked != true;
         }
 
         private void ExternalLockLogsButton_Click(object sender, RoutedEventArgs e)
@@ -243,7 +278,20 @@ namespace llcom_plus.Pages
 
         private void Global_ProgramClosedEvent(object sender, EventArgs e)
         {
-            CloseAll(closeMainUart: true, detachMainUart: true, waitForDispose: true, disposeOwnedPorts: true);
+            ReleaseAllPortsForLayoutChange();
+        }
+
+        public void ReleaseAllPortsForLayoutChange()
+        {
+            if (portsReleased)
+                return;
+
+            portsReleased = true;
+            CloseAll(
+                closeMainUart: false,
+                detachMainUart: true,
+                waitForDispose: true,
+                disposeOwnedPorts: true);
         }
 
         private void RefreshPortsButton_Click(object sender, RoutedEventArgs e)
@@ -297,6 +345,11 @@ namespace llcom_plus.Pages
         {
             foreach (var slot in slots)
                 slot.ClearLog();
+        }
+
+        public void ClearSlotLog(int slotNumber)
+        {
+            GetSlot(slotNumber)?.ClearLog();
         }
 
         public void SetActiveSlot(int slotNumber)
@@ -406,6 +459,11 @@ namespace llcom_plus.Pages
             return index >= 0 && index < slots.Count && slots[index].IsSelectedPortOpen;
         }
 
+        public string GetSlotLastError(int slotNumber)
+        {
+            return GetSlot(slotNumber)?.LastErrorMessage ?? string.Empty;
+        }
+
         public bool SendBytesBlocking(int slotNumber, byte[] data, bool displayAsHex, CancellationToken token)
         {
             if (data == null || data.Length == 0)
@@ -433,6 +491,10 @@ namespace llcom_plus.Pages
             updatingExternalControls = true;
             try
             {
+                var title = FindText("SendAndLogOptions", "发送与日志选项");
+                ExternalOptionsTitle.Text = string.IsNullOrWhiteSpace(slot.SelectedPortName)
+                    ? title
+                    : title + " · " + slot.SelectedPortName;
                 ExternalRTSCheckBox.IsChecked = slot.Rts;
                 ExternalDTRCheckBox.IsChecked = slot.Dtr;
                 ExternalHexCheckBox.IsChecked = slot.HexMode;
@@ -679,6 +741,7 @@ namespace llcom_plus.Pages
             public bool IsSelectedPortOpen => IsOpen &&
                 !string.IsNullOrWhiteSpace(SelectedPortName) &&
                 string.Equals(PortName, SelectedPortName, StringComparison.OrdinalIgnoreCase);
+            public string LastErrorMessage { get; private set; } = string.Empty;
             public int BaudRate
             {
                 get
@@ -694,7 +757,7 @@ namespace llcom_plus.Pages
             }
             public bool Rts
             {
-                get { return useMainUart ? Global.uart.Rts : rtsCheckBox.IsChecked == true; }
+                get { return rtsCheckBox.IsChecked == true; }
                 set
                 {
                     rtsCheckBox.IsChecked = value;
@@ -703,7 +766,7 @@ namespace llcom_plus.Pages
             }
             public bool Dtr
             {
-                get { return useMainUart ? Global.uart.Dtr : dtrCheckBox.IsChecked == true; }
+                get { return dtrCheckBox.IsChecked == true; }
                 set
                 {
                     dtrCheckBox.IsChecked = value;
@@ -777,10 +840,14 @@ namespace llcom_plus.Pages
 
                 var selectedPort = SelectedPortName;
                 if (string.IsNullOrWhiteSpace(selectedPort))
+                {
+                    LastErrorMessage = owner.FindText("MultiPortNoPort", "未选择串口。");
                     return false;
+                }
                 if (owner.IsPortOpenInOtherSlot(this, selectedPort))
                 {
-                    AppendLog("ERR", owner.FindText("MultiPortPortInUse", "该串口已在其它分屏打开。"));
+                    LastErrorMessage = owner.FindText("MultiPortPortInUse", "该串口已在其它分屏打开。");
+                    AppendLog("ERR", LastErrorMessage);
                     return false;
                 }
 
@@ -809,6 +876,7 @@ namespace llcom_plus.Pages
                         }
                         else if (IsOpen)
                         {
+                            Logger.AddUartLogDebug($"[SplitUartClose]slot={Index},port={serial.PortName}");
                             serial.Close();
                         }
                     }
@@ -917,7 +985,7 @@ namespace llcom_plus.Pages
                 hexCheckBox.Margin = new Thickness(0, 3, 8, 4);
                 dtrCheckBox.Margin = new Thickness(0, 3, 8, 4);
                 rtsCheckBox.Margin = new Thickness(0, 3, 0, 4);
-                dtrCheckBox.IsChecked = true;
+                dtrCheckBox.IsChecked = false;
                 dtrCheckBox.Checked += ControlLineCheckBox_Changed;
                 dtrCheckBox.Unchecked += ControlLineCheckBox_Changed;
                 rtsCheckBox.Checked += ControlLineCheckBox_Changed;
@@ -1051,17 +1119,23 @@ namespace llcom_plus.Pages
 
             private bool Open()
             {
+                LastErrorMessage = string.Empty;
                 var portName = SelectedPortName;
                 if (string.IsNullOrWhiteSpace(portName))
+                {
+                    LastErrorMessage = owner.FindText("MultiPortNoPort", "未选择串口。");
                     return false;
+                }
                 if (owner.IsPortOpenInOtherSlot(this, portName))
                 {
-                    AppendLog("ERR", owner.FindText("MultiPortPortInUse", "该串口已在其它分屏打开。"));
+                    LastErrorMessage = owner.FindText("MultiPortPortInUse", "该串口已在其它分屏打开。");
+                    AppendLog("ERR", LastErrorMessage);
                     return false;
                 }
                 if (!int.TryParse(baudComboBox.Text, out var baudRate) || baudRate <= 0)
                 {
-                    AppendLog("ERR", owner.FindText("MultiPortInvalidBaud", "波特率无效。"));
+                    LastErrorMessage = owner.FindText("MultiPortInvalidBaud", "波特率无效。");
+                    AppendLog("ERR", LastErrorMessage);
                     return false;
                 }
 
@@ -1089,6 +1163,10 @@ namespace llcom_plus.Pages
                         serial.DtrEnable = dtrCheckBox.IsChecked == true;
                         if (serial.Handshake != Handshake.RequestToSend)
                             serial.RtsEnable = rtsCheckBox.IsChecked == true;
+                        Logger.AddUartLogDebug(
+                            $"[SplitUartOpen]slot={Index},port={serial.PortName},baud={serial.BaudRate}," +
+                            $"parity={serial.Parity},dataBits={serial.DataBits},stopBits={serial.StopBits}," +
+                            $"handshake={serial.Handshake},dtr={serial.DtrEnable},rts={serial.RtsEnable}");
                         serial.Open();
                         EnsureSessionLogOpen();
                     }
@@ -1097,11 +1175,13 @@ namespace llcom_plus.Pages
                     UpdateTitle();
                     owner.UpdateStatus();
                     AppendLog("SYS", owner.FindText("MultiPortOpened", "已打开。"));
+                    LastErrorMessage = string.Empty;
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    AppendLog("ERR", owner.FindText("MultiPortOpenFailed", "打开失败: ") + ex.Message);
+                    LastErrorMessage = ex.Message;
+                    AppendLog("ERR", owner.FindText("MultiPortOpenFailed", "打开失败: ") + LastErrorMessage);
                     try
                     {
                         if (useMainUart)
@@ -1185,7 +1265,7 @@ namespace llcom_plus.Pages
                             if (useMainUart)
                                 Global.uart.SendData(data);
                             else
-                                serial.Write(data, 0, data.Length);
+                                WriteDirectSerial(data, CancellationToken.None);
                         }
                     });
                     if (!useMainUart)
@@ -1220,7 +1300,7 @@ namespace llcom_plus.Pages
                         if (useMainUart)
                             Global.uart.SendDataCancelable(data, token, null, raiseEvents: false);
                         else
-                            serial.Write(data, 0, data.Length);
+                            WriteDirectSerial(data, token);
                     }
 
                     owner.RunOnUi(() => WriteDataLog("TX", data, displayAsHex, true, updateCounters: !useMainUart));
@@ -1244,6 +1324,15 @@ namespace llcom_plus.Pages
 
             private void ApplyControlLines()
             {
+                // 配置加载、刷新端口时只更新并保存当前端口的 UI 配置。
+                // 只有端口真正打开后才改变硬件控制线，避免分屏切换过程中
+                // 对仍在使用的主串口重复产生 DTR/RTS 边沿。
+                if (!IsOpen)
+                {
+                    owner.SaveSlotProfile(this);
+                    return;
+                }
+
                 if (useMainUart)
                 {
                     try
@@ -1256,12 +1345,6 @@ namespace llcom_plus.Pages
                     {
                         AppendLog("ERR", ex.Message);
                     }
-                    return;
-                }
-
-                if (!IsOpen)
-                {
-                    owner.SaveSlotProfile(this);
                     return;
                 }
 
@@ -1304,12 +1387,29 @@ namespace llcom_plus.Pages
             {
                 try
                 {
-                    var length = serial.BytesToRead;
-                    if (length <= 0)
-                        return;
+                    byte[] data;
+                    lock (serialLock)
+                    {
+                        using (var buffer = new MemoryStream())
+                        {
+                            while (serial.IsOpen)
+                            {
+                                var length = serial.BytesToRead;
+                                if (length <= 0)
+                                    break;
 
-                    var data = new byte[length];
-                    serial.Read(data, 0, length);
+                                var block = new byte[length];
+                                var read = serial.Read(block, 0, block.Length);
+                                if (read <= 0)
+                                    break;
+                                buffer.Write(block, 0, read);
+                            }
+                            data = buffer.ToArray();
+                        }
+                    }
+
+                    if (data.Length == 0)
+                        return;
                     owner.RunOnUi(() =>
                     {
                         WriteDataLog("RX", data, HexMode, false);
@@ -1324,6 +1424,29 @@ namespace llcom_plus.Pages
                 {
                     owner.RunOnUi(() => AppendLog("ERR", ex.Message));
                 }
+            }
+
+            private static void WaitForWriteDrain(SerialPort port, int byteCount, CancellationToken token)
+            {
+                var baudRate = Math.Max(1, port.BaudRate);
+                var estimatedMilliseconds = (long)Math.Ceiling(byteCount * 11000d / baudRate);
+                var timeoutMilliseconds = Math.Max(5000L, estimatedMilliseconds + 2000L);
+                var stopwatch = Stopwatch.StartNew();
+                while (port.BytesToWrite > 0)
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (stopwatch.ElapsedMilliseconds > timeoutMilliseconds)
+                        throw new TimeoutException("等待串口发送缓冲区清空超时。");
+                    Thread.Sleep(2);
+                }
+            }
+
+            private void WriteDirectSerial(byte[] data, CancellationToken token)
+            {
+                Logger.AddUartLogDebug(
+                    $"[SplitUartWrite]slot={Index},port={serial.PortName},baud={serial.BaudRate},bytes={data.Length}");
+                serial.Write(data, 0, data.Length);
+                WaitForWriteDrain(serial, data.Length, token);
             }
 
             private void MainUart_UartDataSent(object sender, EventArgs e)

@@ -58,64 +58,97 @@ namespace llcom_plus.Pages
                     return;
                 }
 
-                var release = await Tools.GitHubReleaseUpdater.CheckLatestAsync();
-                Tools.Global.HasNewVersion = release.HasUpdate;
-                if (!release.HasUpdate)
+                Tools.GitHubReleaseInfo release = null;
+                Exception onlineError = null;
+                try
                 {
-                    Tools.MessageBox.Show(string.Format(
-                        ResourceText("AboutUpdateNoNewVersion", "Already latest version: {0}"),
-                        Tools.AppInfo.DisplayVersion));
-                    return;
+                    release = await Tools.GitHubReleaseUpdater.CheckLatestAsync();
+                    Tools.Global.HasNewVersion = release.HasUpdate;
+                }
+                catch (Exception ex)
+                {
+                    onlineError = ex;
+                    Tools.Global.HasNewVersion = false;
                 }
 
-                if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
+                if (release?.HasUpdate == true)
                 {
-                    Tools.MessageBox.Show(string.Format(
-                        ResourceText("AboutUpdateNoAsset", "Found {0}, but no zip package is attached. Opening release page."),
-                        release.Version));
-                    System.Diagnostics.Process.Start(release.ReleaseUrl);
-                    return;
-                }
+                    if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
+                    {
+                        var localFallback = Tools.GitHubReleaseUpdater.FindLatestLocalUpdatePackage();
+                        if (localFallback != null)
+                        {
+                            CheckUpdateButton.Content = string.Format(
+                                ResourceText("AboutUpdateInstallingLocal", "Found local update {0}; validating and preparing installation..."),
+                                localFallback.DisplayVersion);
+                            StartLocalUpdateAndShutdown(localFallback.Path);
+                            shouldShutdown = true;
+                            return;
+                        }
 
-                var assetName = string.IsNullOrWhiteSpace(release.AssetName) ? ResourceText("AboutUpdateAssetUnknown", "Unknown package") : release.AssetName;
-                var sizeText = FormatByteSize(release.AssetSizeBytes);
-                var hasCachedPackage = Tools.GitHubReleaseUpdater.TryGetCachedUpdatePackage(release, out var zipPath);
-                if (!hasCachedPackage)
-                {
-                    var updateConfirm = Tools.InputDialog.OpenDialog(
+                        Tools.MessageBox.Show(string.Format(
+                            ResourceText("AboutUpdateNoAsset", "Found {0}, but no zip package is attached. Opening release page."),
+                            release.Version));
+                        System.Diagnostics.Process.Start(release.ReleaseUrl);
+                        return;
+                    }
+
+                    var assetName = string.IsNullOrWhiteSpace(release.AssetName) ? ResourceText("AboutUpdateAssetUnknown", "Unknown package") : release.AssetName;
+                    var sizeText = FormatByteSize(release.AssetSizeBytes);
+                    var hasCachedPackage = Tools.GitHubReleaseUpdater.TryGetCachedUpdatePackage(release, out var zipPath);
+                    if (!hasCachedPackage)
+                    {
+                        var updateConfirm = Tools.InputDialog.OpenDialog(
+                            string.Format(
+                                ResourceText("AboutUpdateFoundConfirm", "Found a new version.\r\nCurrent version: {0}\r\nLatest version: {1}\r\nPackage: {2}\r\nSize: {3}\r\n\r\nDownload and update now?"),
+                                Tools.AppInfo.DisplayVersion,
+                                release.Version,
+                                assetName,
+                                sizeText),
+                            null,
+                            ResourceText("AboutUpdateFoundTitle", "New version available")).Item1;
+                        if (!updateConfirm)
+                            return;
+
+                        CheckUpdateButton.Content = ResourceText("AboutUpdateDownloading", "Downloading...");
+                        zipPath = await DownloadUpdateWithProgressAsync(release);
+                    }
+
+                    var installConfirm = Tools.InputDialog.OpenDialog(
                         string.Format(
-                            ResourceText("AboutUpdateFoundConfirm", "Found a new version.\r\nCurrent version: {0}\r\nLatest version: {1}\r\nPackage: {2}\r\nSize: {3}\r\n\r\nDownload and update now?"),
-                            Tools.AppInfo.DisplayVersion,
+                            ResourceText("AboutUpdateInstallConfirm", "Version {0} has been downloaded.\r\nPackage: {1}\r\n\r\nRestart and install now? The app will reopen automatically after installation.\r\nIf you choose No, the package will be kept for next time; closing the app will install it without reopening."),
                             release.Version,
-                            assetName,
-                            sizeText),
+                            zipPath),
                         null,
-                        ResourceText("AboutUpdateFoundTitle", "New version available")).Item1;
-                    if (!updateConfirm)
+                        ResourceText("AboutUpdateInstallTitle", "Install update")).Item1;
+                    if (!installConfirm)
                         return;
 
-                    CheckUpdateButton.Content = ResourceText("AboutUpdateDownloading", "Downloading...");
-                    zipPath = await DownloadUpdateWithProgressAsync(release);
+                    StartLocalUpdateAndShutdown(zipPath);
+                    shouldShutdown = true;
+                    return;
                 }
 
-                var installConfirm = Tools.InputDialog.OpenDialog(
-                    string.Format(
-                        ResourceText("AboutUpdateInstallConfirm", "Version {0} has been downloaded.\r\nPackage: {1}\r\n\r\nRestart and install now? The app will reopen automatically after installation.\r\nIf you choose No, the package will be kept for next time; closing the app will install it without reopening."),
-                        release.Version,
-                        zipPath),
-                    null,
-                    ResourceText("AboutUpdateInstallTitle", "Install update")).Item1;
-                if (!installConfirm)
-                    return;
-
-                Tools.GitHubReleaseUpdater.StartInstallAfterExit(zipPath);
-                shouldShutdown = true;
-                _ = System.Threading.Tasks.Task.Run(async () =>
+                CheckUpdateButton.Content = ResourceText("AboutUpdateCheckingLocal", "Checking the installation directory for local updates...");
+                var localPackage = Tools.GitHubReleaseUpdater.FindLatestLocalUpdatePackage();
+                if (localPackage != null)
                 {
-                    await System.Threading.Tasks.Task.Delay(1500);
-                    Environment.Exit(0);
-                });
-                Application.Current.Shutdown();
+                    CheckUpdateButton.Content = string.Format(
+                        ResourceText("AboutUpdateInstallingLocal", "Found local update {0}; validating and preparing installation..."),
+                        localPackage.DisplayVersion);
+                    StartLocalUpdateAndShutdown(localPackage.Path);
+                    shouldShutdown = true;
+                    return;
+                }
+
+                if (onlineError != null)
+                    throw new InvalidOperationException(string.Format(
+                        ResourceText("AboutUpdateOnlineFailedLocalNone", "Online update check failed, and no usable local package was found.\r\n{0}"),
+                        onlineError.GetBaseException().Message), onlineError);
+
+                Tools.MessageBox.Show(string.Format(
+                    ResourceText("AboutUpdateNoNewVersion", "Already latest version: {0}"),
+                    Tools.AppInfo.DisplayVersion));
             }
             catch (Exception ex)
             {
@@ -130,6 +163,17 @@ namespace llcom_plus.Pages
                     checkingUpdate = false;
                 }
             }
+        }
+
+        private static void StartLocalUpdateAndShutdown(string packagePath)
+        {
+            Tools.GitHubReleaseUpdater.StartInstallAfterExit(packagePath);
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(1500);
+                Environment.Exit(0);
+            });
+            Application.Current.Shutdown();
         }
 
         private string ResourceText(string key, string fallback)

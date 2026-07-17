@@ -2,6 +2,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -20,7 +21,12 @@ namespace llcom_plus.Tools
         private const string UpdateRootDirectoryName = "llcom_plus_update";
         private const string PendingDirectoryName = "pending";
         private const string PendingMetadataFileName = "pending-update.json";
+        private const int MaximumUpdateEntryCount = 10000;
+        private const long MaximumExpandedUpdateBytes = 2L * 1024 * 1024 * 1024;
         private static bool installScheduled;
+
+        public static string LocalPackageDirectory => AppDomain.CurrentDomain.BaseDirectory
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
         public static async Task<GitHubReleaseInfo> CheckLatestAsync()
         {
@@ -89,19 +95,18 @@ namespace llcom_plus.Tools
                     if (version == null)
                         throw new InvalidOperationException("Cannot parse release version from GitHub latest release.");
 
-                    var arch = Environment.Is64BitProcess ? "x64" : "x86";
-                    var html = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    var asset = SelectReleaseAssetFromHtml(html, arch);
-                    var assetName = asset?.Name ?? $"llcom.plus_{NormalizeVersionText(version)}_{arch}.zip";
+                    var expandedAssetsUrl = "https://github.com/" + Repository + "/releases/expanded_assets/" +
+                                            Uri.EscapeDataString(tag);
+                    var expandedAssetsHtml = await client.GetStringAsync(expandedAssetsUrl).ConfigureAwait(false);
+                    var asset = SelectReleaseAssetFromHtml(expandedAssetsHtml);
                     return new GitHubReleaseInfo
                     {
                         Version = version,
                         CurrentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0),
                         TagName = tag,
                         ReleaseUrl = releaseUri,
-                        AssetName = assetName,
-                        AssetDownloadUrl = asset?.DownloadUrl ?? ("https://github.com/" + Repository + "/releases/download/" +
-                                           Uri.EscapeDataString(tag) + "/" + Uri.EscapeDataString(assetName)),
+                        AssetName = asset?.Name,
+                        AssetDownloadUrl = asset?.DownloadUrl,
                         AssetSizeBytes = asset?.SizeBytes ?? 0,
                     };
                 }
@@ -126,16 +131,21 @@ namespace llcom_plus.Tools
                 return cachedZipPath;
             }
 
-            var tempRoot = PendingUpdateRoot;
-            TryDeleteDirectory(tempRoot);
-            Directory.CreateDirectory(tempRoot);
+            var packageDirectory = LocalPackageDirectory;
             var zipFileName = SafeFileName(string.IsNullOrWhiteSpace(release.AssetName) ? "llcom-plus-update.zip" : release.AssetName);
-            var zipPath = Path.Combine(tempRoot, zipFileName);
+            var zipPath = Path.Combine(packageDirectory, zipFileName);
             var downloadPath = zipPath + ".download";
+
+            var packageInfo = TryParseLocalPackage(zipPath);
+            if (packageInfo == null || NormalizeVersion(packageInfo.Version) != NormalizeVersion(release.Version))
+                throw new InvalidDataException("在线更新包文件名必须包含与发布版本一致的版本号和当前架构，例如：llcom plus_1.2.2_x64.zip。");
+
+            TryDeleteFile(downloadPath);
 
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             try
             {
+                long downloadedBytes;
                 using (var client = new HttpClient())
                 {
                     client.Timeout = TimeSpan.FromMinutes(5);
@@ -145,31 +155,35 @@ namespace llcom_plus.Tools
                         response.EnsureSuccessStatusCode();
                         var totalBytes = response.Content.Headers.ContentLength ?? release.AssetSizeBytes;
                         progress?.Report(new GitHubDownloadProgress(0, totalBytes));
+                        downloadedBytes = 0;
                         using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         using (var output = File.Create(downloadPath))
                         {
                             var buffer = new byte[81920];
-                            long bytesReceived = 0;
                             int bytesRead;
                             while ((bytesRead = await input.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
                             {
                                 await output.WriteAsync(buffer, 0, bytesRead).ConfigureAwait(false);
-                                bytesReceived += bytesRead;
-                                progress?.Report(new GitHubDownloadProgress(bytesReceived, totalBytes));
+                                downloadedBytes += bytesRead;
+                                progress?.Report(new GitHubDownloadProgress(downloadedBytes, totalBytes));
                             }
                         }
+
+                        if (totalBytes > 0 && downloadedBytes != totalBytes)
+                            throw new InvalidDataException($"Update package download is incomplete. Expected {totalBytes} bytes, received {downloadedBytes} bytes.");
                     }
                 }
+
+                ValidateUpdatePackage(downloadPath, release.Version);
 
                 if (File.Exists(zipPath))
                     File.Delete(zipPath);
                 File.Move(downloadPath, zipPath);
-                WritePendingMetadata(release, zipFileName);
                 return zipPath;
             }
             catch
             {
-                TryDeleteDirectory(tempRoot);
+                TryDeleteFile(downloadPath);
                 throw;
             }
         }
@@ -180,40 +194,38 @@ namespace llcom_plus.Tools
             if (release == null || release.Version == null)
                 return false;
 
-            var metadata = ReadPendingMetadata();
-            if (metadata == null)
-                return false;
+            var candidates = FindLocalUpdatePackages()
+                .Where(package => NormalizeVersion(package.Version) == NormalizeVersion(release.Version));
+            foreach (var package in candidates)
+            {
+                if (!string.IsNullOrWhiteSpace(release.AssetName) &&
+                    !string.Equals(Path.GetFileName(package.Path), release.AssetName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!IsValidUpdatePackage(package.Path, release.Version))
+                    continue;
 
-            if (!string.Equals(metadata["version"]?.ToString(), NormalizeVersionText(release.Version), StringComparison.OrdinalIgnoreCase))
-                return false;
+                zipPath = package.Path;
+                return true;
+            }
 
-            var metadataAssetName = metadata["assetName"]?.ToString();
-            if (!string.IsNullOrWhiteSpace(release.AssetName) &&
-                !string.Equals(metadataAssetName, release.AssetName, StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            return TryGetPendingPackageFromMetadata(metadata, out zipPath);
+            return false;
         }
 
         public static bool TryGetPendingUpdatePackage(out string zipPath)
         {
             zipPath = null;
-            var metadata = ReadPendingMetadata();
-            if (metadata == null)
-                return false;
-
-            var versionText = metadata["version"]?.ToString();
-            if (!Version.TryParse(versionText, out var version))
-                return false;
-
             var currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
-            if (version <= currentVersion)
+            foreach (var package in FindLocalUpdatePackages())
             {
-                TryDeleteDirectory(PendingUpdateRoot);
-                return false;
+                if (NormalizeVersion(package.Version) <= NormalizeVersion(currentVersion) ||
+                    !IsValidUpdatePackage(package.Path, package.Version))
+                    continue;
+
+                zipPath = package.Path;
+                return true;
             }
 
-            return TryGetPendingPackageFromMetadata(metadata, out zipPath);
+            return false;
         }
 
         public static bool TryStartPendingInstallOnExit()
@@ -240,11 +252,27 @@ namespace llcom_plus.Tools
             if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath))
                 throw new FileNotFoundException("Update package is missing.", zipPath);
 
-            var tempRoot = Path.GetDirectoryName(zipPath);
+            zipPath = Path.GetFullPath(zipPath);
+            if (!string.Equals(
+                Path.GetDirectoryName(zipPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                LocalPackageDirectory,
+                StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("本地更新包必须位于程序安装目录中。");
+
+            var package = TryParseLocalPackage(zipPath);
+            if (package == null)
+                throw new InvalidDataException("本地更新包命名不正确，应类似 llcom plus_1.2.2_x64.zip。");
+            var currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
+            if (NormalizeVersion(package.Version) <= NormalizeVersion(currentVersion))
+                throw new InvalidOperationException($"本地更新包版本 {package.DisplayVersion} 不高于当前版本。");
+            ValidateUpdatePackage(zipPath, package.Version);
+
+            var tempRoot = Path.Combine(UpdateRoot, "install-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
             var scriptPath = Path.Combine(tempRoot, "install-update.ps1");
-            File.WriteAllText(scriptPath, BuildInstallScript(zipPath, restartAfterInstall), Encoding.Unicode);
-            installScheduled = true;
+            File.WriteAllText(scriptPath, BuildInstallScript(zipPath, tempRoot, restartAfterInstall), Encoding.Unicode);
             StartInstaller(scriptPath);
+            installScheduled = true;
         }
 
         private static GitHubReleaseAsset SelectReleaseAsset(JArray assets)
@@ -265,11 +293,10 @@ namespace llcom_plus.Tools
                                 (asset.Name ?? "").EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            return zipAssets.FirstOrDefault(asset => (asset.Name ?? "").IndexOf(arch, StringComparison.OrdinalIgnoreCase) >= 0)
-                ?? zipAssets.FirstOrDefault();
+            return zipAssets.FirstOrDefault(asset => (asset.Name ?? "").IndexOf(arch, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
-        private static GitHubReleaseAsset SelectReleaseAssetFromHtml(string html, string arch)
+        private static GitHubReleaseAsset SelectReleaseAssetFromHtml(string html)
         {
             if (string.IsNullOrWhiteSpace(html))
                 return null;
@@ -295,8 +322,71 @@ namespace llcom_plus.Tools
                 .Select(group => group.First())
                 .ToList();
 
-            return assets.FirstOrDefault(asset => (asset.Name ?? "").IndexOf(arch, StringComparison.OrdinalIgnoreCase) >= 0)
-                ?? assets.FirstOrDefault();
+            var arch = Environment.Is64BitProcess ? "x64" : "x86";
+            return assets.FirstOrDefault(asset => (asset.Name ?? "").IndexOf(arch, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        public static GitHubLocalUpdatePackage FindLatestLocalUpdatePackage()
+        {
+            var currentVersion = NormalizeVersion(
+                Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0));
+            return FindLocalUpdatePackages()
+                .FirstOrDefault(package => NormalizeVersion(package.Version) > currentVersion);
+        }
+
+        private static GitHubLocalUpdatePackage[] FindLocalUpdatePackages()
+        {
+            try
+            {
+                return Directory.EnumerateFiles(LocalPackageDirectory, "*.zip", SearchOption.TopDirectoryOnly)
+                    .Select(TryParseLocalPackage)
+                    .Where(package => package != null)
+                    .OrderByDescending(package => package.Version)
+                    .ThenByDescending(package => File.GetLastWriteTimeUtc(package.Path))
+                    .ToArray();
+            }
+            catch
+            {
+                return new GitHubLocalUpdatePackage[0];
+            }
+        }
+
+        private static GitHubLocalUpdatePackage TryParseLocalPackage(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return null;
+
+            var fileName = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+            var match = Regex.Match(
+                fileName,
+                @"^llcom[ _.-]+plus[ _.-]+v?(?<version>\d+\.\d+\.\d+(?:\.\d+)?)(?:[ _.-]+(?<arch>x64|x86))?(?:[ _.-].*)?$",
+                RegexOptions.IgnoreCase);
+            if (!match.Success || !Version.TryParse(match.Groups["version"].Value, out var version))
+                return null;
+
+            var packageArchitecture = match.Groups["arch"].Value;
+            var currentArchitecture = Environment.Is64BitProcess ? "x64" : "x86";
+            if (!string.IsNullOrWhiteSpace(packageArchitecture) &&
+                !string.Equals(packageArchitecture, currentArchitecture, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return new GitHubLocalUpdatePackage
+            {
+                Path = Path.GetFullPath(path),
+                Version = version,
+                DisplayVersion = $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}"
+            };
+        }
+
+        private static Version NormalizeVersion(Version version)
+        {
+            if (version == null)
+                return new Version(0, 0, 0, 0);
+            return new Version(
+                version.Major,
+                version.Minor,
+                Math.Max(0, version.Build),
+                Math.Max(0, version.Revision));
         }
 
         private static Version ParseVersion(string value)
@@ -370,7 +460,7 @@ namespace llcom_plus.Tools
             }
         }
 
-        private static void WritePendingMetadata(GitHubReleaseInfo release, string zipFileName)
+        private static void WritePendingMetadata(GitHubReleaseInfo release, string zipFileName, long downloadedSizeBytes)
         {
             var metadata = new JObject
             {
@@ -378,6 +468,7 @@ namespace llcom_plus.Tools
                 ["assetName"] = release.AssetName ?? "",
                 ["assetDownloadUrl"] = release.AssetDownloadUrl ?? "",
                 ["assetSizeBytes"] = release.AssetSizeBytes,
+                ["downloadedSizeBytes"] = downloadedSizeBytes,
                 ["zipFileName"] = zipFileName ?? "",
                 ["downloadedAtUtc"] = DateTime.UtcNow.ToString("O"),
             };
@@ -396,8 +487,106 @@ namespace llcom_plus.Tools
             if (!File.Exists(candidate))
                 return false;
 
+            var expectedSize = metadata["downloadedSizeBytes"]?.ToObject<long?>()
+                               ?? metadata["assetSizeBytes"]?.ToObject<long?>()
+                               ?? 0;
+            try
+            {
+                var actualSize = new FileInfo(candidate).Length;
+                if ((expectedSize > 0 && actualSize != expectedSize) || !IsValidUpdatePackage(candidate))
+                {
+                    TryDeleteDirectory(PendingUpdateRoot);
+                    return false;
+                }
+            }
+            catch
+            {
+                TryDeleteDirectory(PendingUpdateRoot);
+                return false;
+            }
+
             zipPath = candidate;
             return true;
+        }
+
+        private static void ValidateUpdatePackage(string zipPath, Version expectedVersion = null)
+        {
+            InspectUpdatePackage(zipPath, expectedVersion);
+        }
+
+        private static bool IsValidUpdatePackage(string zipPath, Version expectedVersion = null)
+        {
+            try
+            {
+                InspectUpdatePackage(zipPath, expectedVersion);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static Version InspectUpdatePackage(string zipPath, Version expectedVersion)
+        {
+            if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath) || new FileInfo(zipPath).Length <= 0)
+                throw new FileNotFoundException("本地更新包不存在或为空。", zipPath);
+
+            var validationRoot = Path.Combine(UpdateRoot, "validate-" + Guid.NewGuid().ToString("N"));
+            var validationRootPrefix = Path.GetFullPath(validationRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            Directory.CreateDirectory(validationRoot);
+            try
+            {
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    if (archive.Entries.Count == 0)
+                        throw new InvalidDataException("本地更新 ZIP 是空包。");
+                    if (archive.Entries.Count > MaximumUpdateEntryCount)
+                        throw new InvalidDataException("本地更新 ZIP 文件数量异常。");
+
+                    long expandedBytes = 0;
+                    var executableEntries = new System.Collections.Generic.List<ZipArchiveEntry>();
+                    foreach (var entry in archive.Entries)
+                    {
+                        expandedBytes = checked(expandedBytes + entry.Length);
+                        if (expandedBytes > MaximumExpandedUpdateBytes)
+                            throw new InvalidDataException("本地更新 ZIP 解压后超过 2 GB，已拒绝安装。");
+
+                        var relativePath = (entry.FullName ?? string.Empty).Replace('/', Path.DirectorySeparatorChar);
+                        if (Path.IsPathRooted(relativePath))
+                            throw new InvalidDataException($"本地更新 ZIP 包含非法路径：{entry.FullName}");
+                        var destinationPath = Path.GetFullPath(Path.Combine(validationRoot, relativePath));
+                        if (!destinationPath.StartsWith(validationRootPrefix, StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(destinationPath.TrimEnd(Path.DirectorySeparatorChar), validationRoot.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException($"本地更新 ZIP 包含非法路径：{entry.FullName}");
+
+                        if (string.Equals(Path.GetFileName(entry.FullName), Global.ExpectedExeFileName, StringComparison.OrdinalIgnoreCase))
+                            executableEntries.Add(entry);
+                    }
+
+                    if (executableEntries.Count != 1)
+                        throw new InvalidDataException($"本地更新 ZIP 必须包含且只能包含一个 {Global.ExpectedExeFileName}。");
+
+                    var executablePath = Path.Combine(validationRoot, Global.ExpectedExeFileName);
+                    using (var input = executableEntries[0].Open())
+                    using (var output = File.Create(executablePath))
+                        input.CopyTo(output);
+
+                    var fileVersionText = FileVersionInfo.GetVersionInfo(executablePath).FileVersion;
+                    var actualVersion = ParseVersion(fileVersionText);
+                    if (actualVersion == null)
+                        throw new InvalidDataException("无法读取更新包内主程序的真实版本号。");
+                    if (expectedVersion != null && NormalizeVersion(actualVersion) != NormalizeVersion(expectedVersion))
+                        throw new InvalidDataException(
+                            $"更新包标注版本 {NormalizeVersionText(expectedVersion)} 与内部主程序版本 {NormalizeVersionText(actualVersion)} 不一致。");
+                    return actualVersion;
+                }
+            }
+            finally
+            {
+                TryDeleteDirectory(validationRoot);
+            }
         }
 
         private static string SafeFileName(string fileName)
@@ -409,12 +598,11 @@ namespace llcom_plus.Tools
             return string.IsNullOrWhiteSpace(fileName) ? "llcom-plus-update.zip" : fileName;
         }
 
-        private static string BuildInstallScript(string zipPath, bool restartAfterInstall)
+        private static string BuildInstallScript(string zipPath, string tempRoot, bool restartAfterInstall)
         {
             var appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var exePath = Path.Combine(appDir, Global.ExpectedExeFileName);
             var pid = Process.GetCurrentProcess().Id;
-            var tempRoot = Path.GetDirectoryName(zipPath);
             var extractDir = Path.Combine(tempRoot, "extract");
 
             return $@"$ErrorActionPreference = 'Stop'
@@ -565,6 +753,8 @@ try {{
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
             var process = Process.Start(startInfo);
+            if (process == null)
+                throw new InvalidOperationException("Failed to start update installer.");
             File.AppendAllText(
                 launchLogPath,
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + Environment.NewLine +
@@ -594,6 +784,25 @@ try {{
             {
             }
         }
+
+        private static void TryDeleteFile(string path)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                    File.Delete(path);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    internal sealed class GitHubLocalUpdatePackage
+    {
+        public string Path { get; set; }
+        public Version Version { get; set; }
+        public string DisplayVersion { get; set; }
     }
 
     internal sealed class GitHubReleaseInfo

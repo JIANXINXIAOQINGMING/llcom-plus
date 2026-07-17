@@ -1,6 +1,7 @@
 using llcom_plus.ScriptEnv;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Ports;
 using System.Management;
@@ -13,7 +14,7 @@ namespace llcom_plus.Model
     class Uart
     {
         private const int SerialWriteTimeoutMilliseconds = 5000;
-        private const int SerialDisposeTimeoutMilliseconds = 1500;
+        private const int SerialDisposeTimeoutMilliseconds = 5000;
         private const int MaxRetiredSerialPorts = 8;
 
         //废弃的串口对象，存放处，尝试fix[System.ObjectDisposedException: 已关闭 Safe handle]
@@ -30,7 +31,9 @@ namespace llcom_plus.Model
         private readonly object lifecycleLock = new object();
         private bool isShuttingDown;
         private bool _rts = false;
-        private bool _dtr = true;
+        // DTR 的上升沿会让不少 USB 串口设备复位。默认保持关闭，确实需要
+        // DTR 的设备再由用户按端口开启，避免“写入成功但设备正在重启”。
+        private bool _dtr = false;
 
         public bool Rts
         {
@@ -107,6 +110,15 @@ namespace llcom_plus.Model
             var oldSerial = serial;
             var oldBaseStream = lastPortBaseStream;
             lastPortBaseStream = null;
+            try
+            {
+                if (oldSerial != null)
+                    oldSerial.DataReceived -= Serial_DataReceived;
+            }
+            catch (Exception e)
+            {
+                Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]sync DataReceived unsubscribe error:{e.Message}");
+            }
             lock (receiveLock)
             {
                 if (ReferenceEquals(pendingReceivePort, oldSerial))
@@ -143,16 +155,6 @@ namespace llcom_plus.Model
 
                 try
                 {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose");
-                    baseStream?.Dispose();
-                }
-                catch (Exception e)
-                {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose error:{e.Message}");
-                }
-
-                try
-                {
                     Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Close");
                     if (port?.IsOpen == true)
                         port.Close();
@@ -171,11 +173,24 @@ namespace llcom_plus.Model
                 {
                     Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Dispose error:{e.Message}");
                 }
+
+                try
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose");
+                    baseStream?.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose error:{e.Message}");
+                }
             };
 
             var task = Task.Run(dispose);
             if (waitForDispose && !task.Wait(SerialDisposeTimeoutMilliseconds))
+            {
                 Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]dispose timeout {SerialDisposeTimeoutMilliseconds}ms");
+                throw new TimeoutException($"串口释放超过 {SerialDisposeTimeoutMilliseconds} 毫秒，后台仍在尝试释放。");
+            }
         }
 
         private void ConfigureSerialDevice(SerialPort port)
@@ -492,6 +507,7 @@ namespace llcom_plus.Model
                 Tools.Logger.AddUartLogDebug(
                     $"[UartWrite]port={portName},baud={port.BaudRate},parity={port.Parity},dataBits={port.DataBits},stopBits={port.StopBits},handshake={port.Handshake},dtr={SafeGetDtr(port)},rts={SafeGetRts(port)},bytes={count}");
                 port.Write(data, offset, count);
+                WaitForWriteDrain(port, count, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException)
@@ -512,6 +528,21 @@ namespace llcom_plus.Model
                 refreshSerialDevice(waitForDispose: false);
                 Tools.Global.NotifyUartPortClosed(portName);
                 throw new IOException("Serial port was closed while writing.", cause);
+            }
+        }
+
+        private static void WaitForWriteDrain(SerialPort port, int byteCount, CancellationToken cancellationToken)
+        {
+            var baudRate = Math.Max(1, port.BaudRate);
+            var estimatedMilliseconds = (long)Math.Ceiling(byteCount * 11000d / baudRate);
+            var timeoutMilliseconds = Math.Max(SerialWriteTimeoutMilliseconds, estimatedMilliseconds + 2000L);
+            var stopwatch = Stopwatch.StartNew();
+            while (port.BytesToWrite > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (stopwatch.ElapsedMilliseconds > timeoutMilliseconds)
+                    throw new TimeoutException("等待串口发送缓冲区清空超时。");
+                Thread.Sleep(2);
             }
         }
 
@@ -559,8 +590,18 @@ namespace llcom_plus.Model
         //接收到事件
         private void Serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
+            var eventPort = sender as SerialPort;
             lock (receiveLock)
-                pendingReceivePort = sender as SerialPort;
+            {
+                // SerialPort.Close/Dispose 之后，驱动仍可能补发旧对象的回调。
+                // 旧回调绝不能覆盖当前串口，否则当前串口已经触发的接收信号会被读错对象。
+                if (eventPort == null || !ReferenceEquals(eventPort, serial))
+                {
+                    Tools.Logger.AddUartLogDebug("[UartReceive]ignored stale DataReceived callback");
+                    return;
+                }
+                pendingReceivePort = eventPort;
+            }
             WaitUartReceive.Set();
         }
 
@@ -586,7 +627,12 @@ namespace llcom_plus.Model
                 {
                     SerialPort readPort;
                     lock (receiveLock)
-                        readPort = pendingReceivePort ?? serial;
+                    {
+                        var currentPort = serial;
+                        readPort = ReferenceEquals(pendingReceivePort, currentPort)
+                            ? pendingReceivePort
+                            : currentPort;
+                    }
 
                     try
                     {
@@ -602,7 +648,11 @@ namespace llcom_plus.Model
                             break;
                         result.AddRange(rev);//加到list末尾
                     }
-                    catch { break; }//崩了？
+                    catch (Exception ex)
+                    {
+                        Tools.Logger.AddUartLogDebug($"[UartReceive]read error:{ex.Message}");
+                        break;
+                    }
 
                     if (result.Count > Tools.Global.setting.maxLength)//长度超了
                         break;
