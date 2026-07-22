@@ -1197,6 +1197,7 @@ namespace llcom_plus.Model
         private string _tcpClientSslTargetHost = "";
         private string _tcpClientSslCaCertPath = "";
         private string _tcpClientSslClientCertPath = "";
+        [JsonIgnore]
         private string _tcpClientSslClientCertPassword = "";
         private string _tcpClientSslCipherSuites = "";
         private bool _tcpClientSslCheckRevocation = false;
@@ -1206,14 +1207,19 @@ namespace llcom_plus.Model
         public string tcpClientSslTargetHost { get { return _tcpClientSslTargetHost; } set { _tcpClientSslTargetHost = value; Save(); } }
         public string tcpClientSslCaCertPath { get { return _tcpClientSslCaCertPath; } set { _tcpClientSslCaCertPath = value; Save(); } }
         public string tcpClientSslClientCertPath { get { return _tcpClientSslClientCertPath; } set { _tcpClientSslClientCertPath = value; Save(); } }
-        public string tcpClientSslClientCertPassword { get { return _tcpClientSslClientCertPassword; } set { _tcpClientSslClientCertPassword = value; Save(); } }
+        [JsonIgnore]
+        public string tcpClientSslClientCertPassword { get { return _tcpClientSslClientCertPassword; } set { _tcpClientSslClientCertPassword = value ?? ""; } }
         public string tcpClientSslCipherSuites { get { return _tcpClientSslCipherSuites; } set { _tcpClientSslCipherSuites = value; Save(); } }
         public bool tcpClientSslCheckRevocation { get { return _tcpClientSslCheckRevocation; } set { _tcpClientSslCheckRevocation = value; Save(); } }
         public bool tcpClientSslPrintDetails { get { return _tcpClientSslPrintDetails; } set { _tcpClientSslPrintDetails = value; Save(); } }
+
+        internal void RemovePersistedTlsPassword()
+        {
+            _tcpClientSslClientCertPassword = "";
+            Save(false);
+        }
         private string _tcpClientSslClientKeyPath = "";
-        private string _openSslPath = "";
         public string tcpClientSslClientKeyPath { get { return _tcpClientSslClientKeyPath; } set { _tcpClientSslClientKeyPath = value; Save(); } }
-        public string openSslPath { get { return _openSslPath; } set { _openSslPath = value; Save(); } }
 
         private bool _tcpReconnect = false;
         public bool tcpReconnect { get { return _tcpReconnect; } set { _tcpReconnect = value; Save(); } }

@@ -33,7 +33,6 @@ namespace llcom_plus.Tools
         };
 
         private static readonly object cacheLock = new object();
-        private static string cachedOpenSslPathKey;
         private static List<string> cachedCipherSuites;
 
         public static void Attach(ComboBox comboBox, Func<string, string> getResourceText)
@@ -141,20 +140,15 @@ namespace llcom_plus.Tools
 
         private static IEnumerable<string> GetAvailableCipherSuites()
         {
-            var openSslPathKey = (Global.setting.openSslPath ?? string.Empty).Trim();
             lock (cacheLock)
             {
-                if (cachedCipherSuites != null &&
-                    string.Equals(cachedOpenSslPathKey, openSslPathKey, StringComparison.OrdinalIgnoreCase))
-                {
+                if (cachedCipherSuites != null)
                     return cachedCipherSuites;
-                }
 
                 var cipherSuites = new List<string>();
                 var openSslCipherSuites = OpenSslCli.GetAvailableCipherSuites();
                 AddDistinct(cipherSuites, openSslCipherSuites.Count > 0 ? openSslCipherSuites : FallbackCipherSuites);
 
-                cachedOpenSslPathKey = openSslPathKey;
                 cachedCipherSuites = cipherSuites;
                 return cachedCipherSuites;
             }

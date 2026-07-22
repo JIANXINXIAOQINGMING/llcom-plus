@@ -340,3 +340,15 @@ serial_monitor_rs/Cargo.lock
 !llcom plus/Runtime/Native/x86/serial_monitor.dll
 !llcom plus/Runtime/Native/x64/
 !llcom plus/Runtime/Native/x64/serial_monitor.dll
+
+# Bundled OpenSSL runtime, split by target architecture.
+!llcom plus/Runtime/OpenSSL/x86/
+!llcom plus/Runtime/OpenSSL/x86/*.exe
+!llcom plus/Runtime/OpenSSL/x86/*.dll
+!llcom plus/Runtime/OpenSSL/x86/ossl-modules/
+!llcom plus/Runtime/OpenSSL/x86/ossl-modules/*.dll
+!llcom plus/Runtime/OpenSSL/x64/
+!llcom plus/Runtime/OpenSSL/x64/*.exe
+!llcom plus/Runtime/OpenSSL/x64/*.dll
+!llcom plus/Runtime/OpenSSL/x64/ossl-modules/
+!llcom plus/Runtime/OpenSSL/x64/ossl-modules/*.dll

@@ -345,10 +345,21 @@ namespace llcom_plus.Tools
                     try
                     {
                         //cost 309ms
-                        setting = JsonConvert.DeserializeObject<Model.Settings>(File.ReadAllText(ProfilePath + "settings.json"));
+                        var settingsText = File.ReadAllText(ProfilePath + "settings.json");
+                        var hadPersistedTlsPassword = false;
+                        try
+                        {
+                            hadPersistedTlsPassword = Newtonsoft.Json.Linq.JObject.Parse(settingsText)
+                                .Property("tcpClientSslClientCertPassword", StringComparison.OrdinalIgnoreCase) != null;
+                        }
+                        catch { }
+
+                        setting = JsonConvert.DeserializeObject<Model.Settings>(settingsText);
                         if (setting == null)
                             throw new Exception("settings.json is empty");
                         setting.EnsureRuntimeState();
+                        if (hadPersistedTlsPassword)
+                            setting.RemovePersistedTlsPassword();
                         setting.SentCount = 0;
                         setting.ReceivedCount = 0;
                         setting.DisableLog = false;

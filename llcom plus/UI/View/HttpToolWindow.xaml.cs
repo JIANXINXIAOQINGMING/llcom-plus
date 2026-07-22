@@ -23,7 +23,7 @@ namespace llcom_plus
         {
             new HeaderPreset("Accept", "application/json"),
             new HeaderPreset("Accept-Charset", "utf-8"),
-            new HeaderPreset("Accept-Encoding", "gzip, deflate, br"),
+            new HeaderPreset("Accept-Encoding", "gzip, deflate"),
             new HeaderPreset("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
             new HeaderPreset("Authorization", "Bearer your-token"),
             new HeaderPreset("Cache-Control", "no-cache"),
@@ -48,10 +48,58 @@ namespace llcom_plus
         {
             InitializeComponent();
             HttpTlsSettingsGrid.DataContext = Tools.Global.setting;
+            HttpSslClientCertPasswordBox.Password = Tools.Global.setting?.tcpClientSslClientCertPassword ?? string.Empty;
             Tools.CipherSuitePicker.Attach(FindName("HttpCipherSuitesPicker") as ComboBox, key => TryFindResource(key) as string);
             InitializeHeaderPresets();
             InitializeBodyEditors();
             ApplySelectedHeaderPreset();
+        }
+
+        private void SelectHttpSslCaCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectCertificateFile(HttpSslCaCertPathTextBox);
+        }
+
+        private void SelectHttpSslClientCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectCertificateFile(HttpSslClientCertPathTextBox);
+        }
+
+        private void SelectHttpSslClientKeyPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectCertificateFile(HttpSslClientKeyPathTextBox);
+        }
+
+        private void ClearHttpSslCaCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            HttpSslCaCertPathTextBox.Clear();
+        }
+
+        private void ClearHttpSslClientCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            HttpSslClientCertPathTextBox.Clear();
+        }
+
+        private void ClearHttpSslClientKeyPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            HttpSslClientKeyPathTextBox.Clear();
+        }
+
+        private void HttpSslClientCertPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            if (Tools.Global.setting != null)
+                Tools.Global.setting.tcpClientSslClientCertPassword = HttpSslClientCertPasswordBox.Password;
+        }
+
+        private void SelectCertificateFile(TextBox target)
+        {
+            var dialog = new OpenFileDialog
+            {
+                CheckFileExists = true,
+                Filter = GetResourceText("SendFileFilter", "All files|*.*")
+            };
+            if (dialog.ShowDialog(Window.GetWindow(this)) == true)
+                target.Text = dialog.FileName;
         }
 
         private async void SendButton_Click(object sender, RoutedEventArgs e)
@@ -289,6 +337,7 @@ namespace llcom_plus
         private void SetSendingState(bool isSending)
         {
             SendButton.IsEnabled = !isSending;
+            HttpTlsSettingsGrid.IsEnabled = !isSending;
             SendButton.Content = isSending
                 ? GetResourceText("HttpSending", "Sending...")
                 : GetResourceText("HttpSend", "Send");

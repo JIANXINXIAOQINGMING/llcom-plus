@@ -551,11 +551,19 @@
     <Copy SourceFiles="@(NativeRuntimeFile)" DestinationFiles="@(NativeRuntimeFile->'$(TargetDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="CopyOpenSslRuntimeFiles" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\Runtime\OpenSSL')">
+    <PropertyGroup>
+      <OpenSslRuntimePlatform>$(PlatformTarget)</OpenSslRuntimePlatform>
+      <OpenSslRuntimePlatform Condition="'$(OpenSslRuntimePlatform)' == ''">$(Platform)</OpenSslRuntimePlatform>
+    </PropertyGroup>
     <ItemGroup>
-      <OpenSslRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\OpenSSL\**\*" />
+      <OpenSslSharedRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\OpenSSL\*.txt;$(MSBuildProjectDirectory)\Runtime\OpenSSL\*.cnf" />
+      <OpenSslPlatformRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\OpenSSL\$(OpenSslRuntimePlatform)\**\*" />
     </ItemGroup>
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)\Runtime\OpenSSL\$(OpenSslRuntimePlatform)\openssl.exe')" Text="Missing OpenSSL runtime for $(OpenSslRuntimePlatform)." />
+    <RemoveDir Directories="$(TargetDir)OpenSSL" Condition="Exists('$(TargetDir)OpenSSL')" />
     <MakeDir Directories="$(TargetDir)OpenSSL" />
-    <Copy SourceFiles="@(OpenSslRuntimeFile)" DestinationFiles="@(OpenSslRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OpenSslSharedRuntimeFile)" DestinationFiles="@(OpenSslSharedRuntimeFile->'$(TargetDir)OpenSSL\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OpenSslPlatformRuntimeFile)" DestinationFiles="@(OpenSslPlatformRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
@@ -566,7 +574,7 @@
       <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
-      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir)circular_send.json;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
       <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
     </ItemGroup>
     <MakeDir Directories="$(MSBuildProjectDirectory)\..\artifacts\release" />

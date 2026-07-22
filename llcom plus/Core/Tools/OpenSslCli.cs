@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,24 +36,69 @@ namespace llcom_plus.Tools
         public bool TimedOut { get; set; }
     }
 
+    internal sealed class OpenSslProcessContext : IDisposable
+    {
+        private readonly string temporaryCaPath;
+        private int disposed;
+
+        public OpenSslProcessContext(Process process, string temporaryCaPath)
+        {
+            Process = process;
+            this.temporaryCaPath = temporaryCaPath;
+        }
+
+        public Process Process { get; }
+
+        public void CleanupTemporaryFiles()
+        {
+            if (string.IsNullOrWhiteSpace(temporaryCaPath))
+                return;
+
+            try { File.Delete(temporaryCaPath); } catch { }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) != 0)
+                return;
+
+            try
+            {
+                if (!Process.HasExited)
+                    Process.Kill();
+            }
+            catch { }
+            try { Process.WaitForExit(2000); } catch { }
+            try { Process.Dispose(); } catch { }
+            CleanupTemporaryFiles();
+        }
+    }
+
     public sealed class OpenSslInteractiveConnection : IDisposable
     {
+        private readonly OpenSslProcessContext context;
         private readonly Process process;
         private readonly Stream input;
         private bool disposed;
 
         internal OpenSslInteractiveConnection(
-            Process process,
+            OpenSslProcessContext context,
             Action<byte[]> onData,
             Action<string> onDiagnostics,
+            Action onConnected,
             Action<int?> onClosed)
         {
-            this.process = process;
+            this.context = context;
+            process = context.Process;
             input = process.StandardInput.BaseStream;
             process.EnableRaisingEvents = true;
-            process.Exited += (_, __) => onClosed?.Invoke(SafeExitCode());
+            process.Exited += (_, __) =>
+            {
+                context.CleanupTemporaryFiles();
+                onClosed?.Invoke(SafeExitCode());
+            };
             StartReadLoop(process.StandardOutput.BaseStream, onData);
-            StartTextReadLoop(process.StandardError.BaseStream, onDiagnostics);
+            StartTextReadLoop(process.StandardError.BaseStream, onDiagnostics, onConnected);
         }
 
         public void Send(byte[] data)
@@ -71,13 +117,7 @@ namespace llcom_plus.Tools
             disposed = true;
 
             try { input.Close(); } catch { }
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill();
-            }
-            catch { }
-            try { process.Dispose(); } catch { }
+            context.Dispose();
         }
 
         private int? SafeExitCode()
@@ -106,7 +146,7 @@ namespace llcom_plus.Tools
             });
         }
 
-        private static void StartTextReadLoop(Stream stream, Action<string> onText)
+        private static void StartTextReadLoop(Stream stream, Action<string> onText, Action onConnected)
         {
             Task.Run(() =>
             {
@@ -115,6 +155,7 @@ namespace llcom_plus.Tools
                 var blockBuffer = new StringBuilder();
                 var blockExpectedLength = -1;
                 var blockActualLength = 0;
+                var connectedRaised = 0;
 
                 void FlushBlock()
                 {
@@ -135,6 +176,9 @@ namespace llcom_plus.Tools
 
                 void ProcessLine(string line)
                 {
+                    if (IsConnectionEstablishedLine(line) && Interlocked.Exchange(ref connectedRaised, 1) == 0)
+                        onConnected?.Invoke();
+
                     if (IsOpenSslMessageHeader(line, out var expectedLength))
                     {
                         FlushBlock();
@@ -200,6 +244,13 @@ namespace llcom_plus.Tools
             });
         }
 
+        private static bool IsConnectionEstablishedLine(string line)
+        {
+            var text = (line ?? string.Empty).Trim();
+            return text.IndexOf("CONNECTION ESTABLISHED", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   text.IndexOf("SSL negotiation finished successfully", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private static bool IsOpenSslMessageHeader(string line, out int expectedLength)
         {
             expectedLength = -1;
@@ -257,6 +308,8 @@ namespace llcom_plus.Tools
 
     public static class OpenSslCli
     {
+        private const string PasswordEnvironmentVariable = "LLCOM_OPENSSL_CERT_PASSWORD";
+
         public static OpenSslClientOptions FromGlobalSettings(string host, int port, bool useDtls)
         {
             var setting = Global.setting;
@@ -286,10 +339,19 @@ namespace llcom_plus.Tools
             OpenSslClientOptions options,
             Action<byte[]> onData,
             Action<string> onDiagnostics,
+            Action onConnected,
             Action<int?> onClosed)
         {
-            var process = StartSClient(options, interactive: true);
-            return new OpenSslInteractiveConnection(process, onData, onDiagnostics, onClosed);
+            var context = StartSClient(options, interactive: true);
+            try
+            {
+                return new OpenSslInteractiveConnection(context, onData, onDiagnostics, onConnected, onClosed);
+            }
+            catch
+            {
+                context.Dispose();
+                throw;
+            }
         }
 
         public static async Task<OpenSslCommandResult> SendAsync(
@@ -298,48 +360,54 @@ namespace llcom_plus.Tools
             int timeoutMilliseconds,
             CancellationToken cancellationToken)
         {
-            using (var process = StartSClient(options, interactive: false))
+            using (var context = StartSClient(options, interactive: false))
             {
+                var process = context.Process;
                 if (timeoutMilliseconds <= 0)
                     timeoutMilliseconds = 30000;
-
-                var outputTask = ReadAllBytesAsync(process.StandardOutput.BaseStream, cancellationToken);
-                var errorTask = ReadAllTextAsync(process.StandardError.BaseStream, cancellationToken);
-
-                await process.StandardInput.BaseStream.WriteAsync(request, 0, request.Length, cancellationToken);
-                process.StandardInput.Close();
-
-                var waitTask = Task.Run(() =>
+                try
                 {
-                    process.WaitForExit();
-                    return process.ExitCode;
-                });
+                    var outputTask = ReadAllBytesAsync(process.StandardOutput.BaseStream, cancellationToken);
+                    var errorTask = ReadAllTextAsync(process.StandardError.BaseStream, cancellationToken);
 
-                var completed = await Task.WhenAny(waitTask, Task.Delay(timeoutMilliseconds, cancellationToken));
-                var timedOut = completed != waitTask;
-                if (timedOut)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try { if (!process.HasExited) process.Kill(); } catch { }
-                    try { process.WaitForExit(2000); } catch { }
+                    await process.StandardInput.BaseStream.WriteAsync(request, 0, request.Length, cancellationToken);
+                    process.StandardInput.Close();
+
+                    var waitTask = Task.Run(() =>
+                    {
+                        process.WaitForExit();
+                        return process.ExitCode;
+                    });
+
+                    var completed = await Task.WhenAny(waitTask, Task.Delay(timeoutMilliseconds, cancellationToken));
+                    var timedOut = completed != waitTask;
+                    if (timedOut)
+                    {
+                        StopProcess(process);
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+
+                    byte[] output;
+                    string diagnostics;
+                    try { output = await outputTask; } catch { output = new byte[0]; }
+                    try { diagnostics = await errorTask; } catch { diagnostics = string.Empty; }
+
+                    int? exitCode = null;
+                    if (!timedOut)
+                        exitCode = await waitTask;
+
+                    return new OpenSslCommandResult
+                    {
+                        Output = output,
+                        Diagnostics = diagnostics,
+                        ExitCode = exitCode,
+                        TimedOut = timedOut
+                    };
                 }
-
-                byte[] output;
-                string diagnostics;
-                try { output = await outputTask; } catch { output = new byte[0]; }
-                try { diagnostics = await errorTask; } catch { diagnostics = string.Empty; }
-
-                int? exitCode = null;
-                if (!timedOut)
-                    exitCode = await waitTask;
-
-                return new OpenSslCommandResult
+                finally
                 {
-                    Output = output,
-                    Diagnostics = diagnostics,
-                    ExitCode = exitCode,
-                    TimedOut = timedOut
-                };
+                    StopProcess(process);
+                }
             }
         }
 
@@ -354,6 +422,8 @@ namespace llcom_plus.Tools
             builder.AppendLine($"Auth mode: {GetAuthModeName(options.AuthMode)}");
             if (!string.IsNullOrWhiteSpace(options.CaCertPath))
                 builder.AppendLine($"CA file: {options.CaCertPath}");
+            else if (options.AuthMode > 0)
+                builder.AppendLine("CA source: Windows trusted root stores");
             if (!string.IsNullOrWhiteSpace(options.ClientCertPath))
                 builder.AppendLine($"Client cert: {options.ClientCertPath}");
             if (!string.IsNullOrWhiteSpace(options.ClientKeyPath))
@@ -363,10 +433,19 @@ namespace llcom_plus.Tools
             return builder.ToString();
         }
 
-        private static Process StartSClient(OpenSslClientOptions options, bool interactive)
+        private static OpenSslProcessContext StartSClient(OpenSslClientOptions options, bool interactive)
         {
+            ValidateOptions(options);
             var executable = FindOpenSslExecutable();
-            var arguments = BuildSClientArguments(options, interactive);
+            var temporaryCaPath = string.Empty;
+            var effectiveCaPath = (options.CaCertPath ?? string.Empty).Trim();
+            if (options.AuthMode > 0 && string.IsNullOrWhiteSpace(effectiveCaPath))
+            {
+                temporaryCaPath = CreateWindowsRootCaBundle();
+                effectiveCaPath = temporaryCaPath;
+            }
+
+            var arguments = BuildSClientArguments(options, interactive, effectiveCaPath);
             var startInfo = new ProcessStartInfo
             {
                 FileName = executable,
@@ -377,15 +456,26 @@ namespace llcom_plus.Tools
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            ConfigureOpenSslEnvironment(startInfo);
+            if (!string.IsNullOrEmpty(options.ClientCertPassword))
+                startInfo.EnvironmentVariables[PasswordEnvironmentVariable] = options.ClientCertPassword;
 
-            var process = Process.Start(startInfo);
-            if (process == null)
-                throw new InvalidOperationException("OpenSSL 启动失败。");
+            try
+            {
+                var process = Process.Start(startInfo);
+                if (process == null)
+                    throw new InvalidOperationException("OpenSSL 启动失败。");
 
-            return process;
+                return new OpenSslProcessContext(process, temporaryCaPath);
+            }
+            catch
+            {
+                try { if (!string.IsNullOrWhiteSpace(temporaryCaPath)) File.Delete(temporaryCaPath); } catch { }
+                throw;
+            }
         }
 
-        private static string BuildSClientArguments(OpenSslClientOptions options, bool interactive)
+        private static string BuildSClientArguments(OpenSslClientOptions options, bool interactive, string effectiveCaPath)
         {
             var args = new List<string>
             {
@@ -401,7 +491,7 @@ namespace llcom_plus.Tools
             }
 
             AddProtocolArguments(args, options);
-            AddCertificateArguments(args, options);
+            AddCertificateArguments(args, options, effectiveCaPath);
             AddCipherArguments(args, options);
 
             if (options.PrintDetails)
@@ -413,6 +503,7 @@ namespace llcom_plus.Tools
 
             if (interactive)
             {
+                args.Add("-brief");
                 args.Add("-quiet");
                 args.Add("-ign_eof");
             }
@@ -463,28 +554,31 @@ namespace llcom_plus.Tools
             }
         }
 
-        private static void AddCertificateArguments(List<string> args, OpenSslClientOptions options)
+        private static void AddCertificateArguments(List<string> args, OpenSslClientOptions options, string effectiveCaPath)
         {
             if (options.AuthMode > 0)
             {
                 args.Add("-verify");
                 args.Add("10");
                 args.Add("-verify_return_error");
-                if (!string.IsNullOrWhiteSpace(options.TargetHost) && !IPAddress.TryParse(options.TargetHost, out _))
+                if (!string.IsNullOrWhiteSpace(options.TargetHost))
                 {
-                    args.Add("-verify_hostname");
+                    if (IPAddress.TryParse(options.TargetHost, out _))
+                        args.Add("-verify_ip");
+                    else
+                        args.Add("-verify_hostname");
                     args.Add(options.TargetHost);
                 }
-            }
 
-            if (!string.IsNullOrWhiteSpace(options.CaCertPath))
-            {
                 args.Add("-CAfile");
-                args.Add(options.CaCertPath);
-            }
+                args.Add(effectiveCaPath);
 
-            if (options.CheckRevocation)
-                args.Add("-crl_check");
+                if (options.CheckRevocation)
+                {
+                    args.Add("-crl_check");
+                    args.Add("-crl_download");
+                }
+            }
 
             if (options.AuthMode < 2)
                 return;
@@ -504,7 +598,85 @@ namespace llcom_plus.Tools
             if (!string.IsNullOrEmpty(options.ClientCertPassword))
             {
                 args.Add("-pass");
-                args.Add("pass:" + options.ClientCertPassword);
+                args.Add("env:" + PasswordEnvironmentVariable);
+            }
+        }
+
+        private static void ValidateOptions(OpenSslClientOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+            if (string.IsNullOrWhiteSpace(options.Host))
+                throw new ArgumentException("服务器地址不能为空。", nameof(options));
+            if (options.Port < 1 || options.Port > 65535)
+                throw new ArgumentOutOfRangeException(nameof(options), "服务器端口必须在 1 到 65535 之间。");
+
+            ValidateOptionalFile(options.CaCertPath, "信任证书/CA");
+            ValidateOptionalFile(options.ClientCertPath, "客户端证书");
+            ValidateOptionalFile(options.ClientKeyPath, "客户端私钥");
+
+            if (options.AuthMode >= 2 && string.IsNullOrWhiteSpace(options.ClientCertPath))
+                throw new ArgumentException("双向认证必须选择客户端证书。", nameof(options));
+        }
+
+        private static void ValidateOptionalFile(string path, string displayName)
+        {
+            if (!string.IsNullOrWhiteSpace(path) && !File.Exists(path.Trim()))
+                throw new FileNotFoundException(displayName + "文件不存在：" + path, path);
+        }
+
+        private static string CreateWindowsRootCaBundle()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "llcom-plus-windows-roots-" + Guid.NewGuid().ToString("N") + ".pem");
+            var certificates = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+
+            AddStoreCertificates(certificates, StoreLocation.CurrentUser);
+            AddStoreCertificates(certificates, StoreLocation.LocalMachine);
+            if (certificates.Count == 0)
+                throw new InvalidOperationException("Windows 受信任根证书存储为空，无法执行证书认证。");
+
+            try
+            {
+                using (var writer = new StreamWriter(path, false, new UTF8Encoding(false)))
+                {
+                    foreach (var certificate in certificates.Values)
+                    {
+                        writer.WriteLine("-----BEGIN CERTIFICATE-----");
+                        writer.WriteLine(Convert.ToBase64String(certificate, Base64FormattingOptions.InsertLineBreaks));
+                        writer.WriteLine("-----END CERTIFICATE-----");
+                    }
+                }
+                return path;
+            }
+            catch
+            {
+                try { File.Delete(path); } catch { }
+                throw;
+            }
+        }
+
+        private static void AddStoreCertificates(Dictionary<string, byte[]> certificates, StoreLocation location)
+        {
+            try
+            {
+                using (var store = new X509Store(StoreName.Root, location))
+                {
+                    store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+                    foreach (var certificate in store.Certificates)
+                    {
+                        try
+                        {
+                            var key = certificate.Thumbprint ?? Convert.ToBase64String(certificate.GetCertHash());
+                            if (!certificates.ContainsKey(key))
+                                certificates.Add(key, certificate.Export(X509ContentType.Cert));
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch
+            {
+                // One store may be unavailable under a restricted account; use the other store.
             }
         }
 
@@ -572,6 +744,7 @@ namespace llcom_plus.Tools
                     RedirectStandardError = true,
                     CreateNoWindow = true
                 };
+                ConfigureOpenSslEnvironment(startInfo);
 
                 using (var process = Process.Start(startInfo))
                 {
@@ -623,37 +796,37 @@ namespace llcom_plus.Tools
             return cipherSuites;
         }
 
+        private static void ConfigureOpenSslEnvironment(ProcessStartInfo startInfo)
+        {
+            var runtimeDirectory = Path.Combine(Global.AppPath, "OpenSSL");
+            var configPath = Path.Combine(runtimeDirectory, "openssl.cnf");
+            var modulesPath = Path.Combine(runtimeDirectory, "ossl-modules");
+            if (File.Exists(configPath))
+                startInfo.EnvironmentVariables["OPENSSL_CONF"] = configPath;
+            if (Directory.Exists(modulesPath))
+                startInfo.EnvironmentVariables["OPENSSL_MODULES"] = modulesPath;
+        }
+
+        private static void StopProcess(Process process)
+        {
+            if (process == null)
+                return;
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill();
+            }
+            catch { }
+            try { process.WaitForExit(2000); } catch { }
+        }
+
         private static string FindOpenSslExecutable()
         {
-            var configured = (Global.setting.openSslPath ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
-                return configured;
+            var bundledOpenSsl = Path.Combine(Global.AppPath, "OpenSSL", "openssl.exe");
+            if (File.Exists(bundledOpenSsl))
+                return bundledOpenSsl;
 
-            var localCandidates = new[]
-            {
-                Path.Combine(Global.AppPath, "OpenSSL", "openssl.exe"),
-                Path.Combine(Global.AppPath, "openssl", "openssl.exe"),
-                Path.Combine(Global.AppPath, "openssl.exe")
-            };
-            foreach (var local in localCandidates)
-            {
-                if (File.Exists(local))
-                    return local;
-            }
-
-            var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-            foreach (var dir in path.Split(Path.PathSeparator))
-            {
-                try
-                {
-                    var candidate = Path.Combine(dir.Trim(), "openssl.exe");
-                    if (File.Exists(candidate))
-                        return candidate;
-                }
-                catch { }
-            }
-
-            throw new FileNotFoundException("找不到 openssl.exe。请将 OpenSSL 放到程序目录的 OpenSSL 文件夹、PATH，或在设置中配置 openSslPath。");
+            throw new FileNotFoundException("找不到程序自带的 OpenSSL：" + bundledOpenSsl);
         }
 
         private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken cancellationToken)

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace llcom_plus.Tools
@@ -27,6 +28,7 @@ namespace llcom_plus.Tools
         internal SshInteractiveConnection(
             Process process,
             Action<byte[]> onData,
+            Action onConnected,
             Action<int?> onClosed)
         {
             this.process = process;
@@ -34,7 +36,7 @@ namespace llcom_plus.Tools
             process.EnableRaisingEvents = true;
             process.Exited += (_, __) => onClosed?.Invoke(SafeExitCode());
             StartReadLoop(process.StandardOutput.BaseStream, onData);
-            StartReadLoop(process.StandardError.BaseStream, onData);
+            StartDiagnosticReadLoop(process.StandardError.BaseStream, onData, onConnected);
         }
 
         public void Send(byte[] data)
@@ -87,6 +89,39 @@ namespace llcom_plus.Tools
                 }
             });
         }
+
+        private static void StartDiagnosticReadLoop(Stream stream, Action<byte[]> onData, Action onConnected)
+        {
+            Task.Run(() =>
+            {
+                var buffer = new byte[8192];
+                var pendingText = new StringBuilder();
+                var connectedRaised = 0;
+                while (true)
+                {
+                    int read;
+                    try { read = stream.Read(buffer, 0, buffer.Length); }
+                    catch { return; }
+                    if (read <= 0)
+                        return;
+
+                    var data = new byte[read];
+                    Buffer.BlockCopy(buffer, 0, data, 0, read);
+                    onData?.Invoke(data);
+
+                    pendingText.Append(Encoding.UTF8.GetString(buffer, 0, read));
+                    if (pendingText.Length > 32768)
+                        pendingText.Remove(0, pendingText.Length - 16384);
+                    var text = pendingText.ToString();
+                    if ((text.IndexOf("Authenticated to ", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         text.IndexOf("Authentication succeeded", StringComparison.OrdinalIgnoreCase) >= 0) &&
+                        Interlocked.Exchange(ref connectedRaised, 1) == 0)
+                    {
+                        onConnected?.Invoke();
+                    }
+                }
+            });
+        }
     }
 
     public static class SshCli
@@ -108,10 +143,11 @@ namespace llcom_plus.Tools
         public static SshInteractiveConnection StartInteractive(
             SshClientOptions options,
             Action<byte[]> onData,
+            Action onConnected,
             Action<int?> onClosed)
         {
             var process = StartSsh(options);
-            return new SshInteractiveConnection(process, onData, onClosed);
+            return new SshInteractiveConnection(process, onData, onConnected, onClosed);
         }
 
         public static string BuildDiagnosticSummary(SshClientOptions options)
@@ -130,6 +166,7 @@ namespace llcom_plus.Tools
 
         private static Process StartSsh(SshClientOptions options)
         {
+            ValidateOptions(options);
             var executable = FindSshExecutable(options.SshPath);
             var arguments = BuildSshArguments(options);
             var startInfo = new ProcessStartInfo
@@ -154,6 +191,7 @@ namespace llcom_plus.Tools
         {
             var args = new List<string>
             {
+                "-v",
                 "-tt",
                 "-p",
                 Math.Max(1, Math.Min(65535, options.Port)).ToString(),
@@ -181,6 +219,18 @@ namespace llcom_plus.Tools
 
             argumentText += " " + QuoteArgument(NormalizeHost(options.Host));
             return argumentText;
+        }
+
+        private static void ValidateOptions(SshClientOptions options)
+        {
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+            if (string.IsNullOrWhiteSpace(options.Host))
+                throw new ArgumentException("SSH 服务器地址不能为空。", nameof(options));
+            if (options.Port < 1 || options.Port > 65535)
+                throw new ArgumentOutOfRangeException(nameof(options), "SSH 服务器端口必须在 1 到 65535 之间。");
+            if (!string.IsNullOrWhiteSpace(options.PrivateKeyPath) && !File.Exists(options.PrivateKeyPath.Trim()))
+                throw new FileNotFoundException("SSH 私钥文件不存在：" + options.PrivateKeyPath, options.PrivateKeyPath);
         }
 
         private static string NormalizeHost(string host)

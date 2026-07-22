@@ -307,7 +307,6 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsAuthMode}" />
@@ -353,35 +352,60 @@
                                 IsChecked="{Binding tcpClientSslCheckRevocation}" />
 
                             <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsTrustedCa}" />
-                            <TextBox
+                            <Grid
                                 Grid.Row="2"
                                 Grid.Column="1"
                                 Grid.ColumnSpan="3"
-                                Margin="0,0,0,8"
-                                Text="{Binding tcpClientSslCaCertPath, UpdateSourceTrigger=PropertyChanged}" />
+                                Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="HttpSslCaCertPathTextBox" IsReadOnly="True" ToolTip="{DynamicResource TlsTrustedCaTip}" Text="{Binding tcpClientSslCaCertPath, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button Grid.Column="1" MinWidth="90" Margin="6,0,0,0" Click="SelectHttpSslCaCertPathButton_Click" Content="{DynamicResource DataCalcSelectFile}" />
+                                <Button Grid.Column="2" MinWidth="70" Margin="6,0,0,0" Click="ClearHttpSslCaCertPathButton_Click" Content="{DynamicResource CircularSendClear}" />
+                            </Grid>
 
                             <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsClientCert}" />
-                            <TextBox
+                            <Grid
                                 Grid.Row="3"
                                 Grid.Column="1"
                                 Grid.ColumnSpan="3"
-                                Margin="0,0,0,8"
-                                Text="{Binding tcpClientSslClientCertPath, UpdateSourceTrigger=PropertyChanged}" />
+                                Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="HttpSslClientCertPathTextBox" IsReadOnly="True" ToolTip="{DynamicResource TlsClientCertTip}" Text="{Binding tcpClientSslClientCertPath, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button Grid.Column="1" MinWidth="90" Margin="6,0,0,0" Click="SelectHttpSslClientCertPathButton_Click" Content="{DynamicResource DataCalcSelectFile}" />
+                                <Button Grid.Column="2" MinWidth="70" Margin="6,0,0,0" Click="ClearHttpSslClientCertPathButton_Click" Content="{DynamicResource CircularSendClear}" />
+                            </Grid>
 
                             <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsClientKey}" />
-                            <TextBox
+                            <Grid
                                 Grid.Row="4"
                                 Grid.Column="1"
                                 Grid.ColumnSpan="3"
-                                Margin="0,0,0,8"
-                                Text="{Binding tcpClientSslClientKeyPath, UpdateSourceTrigger=PropertyChanged}" />
+                                Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="HttpSslClientKeyPathTextBox" IsReadOnly="True" ToolTip="{DynamicResource TlsClientKeyTip}" Text="{Binding tcpClientSslClientKeyPath, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button Grid.Column="1" MinWidth="90" Margin="6,0,0,0" Click="SelectHttpSslClientKeyPathButton_Click" Content="{DynamicResource DataCalcSelectFile}" />
+                                <Button Grid.Column="2" MinWidth="70" Margin="6,0,0,0" Click="ClearHttpSslClientKeyPathButton_Click" Content="{DynamicResource CircularSendClear}" />
+                            </Grid>
 
                             <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,0,8,8" VerticalAlignment="Center" Text="{DynamicResource TlsCertPassword}" />
-                            <TextBox
+                            <PasswordBox
+                                x:Name="HttpSslClientCertPasswordBox"
                                 Grid.Row="5"
                                 Grid.Column="1"
                                 Margin="0,0,12,8"
-                                Text="{Binding tcpClientSslClientCertPassword, UpdateSourceTrigger=PropertyChanged}" />
+                                PasswordChanged="HttpSslClientCertPasswordBox_PasswordChanged" />
                             <CheckBox
                                 Grid.Row="5"
                                 Grid.Column="2"
@@ -405,13 +429,6 @@
                                 StaysOpenOnEdit="True"
                                 ToolTip="{DynamicResource TlsCipherSuitesTip}" />
 
-                            <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,0,8,0" VerticalAlignment="Center" Text="{DynamicResource TlsOpenSslPath}" />
-                            <TextBox
-                                Grid.Row="7"
-                                Grid.Column="1"
-                                Grid.ColumnSpan="3"
-                                ToolTip="{DynamicResource TlsOpenSslPathTip}"
-                                Text="{Binding openSslPath, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
                     </ScrollViewer>
                 </TabItem>

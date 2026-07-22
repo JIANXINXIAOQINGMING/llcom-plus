@@ -86,6 +86,14 @@ namespace llcom_plus.Pages
 
                 RefreshIndexes();
             }
+            catch (Exception ex)
+            {
+                Items.Clear();
+                for (var i = 0; i < DefaultRowCount; i++)
+                    AddItem(new CircularSendItem());
+                RefreshIndexes();
+                ShowStorageError(ex);
+            }
             finally
             {
                 suppressSave = false;
@@ -108,14 +116,30 @@ namespace llcom_plus.Pages
             if (suppressSave)
                 return;
 
+            var tempPath = StoragePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 Directory.CreateDirectory(Global.ProfilePath);
-                File.WriteAllText(StoragePath, JsonConvert.SerializeObject(Items, Formatting.Indented));
+                File.WriteAllText(tempPath, JsonConvert.SerializeObject(Items, Formatting.Indented));
+                File.Copy(tempPath, StoragePath, true);
+                StorageErrorTextBlock.Text = string.Empty;
+                StorageErrorTextBlock.Visibility = Visibility.Collapsed;
             }
-            catch
+            catch (Exception ex)
             {
+                ShowStorageError(ex);
             }
+            finally
+            {
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            }
+        }
+
+        private void ShowStorageError(Exception ex)
+        {
+            var format = TryFindResource("CircularSendSaveFailedFormat") as string ?? "循环发送配置保存/读取失败：{0}";
+            StorageErrorTextBlock.Text = string.Format(format, ex.Message);
+            StorageErrorTextBlock.Visibility = Visibility.Visible;
         }
 
         private void RefreshIndexes()

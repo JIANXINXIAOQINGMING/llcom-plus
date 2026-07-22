@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -92,10 +91,9 @@ namespace llcom_plus.Pages
             SslCaCertPathTextBox.DataContext = Tools.Global.setting;
             SslClientCertPathTextBox.DataContext = Tools.Global.setting;
             SslClientKeyPathTextBox.DataContext = Tools.Global.setting;
-            SslClientCertPasswordTextBox.DataContext = Tools.Global.setting;
+            SslClientCertPasswordBox.Password = Tools.Global.setting.tcpClientSslClientCertPassword ?? string.Empty;
             SslPrintDetailsCheckBox.DataContext = Tools.Global.setting;
             CipherSuitePicker.Attach(FindName("SslCipherSuitesPicker") as ComboBox, key => TryFindResource(key) as string);
-            OpenSslPathTextBox.DataContext = Tools.Global.setting;
             SshUserNameTextBox.DataContext = Tools.Global.setting;
             SshPrivateKeyPathTextBox.DataContext = Tools.Global.setting;
             SshExtraArgumentsTextBox.DataContext = Tools.Global.setting;
@@ -125,6 +123,52 @@ namespace llcom_plus.Pages
             {
                 ScriptApis.SendChannelsReceived("socket-client", data);
             };
+        }
+
+        private void SelectSslCaCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectFilePath(SslCaCertPathTextBox);
+        }
+
+        private void SelectSslClientCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectFilePath(SslClientCertPathTextBox);
+        }
+
+        private void SelectSslClientKeyPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectFilePath(SslClientKeyPathTextBox);
+        }
+
+        private void ClearSslCaCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SslCaCertPathTextBox.Clear();
+        }
+
+        private void ClearSslClientCertPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SslClientCertPathTextBox.Clear();
+        }
+
+        private void ClearSslClientKeyPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            SslClientKeyPathTextBox.Clear();
+        }
+
+        private void SslClientCertPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            if (Tools.Global.setting != null)
+                Tools.Global.setting.tcpClientSslClientCertPassword = SslClientCertPasswordBox.Password;
+        }
+
+        private void SelectFilePath(TextBox target)
+        {
+            var openFileDialog = new System.Windows.Forms.OpenFileDialog
+            {
+                Filter = TryFindResource("SendFileFilter") as string ?? "All files|*.*"
+            };
+            if (openFileDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                target.Text = openFileDialog.FileName;
         }
 
         private void ShowData(string title, byte[] data = null, bool send = false)
@@ -329,7 +373,9 @@ namespace llcom_plus.Pages
                 ShowTextData(protocol == ProtocolDtls ? "🔐 OpenSSL DTLS connecting" : "🔐 OpenSSL TLS connecting",
                     OpenSslCli.BuildDiagnosticSummary(options));
 
-                var connection = OpenSslCli.StartInteractive(
+                OpenSslInteractiveConnection connection = null;
+                var connectionEstablished = false;
+                connection = OpenSslCli.StartInteractive(
                     options,
                     data => DataRecived?.Invoke(null, data),
                     text =>
@@ -341,25 +387,38 @@ namespace llcom_plus.Pages
                                 ShowTextData("🔐 OpenSSL detail", detail);
                         }
                     },
+                    () => Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (socketNow == null || !socketNow.Owns(connection))
+                            return;
+
+                        connectionEstablished = true;
+                        IsConnected = true;
+                        NeedDisconnected = true;
+                        RegisterMainSendTarget(BuildMainSendTargetName(protocol, host, options.Port));
+                        ShowData("✔ OpenSSL connected");
+                    })),
                     exitCode =>
                     {
-                        Dispatcher.Invoke(() =>
+                        Dispatcher.BeginInvoke(new Action(() =>
                         {
+                            if (socketNow == null || !socketNow.Owns(connection))
+                                return;
+
                             socketNow = null;
                             IsConnected = false;
                             Tools.Global.ClearMainSendTarget(MainSendTargetKey);
                             if (!Tools.Global.setting.tcpReconnect)
                                 NeedDisconnected = false;
                             Changeable = true;
-                            ShowTextData("❌ OpenSSL disconnected", $"Exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
-                        });
+                            ShowTextData(
+                                connectionEstablished ? "❌ OpenSSL disconnected" : "❌ OpenSSL handshake failed",
+                                $"Exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
+                        }));
                     });
 
                 socketNow = new SocketObj(connection);
-                IsConnected = true;
                 NeedDisconnected = true;
-                RegisterMainSendTarget(BuildMainSendTargetName(protocol, host, options.Port));
-                ShowData("✔ OpenSSL connected");
             }
             catch (Exception ex)
             {
@@ -383,28 +442,43 @@ namespace llcom_plus.Pages
                 var options = SshCli.FromGlobalSettings(host, GetPortOrDefault(22));
                 ShowTextData("🔐 SSH connecting", SshCli.BuildDiagnosticSummary(options));
 
-                var connection = SshCli.StartInteractive(
+                SshInteractiveConnection connection = null;
+                var connectionEstablished = false;
+                connection = SshCli.StartInteractive(
                     options,
                     data => DataRecived?.Invoke(null, data),
+                    () => Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (socketNow == null || !socketNow.Owns(connection))
+                            return;
+
+                        connectionEstablished = true;
+                        IsConnected = true;
+                        NeedDisconnected = true;
+                        RegisterMainSendTarget(BuildMainSendTargetName(ProtocolSsh, host, options.Port));
+                        ShowData("✔ SSH authenticated");
+                    })),
                     exitCode =>
                     {
-                        Dispatcher.Invoke(() =>
+                        Dispatcher.BeginInvoke(new Action(() =>
                         {
+                            if (socketNow == null || !socketNow.Owns(connection))
+                                return;
+
                             socketNow = null;
                             IsConnected = false;
                             Tools.Global.ClearMainSendTarget(MainSendTargetKey);
                             if (!Tools.Global.setting.tcpReconnect)
                                 NeedDisconnected = false;
                             Changeable = true;
-                            ShowTextData("❌ SSH disconnected", $"Exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
-                        });
+                            ShowTextData(
+                                connectionEstablished ? "❌ SSH disconnected" : "❌ SSH authentication failed",
+                                $"Exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
+                        }));
                     });
 
                 socketNow = new SocketObj(connection);
-                IsConnected = true;
                 NeedDisconnected = true;
-                RegisterMainSendTarget(BuildMainSendTargetName(ProtocolSsh, host, options.Port));
-                ShowData("✔ SSH started");
             }
             catch (Exception ex)
             {
@@ -1219,6 +1293,14 @@ namespace llcom_plus.Pages
             public SocketObj(SshInteractiveConnection ssh)
             {
                 sshConnection = ssh;
+            }
+            public bool Owns(OpenSslInteractiveConnection connection)
+            {
+                return ReferenceEquals(openSslConnection, connection);
+            }
+            public bool Owns(SshInteractiveConnection connection)
+            {
+                return ReferenceEquals(sshConnection, connection);
             }
             public void Send(byte[] buff)
             {
