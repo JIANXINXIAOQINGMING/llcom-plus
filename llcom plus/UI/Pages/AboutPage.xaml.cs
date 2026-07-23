@@ -73,6 +73,16 @@ namespace llcom_plus.Pages
 
                 if (release?.HasUpdate == true)
                 {
+                    Tools.Global.PublishNotification(
+                        string.Format(
+                            ResourceText("NotificationUpdateAvailableTitleFormat", "Version {0} is available"),
+                            release.Version),
+                        string.Format(
+                            ResourceText("NotificationUpdateAvailableMessageFormat", "Current version: {0}"),
+                            Tools.AppInfo.DisplayVersion),
+                        Tools.AppNotificationLevel.Info,
+                        category: Tools.AppNotificationCategory.Update);
+
                     if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
                     {
                         var localFallback = Tools.GitHubReleaseUpdater.FindLatestLocalUpdatePackage();
@@ -114,6 +124,12 @@ namespace llcom_plus.Pages
                         zipPath = await DownloadUpdateWithProgressAsync(release);
                     }
 
+                    Tools.Global.PublishNotification(
+                        ResourceText("NotificationUpdateDownloadedTitle", "Update package downloaded"),
+                        $"{release.Version} · {System.IO.Path.GetFileName(zipPath)}",
+                        Tools.AppNotificationLevel.Success,
+                        category: Tools.AppNotificationCategory.Update);
+
                     var installConfirm = Tools.InputDialog.OpenDialog(
                         string.Format(
                             ResourceText("AboutUpdateInstallConfirm", "Version {0} has been downloaded.\r\nPackage: {1}\r\n\r\nRestart and install now? The app will reopen automatically after installation.\r\nIf you choose No, the package will be kept for next time; closing the app will install it without reopening."),
@@ -152,6 +168,13 @@ namespace llcom_plus.Pages
             }
             catch (Exception ex)
             {
+                Tools.Global.PublishNotification(
+                    string.Format(
+                        ResourceText("NotificationOperationFailedTitleFormat", "{0} failed"),
+                        ResourceText("AboutReleaseButton", "Check updates")),
+                    ex.GetBaseException().Message,
+                    Tools.AppNotificationLevel.Error,
+                    category: Tools.AppNotificationCategory.Update);
                 Tools.MessageBox.Show($"{ResourceText("AboutUpdateFailed", "Update failed.")}\r\n{ex.Message}");
             }
             finally

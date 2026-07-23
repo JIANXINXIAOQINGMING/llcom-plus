@@ -34,6 +34,7 @@ namespace llcom_plus.Model
         // DTR 的上升沿会让不少 USB 串口设备复位。默认保持关闭，确实需要
         // DTR 的设备再由用户按端口开启，避免“写入成功但设备正在重启”。
         private bool _dtr = false;
+        private Tools.SerialPinMonitor pinMonitor;
 
         public bool Rts
         {
@@ -71,6 +72,7 @@ namespace llcom_plus.Model
             //声明接收到事件
             serial.DataReceived += Serial_DataReceived;
             ConfigureSerialDevice(serial);
+            AttachPinMonitor(serial);
             var readThread = new Thread(ReadData)
             {
                 IsBackground = true
@@ -110,6 +112,8 @@ namespace llcom_plus.Model
             var oldSerial = serial;
             var oldBaseStream = lastPortBaseStream;
             lastPortBaseStream = null;
+            pinMonitor?.Dispose();
+            pinMonitor = null;
             try
             {
                 if (oldSerial != null)
@@ -136,7 +140,16 @@ namespace llcom_plus.Model
             //声明接收到事件
             serial.DataReceived += Serial_DataReceived;
             ConfigureSerialDevice(serial);
+            AttachPinMonitor(serial);
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]done");
+        }
+
+        private void AttachPinMonitor(SerialPort port)
+        {
+            pinMonitor?.Dispose();
+            pinMonitor = port == null
+                ? null
+                : new Tools.SerialPinMonitor(port, Tools.Global.NotifySerialPinStatusChanged);
         }
 
         private void DisposeSerialResources(SerialPort port, Stream baseStream, bool waitForDispose)
@@ -375,6 +388,7 @@ namespace llcom_plus.Model
                 Tools.Logger.AddUartLogDebug($"[UartOpen]open");
                 serial.Open();
                 lastPortBaseStream = serial.BaseStream;
+                pinMonitor?.Arm();
                 Tools.Logger.AddUartLogDebug($"[UartOpen]done");
             }
         }
@@ -406,6 +420,8 @@ namespace llcom_plus.Model
                 isShuttingDown = true;
                 var oldSerial = serial;
                 var oldBaseStream = lastPortBaseStream;
+                pinMonitor?.Dispose();
+                pinMonitor = null;
                 serial = null;
                 lastPortBaseStream = null;
                 lock (receiveLock)

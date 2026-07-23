@@ -170,6 +170,20 @@ namespace llcom_plus.Pages
             if (UsbListComboBox.SelectedItem == null || IsConnected)
                 return;
             var target = (DeviceInfo)UsbListComboBox.SelectedItem;
+            var notificationSource = TryFindResource("NotificationWinUsbSource") as string ?? "WinUSB";
+            var connectedTitle = string.Format(
+                TryFindResource("NotificationConnectedTitleFormat") as string ?? "{0} 已连接",
+                notificationSource);
+            var disconnectedTitle = string.Format(
+                TryFindResource("NotificationDisconnectedTitleFormat") as string ?? "{0} 已断开",
+                notificationSource);
+            var connectionLostTitle = string.Format(
+                TryFindResource("NotificationConnectionLostTitleFormat") as string ?? "{0} 连接中断",
+                notificationSource);
+            var failedTitle = string.Format(
+                TryFindResource("NotificationOperationFailedTitleFormat") as string ?? "{0} 失败",
+                notificationSource);
+            var targetSummary = $"VID:0x{target.Vid:X04} PID:0x{target.Pid:X04} IF:{target.Interface}";
             UsbContext context = new UsbContext();
             var allDevices = context.List();
             var matched = false;
@@ -218,6 +232,7 @@ namespace llcom_plus.Pages
                 if (UsbInComboBox.SelectedItem == null || UsbOutComboBox.SelectedItem == null)
                 {
                     matched = false;
+                    IsConnected = false;
                     ShowData("open failed: endpoint not selected");
                     try { device.Close(); } catch { }
                     break;
@@ -234,6 +249,11 @@ namespace llcom_plus.Pages
                         break;
                     }
                 }
+                Tools.Global.PublishNotification(
+                    connectedTitle,
+                    targetSummary,
+                    AppNotificationLevel.Success,
+                    category: AppNotificationCategory.Connection);
                 new Thread(() =>
                 {
                     needClose = false;
@@ -262,6 +282,11 @@ namespace llcom_plus.Pages
                                     context.Dispose();
                                     IsConnected = false;
                                     ShowData($"disconnect");
+                                    Tools.Global.PublishNotification(
+                                        connectionLostTitle,
+                                        targetSummary,
+                                        AppNotificationLevel.Warning,
+                                        category: AppNotificationCategory.Connection);
                                     return;
                             }
                             if (readLength > 0)//有数据了
@@ -313,6 +338,11 @@ namespace llcom_plus.Pages
                                 context.Dispose();
                                 IsConnected = false;
                                 ShowData($"disconnect");
+                                Tools.Global.PublishNotification(
+                                    disconnectedTitle,
+                                    targetSummary,
+                                    AppNotificationLevel.Info,
+                                    category: AppNotificationCategory.Connection);
                                 return;
                             }
                         }
@@ -323,6 +353,11 @@ namespace llcom_plus.Pages
                             context.Dispose();
                             IsConnected = false;
                             ShowData($"disconnect by exception:\r\n{e}");
+                            Tools.Global.PublishNotification(
+                                connectionLostTitle,
+                                e.GetBaseException().Message,
+                                AppNotificationLevel.Error,
+                                category: AppNotificationCategory.Connection);
                             break;
                         }
                     }
@@ -332,6 +367,11 @@ namespace llcom_plus.Pages
             {
                 allDevices.Dispose();
                 context.Dispose();
+                Tools.Global.PublishNotification(
+                    failedTitle,
+                    targetSummary,
+                    AppNotificationLevel.Error,
+                    category: AppNotificationCategory.Connection);
             }
         }
 

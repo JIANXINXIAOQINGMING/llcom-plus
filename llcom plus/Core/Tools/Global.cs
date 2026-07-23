@@ -23,6 +23,32 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace llcom_plus.Tools
 {
+    internal enum AppNotificationLevel
+    {
+        Info,
+        Success,
+        Warning,
+        Error
+    }
+
+    internal enum AppNotificationCategory
+    {
+        General,
+        Connection,
+        SerialPin,
+        Task,
+        Update
+    }
+
+    internal sealed class AppNotificationEventArgs : EventArgs
+    {
+        public DateTime Timestamp { get; set; }
+        public string Title { get; set; }
+        public string Message { get; set; }
+        public AppNotificationLevel Level { get; set; }
+        public AppNotificationCategory Category { get; set; }
+    }
+
     class UartSendRequest
     {
         public byte[] Data { get; set; }
@@ -193,6 +219,57 @@ namespace llcom_plus.Tools
         /// </summary>
         public static event EventHandler SerialSplitScreenChangedEvent;
         public static void NotifySerialSplitScreenChanged() => SerialSplitScreenChangedEvent?.Invoke(null, EventArgs.Empty);
+
+        /// <summary>
+        /// 主串口和多串口分屏共用的输入引脚状态变化通道。
+        /// </summary>
+        public static event EventHandler<SerialPinStatusSnapshot> SerialPinStatusChangedEvent;
+        public static void NotifySerialPinStatusChanged(SerialPinStatusSnapshot snapshot)
+        {
+            if (snapshot == null || isMainWindowsClosed)
+                return;
+
+            SerialPinStatusChangedEvent?.Invoke(null, snapshot);
+        }
+
+        /// <summary>
+        /// 各功能模块共用的消息中心入口。普通收发数据不要写入此通道。
+        /// </summary>
+        public static event EventHandler<AppNotificationEventArgs> AppNotificationEvent;
+        public static void PublishNotification(
+            string title,
+            string message = "",
+            AppNotificationLevel level = AppNotificationLevel.Info,
+            DateTime? timestamp = null,
+            AppNotificationCategory category = AppNotificationCategory.General)
+        {
+            if (isMainWindowsClosed || string.IsNullOrWhiteSpace(title))
+                return;
+
+            var notification = new AppNotificationEventArgs
+            {
+                Timestamp = timestamp ?? DateTime.Now,
+                Title = title.Trim(),
+                Message = message ?? string.Empty,
+                Level = level,
+                Category = category
+            };
+            var handlers = AppNotificationEvent;
+            if (handlers == null)
+                return;
+
+            foreach (EventHandler<AppNotificationEventArgs> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(null, notification);
+                }
+                catch (Exception ex)
+                {
+                    Logger.AddUartLogDebug($"[AppNotification]handler error:{ex.Message}");
+                }
+            }
+        }
 
         /// <summary>
         /// 让工具页面请求主串口发送原始字节

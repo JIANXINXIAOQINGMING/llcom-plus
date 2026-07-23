@@ -22,6 +22,7 @@
     Activated="Window_Activated"
     Deactivated="Window_Deactivated"
     Loaded="Window_Loaded"
+    PreviewMouseDown="MainWindow_PreviewMouseDown"
     SourceInitialized="Window_SourceInitialized"
     mc:Ignorable="d">
     <Window.Style>
@@ -1370,6 +1371,46 @@
                 CornerRadius="15">
                 <StackPanel Orientation="Horizontal">
                     <Button
+                        Name="NotificationCenterButton"
+                        Width="36"
+                        Height="36"
+                        Margin="0,0,4,0"
+                        Padding="0"
+                        Click="NotificationCenterButton_Click"
+                        ToolTip="{DynamicResource NotificationCenterTitle}">
+                        <Grid Width="26" Height="26">
+                            <fa:FontAwesome
+                                Width="16"
+                                Height="16"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="16"
+                                Foreground="{DynamicResource AppGlassTextBrush}"
+                                Icon="BellOutline" />
+                            <Border
+                                Name="NotificationBadge"
+                                MinWidth="16"
+                                Height="16"
+                                Margin="0,-4,-5,0"
+                                Padding="3,0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Background="{DynamicResource AppDangerBrush}"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    Name="NotificationBadgeText"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="9"
+                                    FontWeight="SemiBold"
+                                    Foreground="White"
+                                    Text="0" />
+                            </Border>
+                        </Grid>
+                    </Button>
+                    <Button
                         Name="ThemeToggleMenuItem"
                         Width="36"
                         Height="36"
@@ -1415,5 +1456,182 @@
             </Border>
             <Border Style="{StaticResource FloatingGlassHighlightStyle}" CornerRadius="15" />
         </Grid>
+
+        <Popup
+            Name="NotificationPopup"
+            AllowsTransparency="True"
+            Opened="NotificationPopup_Opened"
+            Placement="Bottom"
+            PlacementTarget="{Binding ElementName=NotificationCenterButton}"
+            StaysOpen="True"
+            VerticalOffset="7">
+            <Grid Name="NotificationPopupRoot" Width="470" MaxHeight="510">
+                <Border
+                    Name="NotificationPopupSurface"
+                    Margin="20"
+                    Padding="12"
+                    Background="{DynamicResource AppPopupBackground}"
+                    BorderBrush="{DynamicResource AppGlassHighlightBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                    <Border.Effect>
+                        <DropShadowEffect
+                            BlurRadius="14"
+                            Direction="270"
+                            Opacity="0.34"
+                            RenderingBias="Quality"
+                            ShadowDepth="4"
+                            Color="{DynamicResource AppShadowColor}" />
+                    </Border.Effect>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid Margin="2,0,2,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal">
+                                <fa:FontAwesome
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="15"
+                                    Foreground="{DynamicResource AppAccentBrush}"
+                                    Icon="BellOutline" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontSize="15"
+                                    FontWeight="SemiBold"
+                                    Foreground="{DynamicResource AppGlassTextBrush}"
+                                    Text="{DynamicResource NotificationCenterTitle}" />
+                            </StackPanel>
+                            <ComboBox
+                                Name="NotificationFilterComboBox"
+                                Grid.Column="1"
+                                Width="104"
+                                Height="30"
+                                Margin="8,0"
+                                SelectionChanged="NotificationFilterComboBox_SelectionChanged">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Ellipse
+                                                Width="8"
+                                                Height="8"
+                                                Margin="0,0,7,0"
+                                                VerticalAlignment="Center"
+                                                Fill="{Binding IndicatorBrush}" />
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                Text="{Binding Text}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button
+                                Name="NotificationClearButton"
+                                Grid.Column="2"
+                                MinWidth="58"
+                                Padding="9,4"
+                                Click="NotificationClearButton_Click"
+                                Content="{DynamicResource NotificationClear}"
+                                Style="{StaticResource GlassButtonStyle}" />
+                        </Grid>
+                        <Border
+                            Grid.Row="1"
+                            MinHeight="130"
+                            MaxHeight="360"
+                            Padding="4"
+                            Background="{DynamicResource AppGlassControlBackground}"
+                            BorderBrush="{DynamicResource AppGlassBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="11">
+                            <Grid>
+                                <TextBlock
+                                    Name="NotificationEmptyText"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Foreground="{DynamicResource AppGlassMutedBrush}"
+                                    Text="{DynamicResource NotificationEmpty}" />
+                                <ListBox
+                                    Name="NotificationListBox"
+                                    Padding="3"
+                                    HorizontalContentAlignment="Stretch"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                    ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border
+                                                Margin="0,0,0,7"
+                                                Padding="0"
+                                                Background="{DynamicResource AppPopupBackground}"
+                                                BorderBrush="{DynamicResource AppGlassBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="9">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="4" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border
+                                                        Background="{Binding IndicatorBrush}"
+                                                        CornerRadius="8,0,0,8" />
+                                                    <Grid Grid.Column="1" Margin="9,8,10,8">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock
+                                                                Margin="0,0,8,0"
+                                                                FontWeight="SemiBold"
+                                                                Foreground="{DynamicResource AppGlassTextBrush}"
+                                                                Text="{Binding Title}"
+                                                                TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock
+                                                                Grid.Column="1"
+                                                                FontFamily="Consolas"
+                                                                FontSize="10"
+                                                                Foreground="{DynamicResource AppGlassMutedBrush}"
+                                                                Text="{Binding TimeText}" />
+                                                        </Grid>
+                                                        <TextBlock
+                                                            Grid.Row="1"
+                                                            Margin="0,5,0,0"
+                                                            Foreground="{DynamicResource AppGlassMutedBrush}"
+                                                            Text="{Binding Message}"
+                                                            TextWrapping="Wrap" />
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </Border>
+                        <TextBlock
+                            Grid.Row="2"
+                            Margin="3,8,3,0"
+                            Foreground="{DynamicResource AppGlassMutedBrush}"
+                            Text="{DynamicResource NotificationSessionOnly}"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Border>
+                <Border
+                    Margin="21"
+                    CornerRadius="16"
+                    Style="{StaticResource FloatingGlassHighlightStyle}" />
+            </Grid>
+        </Popup>
     </Grid>
 </Window>

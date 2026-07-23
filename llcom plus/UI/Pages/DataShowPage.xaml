@@ -206,11 +206,13 @@
                     <WrapPanel>
                         <CheckBox
                             Name="RTSCheckBox"
+                            Click="ControlLineCheckBox_Click"
                             Content="RTS"
                             IsChecked="{Binding Rts}"
                             Style="{StaticResource LogOptionCheckBoxStyle}" />
                         <CheckBox
                             Name="DTRCheckBox"
+                            Click="ControlLineCheckBox_Click"
                             Content="DTR"
                             IsChecked="{Binding Dtr}"
                             Style="{StaticResource LogOptionCheckBoxStyle}" />

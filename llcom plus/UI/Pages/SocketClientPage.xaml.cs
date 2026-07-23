@@ -237,6 +237,7 @@ namespace llcom_plus.Pages
             catch (Exception ex)
             {
                 ShowData($"❗ Server information error {ex.Message}");
+                PublishConnectionFailure(ex.Message);
                 Changeable = true;
                 return;
             }
@@ -259,6 +260,7 @@ namespace llcom_plus.Pages
                     {
                         Changeable = true;
                         ShowData("❗ Server connect failed");
+                        PublishConnectionFailure("Server connect failed");
                         return;
                     }
 
@@ -270,6 +272,7 @@ namespace llcom_plus.Pages
                     catch(Exception ex)
                     {
                         ShowData($"❗ Server connect error {ex.Message}");
+                        PublishConnectionFailure(ex.Message);
                         socketNow = null;
                         IsConnected = false;
                         Tools.Global.ClearMainSendTarget(MainSendTargetKey);
@@ -284,6 +287,7 @@ namespace llcom_plus.Pages
             catch (Exception ex)
             {
                 ShowData($"❗ Server connect error {ex.Message}");
+                PublishConnectionFailure(ex.Message);
                 Changeable = true;
                 return;
             }
@@ -414,6 +418,11 @@ namespace llcom_plus.Pages
                             ShowTextData(
                                 connectionEstablished ? "❌ OpenSSL disconnected" : "❌ OpenSSL handshake failed",
                                 $"Exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
+                            if (!connectionEstablished)
+                            {
+                                PublishConnectionFailure(
+                                    $"OpenSSL exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
+                            }
                         }));
                     });
 
@@ -429,6 +438,7 @@ namespace llcom_plus.Pages
                     NeedDisconnected = false;
                 Changeable = true;
                 ShowData($"❗ OpenSSL connect error {ex.Message}");
+                PublishConnectionFailure(ex.Message);
                 ShowData("❌ Server disconnected");
             }
         }
@@ -474,6 +484,11 @@ namespace llcom_plus.Pages
                             ShowTextData(
                                 connectionEstablished ? "❌ SSH disconnected" : "❌ SSH authentication failed",
                                 $"Exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
+                            if (!connectionEstablished)
+                            {
+                                PublishConnectionFailure(
+                                    $"SSH exit code: {(exitCode.HasValue ? exitCode.Value.ToString() : "unknown")}");
+                            }
                         }));
                     });
 
@@ -489,6 +504,7 @@ namespace llcom_plus.Pages
                     NeedDisconnected = false;
                 Changeable = true;
                 ShowData($"❗ SSH connect error {ex.Message}");
+                PublishConnectionFailure(ex.Message);
                 ShowData("❌ Server disconnected");
             }
         }
@@ -553,6 +569,37 @@ namespace llcom_plus.Pages
                 DisplayName = displayName,
                 Send = Send
             });
+        }
+
+        private void PublishConnectionFailure(string detail)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => PublishConnectionFailure(detail)));
+                return;
+            }
+
+            var protocol = GetSelectedProtocol();
+            string displayName;
+            try
+            {
+                displayName = BuildMainSendTargetName(
+                    protocol,
+                    GetServerHost(),
+                    GetPortOrDefault(GetDefaultPort(protocol)));
+            }
+            catch
+            {
+                displayName = GetProtocolText(protocol);
+            }
+
+            Tools.Global.PublishNotification(
+                string.Format(
+                    TryFindResource("NotificationOperationFailedTitleFormat") as string ?? "{0} 失败",
+                    displayName),
+                detail ?? string.Empty,
+                Tools.AppNotificationLevel.Error,
+                category: Tools.AppNotificationCategory.Connection);
         }
 
         private string BuildMainSendTargetName(int protocol, string host, int port)

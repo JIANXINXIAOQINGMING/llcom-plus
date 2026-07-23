@@ -124,12 +124,14 @@
                         <CheckBox
                             x:Name="ExternalRTSCheckBox"
                             Checked="ExternalControlCheckBox_Changed"
+                            Click="ExternalControlCheckBox_Click"
                             Content="RTS"
                             Style="{StaticResource SplitLogOptionCheckBoxStyle}"
                             Unchecked="ExternalControlCheckBox_Changed" />
                         <CheckBox
                             x:Name="ExternalDTRCheckBox"
                             Checked="ExternalControlCheckBox_Changed"
+                            Click="ExternalControlCheckBox_Click"
                             Content="DTR"
                             Style="{StaticResource SplitLogOptionCheckBoxStyle}"
                             Unchecked="ExternalControlCheckBox_Changed" />

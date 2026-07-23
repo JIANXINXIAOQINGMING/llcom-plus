@@ -80,7 +80,10 @@ namespace llcom_plus.Pages
             BindExternalGlobalOptions();
             ownerWindow = Window.GetWindow(this);
             if (ownerWindow != null)
+            {
                 ownerWindow.PreviewMouseDown += OwnerWindow_PreviewMouseDown;
+                ownerWindow.Deactivated += OwnerWindow_Deactivated;
+            }
             RefreshPorts();
             ApplyInitialFirstPort();
             UpdateStatus();
@@ -206,6 +209,7 @@ namespace llcom_plus.Pages
             if (ownerWindow != null)
             {
                 ownerWindow.PreviewMouseDown -= OwnerWindow_PreviewMouseDown;
+                ownerWindow.Deactivated -= OwnerWindow_Deactivated;
                 ownerWindow = null;
             }
             if (subscribedProgramClosed)
@@ -225,6 +229,11 @@ namespace llcom_plus.Pages
             if (ExternalOptionsButton.IsMouseOver || (placementTarget?.IsMouseOver ?? false) || (popupChild?.IsMouseOver ?? false))
                 return;
 
+            ExternalOptionsButton.IsChecked = false;
+        }
+
+        private void OwnerWindow_Deactivated(object sender, EventArgs e)
+        {
             ExternalOptionsButton.IsChecked = false;
         }
 
@@ -528,6 +537,48 @@ namespace llcom_plus.Pages
             SaveSlotProfile(slot);
         }
 
+        private void ExternalControlCheckBox_Click(object sender, RoutedEventArgs e)
+        {
+            if (updatingExternalControls ||
+                !(sender is CheckBox checkBox))
+            {
+                return;
+            }
+
+            var slot = GetSlot(activeSlotNumber);
+            if (slot == null)
+                return;
+
+            PublishControlLineNotification(
+                slot,
+                ReferenceEquals(checkBox, ExternalRTSCheckBox) ? "RTS" : "DTR");
+        }
+
+        private void PublishControlLineNotification(PortSlot slot, string lineName)
+        {
+            if (slot == null)
+                return;
+
+            var portName = string.IsNullOrWhiteSpace(slot.SelectedPortName)
+                ? FindText("SerialPinUnknownPort", "串口")
+                : slot.SelectedPortName;
+            var title = string.Format(
+                FindText("NotificationControlLineTitleFormat", "{0} 手动切换 {1}"),
+                portName,
+                lineName);
+            var message = string.Format(
+                FindText("NotificationControlLineMessageFormat", "RTS:{0}  DTR:{1}"),
+                slot.Rts ? "1" : "0",
+                slot.Dtr ? "1" : "0");
+            Global.PublishNotification(
+                title,
+                message,
+                AppNotificationLevel.Info,
+                category: AppNotificationCategory.SerialPin);
+            Logger.AddUartLogDebug(
+                $"[SplitControlLineManual]slot={slot.Index},port={portName} {lineName} {message}");
+        }
+
         private void ApplyPortProfile(PortSlot slot)
         {
             if (slot == null || slot.IsOpen)
@@ -680,6 +731,7 @@ namespace llcom_plus.Pages
             private readonly TextBlock titleTextBlock = new TextBlock();
             private readonly object serialLock = new object();
             private readonly object sessionLogLock = new object();
+            private SerialPinMonitor pinMonitor;
             private string selectedPortName = "";
             private StreamWriter sessionStringLogWriter;
             private StreamWriter sessionHexLogWriter;
@@ -702,6 +754,7 @@ namespace llcom_plus.Pages
                     serial.DataReceived += Serial_DataReceived;
                     serial.WriteTimeout = 5000;
                     serial.ReadTimeout = 500;
+                    pinMonitor = new SerialPinMonitor(serial, Global.NotifySerialPinStatusChanged);
                 }
             }
 
@@ -866,6 +919,9 @@ namespace llcom_plus.Pages
                 {
                     try
                     {
+                        if (!useMainUart)
+                            pinMonitor?.Disarm();
+
                         if (useMainUart)
                         {
                             if (closeMainUart && Global.uart.IsOpen())
@@ -915,6 +971,9 @@ namespace llcom_plus.Pages
 
                 lock (serialLock)
                 {
+                    try { pinMonitor?.Dispose(); }
+                    catch { }
+                    pinMonitor = null;
                     try { serial.DataReceived -= Serial_DataReceived; }
                     catch { }
                     try { serial.Close(); }
@@ -988,8 +1047,10 @@ namespace llcom_plus.Pages
                 dtrCheckBox.IsChecked = false;
                 dtrCheckBox.Checked += ControlLineCheckBox_Changed;
                 dtrCheckBox.Unchecked += ControlLineCheckBox_Changed;
+                dtrCheckBox.Click += ControlLineCheckBox_Click;
                 rtsCheckBox.Checked += ControlLineCheckBox_Changed;
                 rtsCheckBox.Unchecked += ControlLineCheckBox_Changed;
+                rtsCheckBox.Click += ControlLineCheckBox_Click;
 
                 options.Children.Add(portComboBox);
                 options.Children.Add(baudComboBox);
@@ -1168,6 +1229,7 @@ namespace llcom_plus.Pages
                             $"parity={serial.Parity},dataBits={serial.DataBits},stopBits={serial.StopBits}," +
                             $"handshake={serial.Handshake},dtr={serial.DtrEnable},rts={serial.RtsEnable}");
                         serial.Open();
+                        pinMonitor?.Arm();
                         EnsureSessionLogOpen();
                     }
 
@@ -1175,6 +1237,15 @@ namespace llcom_plus.Pages
                     UpdateTitle();
                     owner.UpdateStatus();
                     AppendLog("SYS", owner.FindText("MultiPortOpened", "已打开。"));
+                    Global.PublishNotification(
+                        string.Format(
+                            owner.FindText("NotificationConnectedTitleFormat", "{0} 已连接"),
+                            portName),
+                        string.Format(
+                            owner.FindText("NotificationSerialOpenedMessageFormat", "{0} baud"),
+                            baudRate),
+                        AppNotificationLevel.Success,
+                        category: AppNotificationCategory.Connection);
                     LastErrorMessage = string.Empty;
                     return true;
                 }
@@ -1182,6 +1253,13 @@ namespace llcom_plus.Pages
                 {
                     LastErrorMessage = ex.Message;
                     AppendLog("ERR", owner.FindText("MultiPortOpenFailed", "打开失败: ") + LastErrorMessage);
+                    Global.PublishNotification(
+                        string.Format(
+                            owner.FindText("NotificationOperationFailedTitleFormat", "{0} 失败"),
+                            portName),
+                        LastErrorMessage,
+                        AppNotificationLevel.Error,
+                        category: AppNotificationCategory.Connection);
                     try
                     {
                         if (useMainUart)
@@ -1191,6 +1269,7 @@ namespace llcom_plus.Pages
                         }
                         else if (IsOpen)
                         {
+                            pinMonitor?.Disarm();
                             serial.Close();
                         }
                     }
@@ -1320,6 +1399,16 @@ namespace llcom_plus.Pages
             private void ControlLineCheckBox_Changed(object sender, RoutedEventArgs e)
             {
                 ApplyControlLines();
+            }
+
+            private void ControlLineCheckBox_Click(object sender, RoutedEventArgs e)
+            {
+                if (!(sender is CheckBox checkBox))
+                    return;
+
+                owner.PublishControlLineNotification(
+                    this,
+                    ReferenceEquals(checkBox, rtsCheckBox) ? "RTS" : "DTR");
             }
 
             private void ApplyControlLines()

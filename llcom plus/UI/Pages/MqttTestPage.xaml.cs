@@ -42,6 +42,7 @@ namespace llcom_plus.Pages
         private static MqttFactory factory = new MqttFactory();
         private MQTTnet.Client.IMqttClient mqttClient = factory.CreateMqttClient();
         public bool MqttIsConnected { get; set; } = false;
+        private bool mqttConnectionEstablished = false;
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
             if (initial)
@@ -73,7 +74,16 @@ namespace llcom_plus.Pages
                 this.Dispatcher.Invoke(new Action(delegate
                 {
                     MqttIsConnected = mqttClient.IsConnected;
+                    mqttConnectionEstablished = true;
                     subListBox.Items.Clear();
+                    var source = TryFindResource("NotificationMqttSource") as string ?? "MQTT";
+                    Tools.Global.PublishNotification(
+                        string.Format(
+                            TryFindResource("NotificationConnectedTitleFormat") as string ?? "{0} 已连接",
+                            source),
+                        $"{Tools.Global.setting.mqttServer}:{Tools.Global.setting.mqttPort}",
+                        Tools.AppNotificationLevel.Success,
+                        category: Tools.AppNotificationCategory.Connection);
                 }));
                 Tools.Logger.ShowDataRaw(new Tools.DataShowRaw
                 {
@@ -86,9 +96,22 @@ namespace llcom_plus.Pages
             {
                 this.Dispatcher.Invoke(new Action(delegate
                 {
+                    var wasConnected = mqttConnectionEstablished;
+                    mqttConnectionEstablished = false;
                     MqttIsConnected = mqttClient.IsConnected;
                     subListBox.Items.Clear();
                     subListBox.Items.Add(TryFindResource("MQTTNotConnect") as string ?? "?!");
+                    if (wasConnected)
+                    {
+                        var source = TryFindResource("NotificationMqttSource") as string ?? "MQTT";
+                        Tools.Global.PublishNotification(
+                            string.Format(
+                                TryFindResource("NotificationDisconnectedTitleFormat") as string ?? "{0} 已断开",
+                                source),
+                            $"{Tools.Global.setting.mqttServer}:{Tools.Global.setting.mqttPort}",
+                            Tools.AppNotificationLevel.Warning,
+                            category: Tools.AppNotificationCategory.Connection);
+                    }
                 }));
                 Tools.Logger.ShowDataRaw(new Tools.DataShowRaw
                 {
@@ -225,6 +248,14 @@ namespace llcom_plus.Pages
                                 data = new byte[0],
                                 color = Tools.Logger.GetThemeBrush("AppDangerBrush", Brushes.OrangeRed)
                             });
+                            var source = TryFindResource("NotificationMqttSource") as string ?? "MQTT";
+                            Tools.Global.PublishNotification(
+                                string.Format(
+                                    TryFindResource("NotificationOperationFailedTitleFormat") as string ?? "{0} 失败",
+                                    source),
+                                "TLS certificate",
+                                Tools.AppNotificationLevel.Error,
+                                category: Tools.AppNotificationCategory.Connection);
                             return;
                         }
                     }
@@ -245,7 +276,21 @@ namespace llcom_plus.Pages
                     {
                         await mqttClient.ConnectAsync(options, CancellationToken.None);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _ = Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            MqttIsConnected = false;
+                            var source = TryFindResource("NotificationMqttSource") as string ?? "MQTT";
+                            Tools.Global.PublishNotification(
+                                string.Format(
+                                    TryFindResource("NotificationOperationFailedTitleFormat") as string ?? "{0} 失败",
+                                    source),
+                                ex.GetBaseException().Message,
+                                Tools.AppNotificationLevel.Error,
+                                category: Tools.AppNotificationCategory.Connection);
+                        }));
+                    }
                 });
             }
         }

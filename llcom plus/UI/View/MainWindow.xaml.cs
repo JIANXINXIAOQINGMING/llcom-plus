@@ -60,6 +60,11 @@ namespace llcom_plus
         {
             StartupProfiler.Mark("MainWindow ctor enter");
             StartupProfiler.Measure("MainWindow.InitializeComponent", InitializeComponent);
+            notificationView = CollectionViewSource.GetDefaultView(notificationItems);
+            notificationView.Filter = FilterNotification;
+            NotificationListBox.ItemsSource = notificationView;
+            RefreshNotificationFilterOptions();
+            UpdateNotificationUi();
             StartupProfiler.Measure("MainWindow restore placement", () =>
             {
                 var availableWidth = Math.Max(this.MinWidth, SystemParameters.WorkArea.Width - 32);
@@ -107,6 +112,15 @@ namespace llcom_plus
         private bool syncingSerialSplitControls = false;
         private bool refreshingSendTargetSelector = false;
         private int lastSerialSendTargetSlot = 1;
+        private const int MaxNotificationItems = 200;
+        private readonly ObservableCollection<AppNotificationItem> notificationItems =
+            new ObservableCollection<AppNotificationItem>();
+        private ICollectionView notificationView;
+        private NotificationFilter selectedNotificationFilter = NotificationFilter.All;
+        private bool refreshingNotificationFilters;
+        private int unreadNotificationCount;
+        private string lastMainSendTargetDisplayName = string.Empty;
+        private bool windowIsClosing;
         public static string recvScriptBackup = "";
 
         private sealed class SendSuggestionItem
@@ -118,6 +132,33 @@ namespace llcom_plus
             {
                 return SendText ?? string.Empty;
             }
+        }
+
+        private sealed class AppNotificationItem
+        {
+            public DateTime Timestamp { get; set; }
+            public string TimeText => Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff");
+            public string Title { get; set; }
+            public string Message { get; set; }
+            public AppNotificationLevel Level { get; set; }
+            public AppNotificationCategory Category { get; set; }
+            public System.Windows.Media.Brush IndicatorBrush { get; set; }
+        }
+
+        private enum NotificationFilter
+        {
+            All,
+            Info,
+            Success,
+            Warning,
+            Error
+        }
+
+        private sealed class NotificationFilterOption
+        {
+            public NotificationFilter Filter { get; set; }
+            public string Text { get; set; }
+            public System.Windows.Media.Brush IndicatorBrush { get; set; }
         }
 
         private sealed class SendTargetItem
@@ -176,6 +217,8 @@ namespace llcom_plus
                         Tools.Global.ThemeChanged += Global_ThemeChanged;
                         Tools.Global.UartPortClosedEvent += Global_UartPortClosedEvent;
                         Tools.Global.SerialSplitScreenChangedEvent += Global_SerialSplitScreenChangedEvent;
+                        Tools.Global.SerialPinStatusChangedEvent += Global_SerialPinStatusChangedEvent;
+                        Tools.Global.AppNotificationEvent += Global_AppNotificationEvent;
                         Tools.Global.IsActiveSerialTargetOpenRequest = IsActiveSerialTargetOpenForTools;
                         Tools.Global.EnsureActiveSerialTargetOpenRequest = EnsureActiveSerialTargetOpenForTools;
                         Tools.Global.SendRawDataToActiveTargetRequest = SendRawDataToActiveTargetForTools;
@@ -806,6 +849,7 @@ namespace llcom_plus
                 serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
                 connectionStatusButton.IsEnabled = true;
                 UpdateMainSerialConnectionStatus();
+                AddSerialConnectionNotification(port, reconnected: false);
                 return true;
             }
             catch (Exception ex)
@@ -989,6 +1033,8 @@ namespace llcom_plus
         {
             mainGridLayoutWidth = e.NewSize.Width;
             UpdateMainPaneMinimum();
+            if (NotificationPopup?.IsOpen == true)
+                PositionNotificationPopup();
         }
 
         private void RightToolsGridSplitter_DragDelta(object sender, DragDeltaEventArgs e)
@@ -1304,7 +1350,41 @@ namespace llcom_plus
 
         private void Global_MainSendTargetChangedEvent(object sender, EventArgs e)
         {
-            Dispatcher.BeginInvoke(new Action(() => UpdateMainSendTargetUi(Tools.Global.HasMainSendTarget)));
+            var hasMainSendTarget = Tools.Global.HasMainSendTarget;
+            var currentDisplayName = Tools.Global.MainSendTargetDisplayName;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (windowIsClosing || Tools.Global.isMainWindowsClosed)
+                    return;
+
+                if (!string.IsNullOrWhiteSpace(currentDisplayName) &&
+                    !string.Equals(currentDisplayName, lastMainSendTargetDisplayName, StringComparison.Ordinal))
+                {
+                    AddNotification(
+                        DateTime.Now,
+                        string.Format(
+                            TryFindResource("NotificationConnectedTitleFormat") as string ?? "{0} 已连接",
+                            currentDisplayName),
+                        TryFindResource("NotificationReadyForSend") as string ?? "已可作为主发送目标。",
+                        AppNotificationLevel.Success,
+                        AppNotificationCategory.Connection);
+                }
+                else if (string.IsNullOrWhiteSpace(currentDisplayName) &&
+                         !string.IsNullOrWhiteSpace(lastMainSendTargetDisplayName))
+                {
+                    AddNotification(
+                        DateTime.Now,
+                        string.Format(
+                            TryFindResource("NotificationDisconnectedTitleFormat") as string ?? "{0} 已断开",
+                            lastMainSendTargetDisplayName),
+                        string.Empty,
+                        AppNotificationLevel.Info,
+                        AppNotificationCategory.Connection);
+                }
+
+                lastMainSendTargetDisplayName = currentDisplayName ?? string.Empty;
+                UpdateMainSendTargetUi(hasMainSendTarget);
+            }));
         }
 
         private void UpdateMainSendTargetUi(bool preferNetworkTarget = false)
@@ -1324,6 +1404,20 @@ namespace llcom_plus
             {
                 if (Tools.Global.isMainWindowsClosed)
                     return;
+                if (!forcusClosePort)
+                {
+                    var displayName = string.IsNullOrWhiteSpace(portName)
+                        ? (TryFindResource("SerialPinUnknownPort") as string ?? "串口")
+                        : portName;
+                    AddNotification(
+                        DateTime.Now,
+                        string.Format(
+                            TryFindResource("NotificationConnectionLostTitleFormat") as string ?? "{0} 连接中断",
+                            displayName),
+                        string.Empty,
+                        AppNotificationLevel.Warning,
+                        AppNotificationCategory.Connection);
+                }
                 if (IsSerialSplitModeRequested())
                 {
                     ApplySerialSplitLayout();
@@ -1424,12 +1518,14 @@ namespace llcom_plus
             if (!Tools.Global.uart.IsOpen())
                 return;
 
+            var portName = Tools.Global.uart.GetName();
             try
             {
                 forcusClosePort = true;
                 Tools.Global.uart.Close(waitForDispose: true);
                 Tools.Logger.StopSessionLog();
                 statusTextBlock.Text = TryFindResource("OpenPort_close") as string ?? "?!";
+                AddSerialDisconnectedNotification(portName);
             }
             catch (Exception ex)
             {
@@ -1646,6 +1742,7 @@ namespace llcom_plus
                                     serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
                                     connectionStatusButton.IsEnabled = true;
                                     statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
+                                    AddSerialConnectionNotification(Tools.Global.uart.GetName(), reconnected: true);
                                 }));
                             }
                             catch (Exception ex)
@@ -1689,6 +1786,10 @@ namespace llcom_plus
         private static int UsbPluginDeley = 0;
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            const int WmNcLButtonDown = 0x00A1;
+            if (msg == WmNcLButtonDown)
+                CloseNotificationPopup();
+
             if (msg == 0x219 && !Tools.Global.uart.IsOpen())// 监听USB设备插拔消息
             {
                 if (UsbPluginDeley == 0)
@@ -1751,6 +1852,7 @@ namespace llcom_plus
         /// <param name="e"></param>
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            windowIsClosing = true;
             Tools.Global.setting.windowLeft = this.Left;
             Tools.Global.setting.windowTop = this.Top;
             Tools.Global.setting.windowWidth = this.Width;
@@ -1760,6 +1862,8 @@ namespace llcom_plus
                 saveScriptFile(lastScriptFile);
             Tools.Global.ClearMainSendTarget();
             Tools.Global.ThemeChanged -= Global_ThemeChanged;
+            Tools.Global.SerialPinStatusChangedEvent -= Global_SerialPinStatusChangedEvent;
+            Tools.Global.AppNotificationEvent -= Global_AppNotificationEvent;
             Tools.Global.isMainWindowsClosed = true;
             Tools.GitHubReleaseUpdater.TryStartPendingInstallOnExit();
             foreach (Window win in App.Current.Windows.Cast<Window>().Where(win => win != this).ToList())
@@ -1804,6 +1908,7 @@ namespace llcom_plus
         {
             if (WindowState == WindowState.Minimized)
                 return;
+            CloseNotificationPopup();
             if (settingPage?.IsVisible == true)
                 PositionOwnedWindow(settingPage);
             if (flowControlPage?.IsVisible == true)
@@ -2002,6 +2107,7 @@ namespace llcom_plus
                         serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
                         connectionStatusButton.IsEnabled = true;
                         UpdateMainSerialConnectionStatus();
+                        AddSerialConnectionNotification(port, reconnected: false);
                         // sendUartData 会读取当前端口下拉框和其它 WPF 状态，必须
                         // 在 UI 线程执行，不能从串口打开的后台线程直接调用。
                         SendPendingDataAfterOpen();
@@ -2085,7 +2191,10 @@ namespace llcom_plus
                 serialPortsListComboBox.IsEnabled = true;
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0;
                 if (closed)
+                {
                     statusTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
+                    AddSerialDisconnectedNotification(lastPort);
+                }
                 else
                     UpdateMainSerialConnectionStatus();
                 Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]change show done");
@@ -2134,6 +2243,18 @@ namespace llcom_plus
 
             if (baudRateComboBox.SelectedItem != null)
             {
+                var splitMode = IsSerialSplitModeActive();
+                var selectedSlot = splitMode ? GetSelectedSerialSplitSlot() : 0;
+                var previousBaudRate = splitMode
+                    ? mainSplitPortPage?.GetSlotBaudRate(selectedSlot) ?? 0
+                    : Tools.Global.setting?.baudRate ?? 0;
+                var selectedPortWasOpen = splitMode
+                    ? mainSplitPortPage?.IsSlotSelectedPortOpen(selectedSlot) == true
+                    : IsSelectedMainSerialPortOpen();
+                var selectedPortName = splitMode
+                    ? mainSplitPortPage?.GetSlotPortName(selectedSlot)
+                    : Tools.Global.uart.GetName();
+
                 lastBaudRateSelectedIndex = baudRateComboBox.SelectedIndex;
                 if (baudRateComboBox.SelectedIndex == baudRateComboBox.Items.Count - 1)
                 {
@@ -2150,9 +2271,19 @@ namespace llcom_plus
                         mainSplitPortPage?.SetSlotBaudRate(GetSelectedSerialSplitSlot(), br);
                         baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = br.ToString();
                         baudRateComboBox.Text = br.ToString();
+                        NotifyBaudRateChangedIfNeeded(
+                            selectedPortName,
+                            selectedPortWasOpen,
+                            previousBaudRate,
+                            mainSplitPortPage?.GetSlotBaudRate(selectedSlot) ?? br);
                         return;
                     }
                     Tools.Global.setting.baudRate = br;
+                    NotifyBaudRateChangedIfNeeded(
+                        selectedPortName,
+                        selectedPortWasOpen,
+                        previousBaudRate,
+                        Tools.Global.setting.baudRate);
                     Task.Run(() =>
                     {
                         this.Dispatcher.Invoke(new Action(delegate {
@@ -2170,13 +2301,64 @@ namespace llcom_plus
                             GetSelectedSerialSplitSlot(),
                             int.Parse((baudRateComboBox.SelectedItem as ComboBoxItem).Content.ToString()));
                         baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = TryFindResource("OtherRate") as string ?? "?!";
+                        NotifyBaudRateChangedIfNeeded(
+                            selectedPortName,
+                            selectedPortWasOpen,
+                            previousBaudRate,
+                            mainSplitPortPage?.GetSlotBaudRate(selectedSlot) ?? previousBaudRate);
                         return;
                     }
                     Tools.Global.setting.baudRate =
                         int.Parse((baudRateComboBox.SelectedItem as ComboBoxItem).Content.ToString());
                     baudRateComboBox.Items[baudRateComboBox.Items.Count - 1] = TryFindResource("OtherRate") as string ?? "?!";
+                    NotifyBaudRateChangedIfNeeded(
+                        selectedPortName,
+                        selectedPortWasOpen,
+                        previousBaudRate,
+                        Tools.Global.setting.baudRate);
                 }
             }
+        }
+
+        private void NotifyBaudRateChangedIfNeeded(
+            string portName,
+            bool portWasOpen,
+            int previousBaudRate,
+            int currentBaudRate)
+        {
+            if (!ShouldNotifyBaudRateChange(portWasOpen, previousBaudRate, currentBaudRate))
+                return;
+
+            var displayName = string.IsNullOrWhiteSpace(portName)
+                ? (TryFindResource("SerialPinUnknownPort") as string ?? "串口")
+                : portName;
+            var title = string.Format(
+                TryFindResource("NotificationBaudChangedTitleFormat") as string ??
+                    "{0} 波特率已切换",
+                displayName);
+            var message = string.Format(
+                TryFindResource("NotificationBaudChangedMessageFormat") as string ??
+                    "{0} → {1} baud，后续发送使用新波特率。",
+                previousBaudRate,
+                currentBaudRate);
+            Tools.Global.PublishNotification(
+                title,
+                message,
+                AppNotificationLevel.Info,
+                category: AppNotificationCategory.Connection);
+            Tools.Logger.AddUartLogDebug(
+                $"[BaudRateChanged]{displayName} {previousBaudRate}->{currentBaudRate}");
+        }
+
+        private static bool ShouldNotifyBaudRateChange(
+            bool portWasOpen,
+            int previousBaudRate,
+            int currentBaudRate)
+        {
+            return portWasOpen &&
+                previousBaudRate > 0 &&
+                currentBaudRate > 0 &&
+                previousBaudRate != currentBaudRate;
         }
 
         /// <summary>
@@ -3100,6 +3282,7 @@ namespace llcom_plus
         }
         private void Window_Deactivated(object sender, EventArgs e)
         {
+            CloseNotificationPopup();
             //窗口变为后台,可能在切换编辑器,自动保存脚本
             if (lastScriptFile != "")
                 saveScriptFile(lastScriptFile);
@@ -3227,6 +3410,7 @@ namespace llcom_plus
 
         private void StopScriptButton_Click(object sender, RoutedEventArgs e)
         {
+            var wasRunning = ScriptEnv.JavaScriptRunEnv.isRunning;
             scriptLogCount = 0;
             lock(scriptLogsBuff)
                 scriptLogsBuff.Clear();
@@ -3250,11 +3434,31 @@ namespace llcom_plus
 
             pauseScriptPrintButton.ToolTip = TryFindResource("ScriptReload") as string ?? "?!";
             pauseScriptPrintIcon.Icon = FontAwesomeIcon.Refresh;
+            if (wasRunning)
+            {
+                AddNotification(
+                    DateTime.Now,
+                    string.Format(
+                        TryFindResource("NotificationStoppedTitleFormat") as string ?? "{0} 已停止",
+                        TryFindResource("NotificationScriptSource") as string ?? "脚本"),
+                    Tools.Global.setting.runScript ?? string.Empty,
+                    AppNotificationLevel.Warning,
+                    AppNotificationCategory.Task);
+            }
         }
 
         private void JavaScriptRunEnv_ScriptRunError(object sender, EventArgs e)
         {
             scriptLogPrintable = true;
+            Dispatcher.BeginInvoke(new Action(() =>
+                AddNotification(
+                    DateTime.Now,
+                    string.Format(
+                        TryFindResource("NotificationOperationFailedTitleFormat") as string ?? "{0} 失败",
+                        TryFindResource("NotificationScriptSource") as string ?? "脚本"),
+                    Tools.Global.setting.runScript ?? string.Empty,
+                    AppNotificationLevel.Error,
+                    AppNotificationCategory.Task)));
         }
 
         private void PauseScriptPrintButton_Click(object sender, RoutedEventArgs e)
@@ -3315,6 +3519,376 @@ namespace llcom_plus
             SetRightToolsCollapsed(rightToolsCollapsed);
             UpdateMainSendTargetUi();
             UpdateThemeToggleMenu();
+            RefreshNotificationFilterOptions();
+        }
+
+        private void Global_SerialPinStatusChangedEvent(object sender, SerialPinStatusSnapshot snapshot)
+        {
+            if (snapshot == null || Tools.Global.isMainWindowsClosed)
+                return;
+
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => Global_SerialPinStatusChangedEvent(sender, snapshot)));
+                return;
+            }
+
+            var portName = string.IsNullOrWhiteSpace(snapshot.PortName)
+                ? (TryFindResource("SerialPinUnknownPort") as string ?? "串口")
+                : snapshot.PortName;
+            var changedLines = snapshot.ChangedLines == null || snapshot.ChangedLines.Count == 0
+                ? "PIN"
+                : string.Join(" / ", snapshot.ChangedLines);
+            var titleFormat = TryFindResource("SerialPinNotificationTitleFormat") as string ??
+                "{0} 引脚变化：{1}";
+            var messageFormat = TryFindResource("SerialPinNotificationMessageFormat") as string ??
+                "CTS:{0}  DSR:{1}  DCD:{2}  RI:{3}";
+
+            var title = string.Format(titleFormat, portName, changedLines);
+            var message = string.Format(
+                messageFormat,
+                FormatSerialPinState(snapshot.Cts, false, snapshot),
+                FormatSerialPinState(snapshot.Dsr, false, snapshot),
+                FormatSerialPinState(snapshot.Dcd, false, snapshot),
+                FormatSerialPinState(snapshot.Ri, true, snapshot));
+
+            AddNotification(
+                snapshot.Timestamp,
+                title,
+                message,
+                AppNotificationLevel.Info,
+                AppNotificationCategory.SerialPin);
+            Tools.Logger.AddUartLogDebug(
+                $"[SerialPinChanged]{portName} {changedLines} {message}");
+        }
+
+        private void Global_AppNotificationEvent(object sender, AppNotificationEventArgs notification)
+        {
+            if (notification == null || windowIsClosing || Tools.Global.isMainWindowsClosed)
+                return;
+
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => Global_AppNotificationEvent(sender, notification)));
+                return;
+            }
+
+            AddNotification(
+                notification.Timestamp,
+                notification.Title,
+                notification.Message,
+                notification.Level,
+                notification.Category);
+        }
+
+        private void AddSerialConnectionNotification(string portName, bool reconnected)
+        {
+            var displayName = string.IsNullOrWhiteSpace(portName)
+                ? (TryFindResource("SerialPinUnknownPort") as string ?? "串口")
+                : portName;
+            var baudMessage = string.Format(
+                TryFindResource("NotificationSerialOpenedMessageFormat") as string ?? "{0} baud",
+                Tools.Global.setting?.baudRate ?? 0);
+            if (reconnected)
+            {
+                var reconnectMessage = TryFindResource("NotificationSerialReconnectedMessage") as string ??
+                    "自动重连成功。";
+                baudMessage = reconnectMessage + " " + baudMessage;
+            }
+
+            AddNotification(
+                DateTime.Now,
+                string.Format(
+                    TryFindResource("NotificationConnectedTitleFormat") as string ?? "{0} 已连接",
+                    displayName),
+                baudMessage,
+                AppNotificationLevel.Success,
+                AppNotificationCategory.Connection);
+        }
+
+        private void AddSerialDisconnectedNotification(string portName)
+        {
+            var displayName = string.IsNullOrWhiteSpace(portName)
+                ? (TryFindResource("SerialPinUnknownPort") as string ?? "串口")
+                : portName;
+            AddNotification(
+                DateTime.Now,
+                string.Format(
+                    TryFindResource("NotificationDisconnectedTitleFormat") as string ?? "{0} 已断开",
+                    displayName),
+                string.Empty,
+                AppNotificationLevel.Info,
+                AppNotificationCategory.Connection);
+        }
+
+        private string FormatSerialPinState(bool? state, bool isRingIndicator, SerialPinStatusSnapshot snapshot)
+        {
+            if (state.HasValue)
+                return state.Value ? "1" : "0";
+
+            if (isRingIndicator &&
+                snapshot?.ChangedLines != null &&
+                snapshot.ChangedLines.Any(line => string.Equals(line, "RI", StringComparison.OrdinalIgnoreCase)))
+            {
+                return TryFindResource("SerialPinTriggered") as string ?? "触发";
+            }
+
+            return "?";
+        }
+
+        private void AddNotification(
+            DateTime timestamp,
+            string title,
+            string message,
+            AppNotificationLevel level = AppNotificationLevel.Info,
+            AppNotificationCategory category = AppNotificationCategory.General)
+        {
+            notificationItems.Insert(0, new AppNotificationItem
+            {
+                Timestamp = timestamp == default(DateTime) ? DateTime.Now : timestamp,
+                Title = title ?? string.Empty,
+                Message = message ?? string.Empty,
+                Level = level,
+                Category = category,
+                IndicatorBrush = GetNotificationIndicatorBrush(level)
+            });
+
+            while (notificationItems.Count > MaxNotificationItems)
+                notificationItems.RemoveAt(notificationItems.Count - 1);
+
+            if (NotificationPopup?.IsOpen != true)
+                unreadNotificationCount++;
+            UpdateNotificationUi();
+        }
+
+        private System.Windows.Media.Brush GetNotificationIndicatorBrush(AppNotificationLevel level)
+        {
+            string resourceKey;
+            switch (level)
+            {
+                case AppNotificationLevel.Success:
+                    resourceKey = "AppSuccessBrush";
+                    break;
+                case AppNotificationLevel.Warning:
+                    resourceKey = "AppWarningBrush";
+                    break;
+                case AppNotificationLevel.Error:
+                    resourceKey = "AppDangerBrush";
+                    break;
+                default:
+                    resourceKey = "AppAccentBrush";
+                    break;
+            }
+
+            return TryFindResource(resourceKey) as System.Windows.Media.Brush ??
+                System.Windows.Media.Brushes.DodgerBlue;
+        }
+
+        private bool FilterNotification(object value)
+        {
+            if (!(value is AppNotificationItem item))
+                return false;
+
+            switch (selectedNotificationFilter)
+            {
+                case NotificationFilter.Info:
+                    return item.Level == AppNotificationLevel.Info;
+                case NotificationFilter.Success:
+                    return item.Level == AppNotificationLevel.Success;
+                case NotificationFilter.Warning:
+                    return item.Level == AppNotificationLevel.Warning;
+                case NotificationFilter.Error:
+                    return item.Level == AppNotificationLevel.Error;
+                default:
+                    return true;
+            }
+        }
+
+        private void RefreshNotificationFilterOptions()
+        {
+            if (NotificationFilterComboBox == null)
+                return;
+
+            var options = new[]
+            {
+                new NotificationFilterOption
+                {
+                    Filter = NotificationFilter.All,
+                    Text = GetResourceText("NotificationFilterAll", "全部"),
+                    IndicatorBrush = TryFindResource("AppGlassMutedBrush") as System.Windows.Media.Brush ??
+                        System.Windows.Media.Brushes.Gray
+                },
+                new NotificationFilterOption
+                {
+                    Filter = NotificationFilter.Info,
+                    Text = GetResourceText("NotificationFilterInfo", "提示"),
+                    IndicatorBrush = GetNotificationIndicatorBrush(AppNotificationLevel.Info)
+                },
+                new NotificationFilterOption
+                {
+                    Filter = NotificationFilter.Success,
+                    Text = GetResourceText("NotificationFilterSuccess", "成功"),
+                    IndicatorBrush = GetNotificationIndicatorBrush(AppNotificationLevel.Success)
+                },
+                new NotificationFilterOption
+                {
+                    Filter = NotificationFilter.Warning,
+                    Text = GetResourceText("NotificationFilterWarning", "警告"),
+                    IndicatorBrush = GetNotificationIndicatorBrush(AppNotificationLevel.Warning)
+                },
+                new NotificationFilterOption
+                {
+                    Filter = NotificationFilter.Error,
+                    Text = GetResourceText("NotificationFilterError", "错误"),
+                    IndicatorBrush = GetNotificationIndicatorBrush(AppNotificationLevel.Error)
+                }
+            };
+
+            refreshingNotificationFilters = true;
+            try
+            {
+                NotificationFilterComboBox.ItemsSource = options;
+                NotificationFilterComboBox.SelectedItem =
+                    options.First(option => option.Filter == selectedNotificationFilter);
+            }
+            finally
+            {
+                refreshingNotificationFilters = false;
+            }
+        }
+
+        private void NotificationFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (refreshingNotificationFilters ||
+                !(NotificationFilterComboBox.SelectedItem is NotificationFilterOption option))
+            {
+                return;
+            }
+
+            selectedNotificationFilter = option.Filter;
+            notificationView?.Refresh();
+            UpdateNotificationUi();
+        }
+
+        private void UpdateNotificationUi()
+        {
+            if (NotificationBadge == null)
+                return;
+
+            NotificationBadge.Visibility = unreadNotificationCount > 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            NotificationBadgeText.Text = unreadNotificationCount > 99
+                ? "99+"
+                : unreadNotificationCount.ToString();
+            var filteredItemsEmpty = notificationView?.IsEmpty ?? notificationItems.Count == 0;
+            NotificationEmptyText.Visibility = filteredItemsEmpty
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            NotificationEmptyText.SetResourceReference(
+                TextBlock.TextProperty,
+                notificationItems.Count == 0 ? "NotificationEmpty" : "NotificationFilterEmpty");
+            NotificationClearButton.IsEnabled = notificationItems.Count > 0;
+        }
+
+        private void NotificationCenterButton_Click(object sender, RoutedEventArgs e)
+        {
+            var shouldOpen = GetNotificationPopupStateAfterButtonClick(NotificationPopup.IsOpen);
+            if (!shouldOpen)
+            {
+                NotificationPopup.IsOpen = false;
+            }
+            else
+            {
+                NotificationPopup.PlacementTarget = NotificationCenterButton;
+                PositionNotificationPopup();
+                NotificationPopup.IsOpen = true;
+            }
+            e.Handled = true;
+        }
+
+        private static bool GetNotificationPopupStateAfterButtonClick(bool isOpen)
+        {
+            return !isOpen;
+        }
+
+        private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (ShouldCloseNotificationPopup(
+                NotificationPopup?.IsOpen == true,
+                NotificationCenterButton?.IsMouseOver == true,
+                NotificationPopupRoot?.IsMouseOver == true,
+                NotificationFilterComboBox?.IsDropDownOpen == true))
+            {
+                CloseNotificationPopup();
+            }
+        }
+
+        private static bool ShouldCloseNotificationPopup(
+            bool isOpen,
+            bool isPointerOverButton,
+            bool isPointerOverPopup,
+            bool isFilterDropDownOpen)
+        {
+            return isOpen &&
+                !isPointerOverButton &&
+                !isPointerOverPopup &&
+                !isFilterDropDownOpen;
+        }
+
+        private void CloseNotificationPopup()
+        {
+            if (NotificationPopup?.IsOpen == true)
+                NotificationPopup.IsOpen = false;
+        }
+
+        private void NotificationPopup_Opened(object sender, EventArgs e)
+        {
+            PositionNotificationPopup();
+            unreadNotificationCount = 0;
+            UpdateNotificationUi();
+        }
+
+        private void PositionNotificationPopup()
+        {
+            if (MainGrid == null ||
+                NotificationCenterButton == null ||
+                NotificationPopupRoot == null ||
+                NotificationPopupSurface == null ||
+                MainGrid.ActualWidth <= 0)
+            {
+                return;
+            }
+
+            var buttonLeft = NotificationCenterButton.TranslatePoint(new System.Windows.Point(0, 0), MainGrid).X;
+            var surfaceWidth = NotificationPopupSurface.ActualWidth > 0
+                ? NotificationPopupSurface.ActualWidth
+                : Math.Max(
+                    0,
+                    NotificationPopupRoot.Width -
+                    NotificationPopupSurface.Margin.Left -
+                    NotificationPopupSurface.Margin.Right);
+            var popupAlignmentWidth = NotificationPopupSurface.Margin.Left + surfaceWidth;
+            NotificationPopup.HorizontalOffset = CalculateNotificationPopupOffset(
+                MainGrid.ActualWidth,
+                buttonLeft,
+                popupAlignmentWidth);
+        }
+
+        private static double CalculateNotificationPopupOffset(
+            double mainWidth,
+            double buttonLeft,
+            double popupWidth)
+        {
+            var desiredLeft = Math.Max(0, mainWidth - popupWidth);
+            return Math.Round(desiredLeft - buttonLeft);
+        }
+
+        private void NotificationClearButton_Click(object sender, RoutedEventArgs e)
+        {
+            notificationItems.Clear();
+            unreadNotificationCount = 0;
+            UpdateNotificationUi();
         }
 
         private void LanguageMenuButton_Click(object sender, RoutedEventArgs e)

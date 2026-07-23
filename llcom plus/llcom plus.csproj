@@ -284,6 +284,7 @@
     <Compile Include="Core\Tools\OpenSslMessageExplainer.cs" />
     <Compile Include="Core\Tools\EditorTheme.cs" />
     <Compile Include="Core\Tools\SshCli.cs" />
+    <Compile Include="Core\Tools\SerialPinMonitor.cs" />
     <Compile Include="Core\Tools\StartupProfiler.cs" />
     <Compile Include="Core\Tools\Win32.cs" />
     <Compile Include="Core\HttpTools\HeaderParser.cs" />

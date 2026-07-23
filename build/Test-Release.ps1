@@ -133,6 +133,191 @@ try {
     finally {
         Remove-Item -LiteralPath $rootBundlePath -Force -ErrorAction SilentlyContinue
     }
+
+    $pinMonitorType = $assembly.GetType('llcom_plus.Tools.SerialPinMonitor', $true)
+    $mapPinBits = $pinMonitorType.GetMethod(
+        'AddChangedLines',
+        [Reflection.BindingFlags]'NonPublic,Static',
+        $null,
+        [Type[]]@([Collections.Generic.ICollection[string]], [uint32]),
+        $null)
+    $pinNames = [Activator]::CreateInstance([Collections.Generic.List[string]])
+    [void]$mapPinBits.Invoke($null, [object[]]@($pinNames, [uint32]0xF0))
+    Test-Condition (($pinNames -join ',') -eq 'CTS,DSR,DCD,RI') 'Serial modem-status bits map to CTS/DSR/DCD/RI'
+
+    Add-Type -AssemblyName PresentationFramework
+    Get-ChildItem -LiteralPath $outputDir -Filter '*.dll' | ForEach-Object {
+        try { [void][Reflection.Assembly]::LoadFrom($_.FullName) } catch { }
+    }
+    [Windows.Application]::ResourceAssembly = $assembly
+    $globalType = $assembly.GetType('llcom_plus.Tools.Global', $true)
+    $globalType.GetField('setting', [Reflection.BindingFlags]'Public,Static').SetValue($null, $settings)
+    $appType = $assembly.GetType('llcom_plus.App', $true)
+    $app = [Activator]::CreateInstance($appType)
+    $window = $null
+    try {
+        [void]$appType.GetMethod('InitializeComponent').Invoke($app, $null)
+        $windowType = $assembly.GetType('llcom_plus.MainWindow', $true)
+        $window = [Activator]::CreateInstance($windowType)
+        $shouldNotifyBaudRateChange = $windowType.GetMethod(
+            'ShouldNotifyBaudRateChange',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $notifyForOpenChangedPort = [bool]$shouldNotifyBaudRateChange.Invoke(
+            $null,
+            [object[]]@($true, 115200, 9600))
+        $skipForClosedPort = -not [bool]$shouldNotifyBaudRateChange.Invoke(
+            $null,
+            [object[]]@($false, 115200, 9600))
+        $skipForSameBaudRate = -not [bool]$shouldNotifyBaudRateChange.Invoke(
+            $null,
+            [object[]]@($true, 115200, 115200))
+        Test-Condition (
+            $notifyForOpenChangedPort -and
+            $skipForClosedPort -and
+            $skipForSameBaudRate
+        ) 'Baud-rate notifications require an open port and an actual change'
+
+        $dataShowPageType = $assembly.GetType('llcom_plus.Pages.DataShowPage', $true)
+        $controlLineHandler = $dataShowPageType.GetMethod(
+            'ControlLineCheckBox_Click',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        Test-Condition ($null -ne $controlLineHandler) 'Manual RTS/DTR operations have a notification handler'
+        $dataShowPage = [Activator]::CreateInstance($dataShowPageType)
+        $logOptionsButton = $dataShowPage.FindName('LogOptionsButton')
+        $logOptionsPopup = $dataShowPage.FindName('LogOptionsPopup')
+        $logOptionsButton.IsChecked = $true
+        $closeLogOptionsOnDeactivate = $dataShowPageType.GetMethod(
+            'OwnerWindow_Deactivated',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        [void]$closeLogOptionsOnDeactivate.Invoke(
+            $dataShowPage,
+            [object[]]@($null, [EventArgs]::Empty))
+        Test-Condition (
+            $logOptionsPopup.StaysOpen -and
+            $logOptionsButton.IsChecked -ne $true
+        ) 'Send and log options stay open for internal clicks and close when the application deactivates'
+
+        $calculatePopupOffset = $windowType.GetMethod(
+            'CalculateNotificationPopupOffset',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $popupOffset = [double]$calculatePopupOffset.Invoke(
+            $null,
+            [object[]]@([double]1160, [double]947, [double]430))
+        Test-Condition (
+            ([Math]::Abs((947 + $popupOffset + 430) - 1160) -lt 0.01)
+        ) 'Notification popup right edge aligns with the application'
+        $addNotification = $windowType.GetMethod('AddNotification', [Reflection.BindingFlags]'NonPublic,Instance')
+        $notificationLevelType = $assembly.GetType('llcom_plus.Tools.AppNotificationLevel', $true)
+        $notificationCategoryType = $assembly.GetType('llcom_plus.Tools.AppNotificationCategory', $true)
+        $infoNotificationLevel = [Enum]::Parse($notificationLevelType, 'Info')
+        $pinNotificationCategory = [Enum]::Parse($notificationCategoryType, 'SerialPin')
+        [void]$addNotification.Invoke(
+            $window,
+            [object[]]@(
+                [DateTime]::Now,
+                'COM3 pin changed: RI',
+                'CTS:1 DSR:0 DCD:0 RI:1',
+                $infoNotificationLevel,
+                $pinNotificationCategory))
+        $badge = $window.FindName('NotificationBadge')
+        $badgeText = $window.FindName('NotificationBadgeText')
+        $notificationList = $window.FindName('NotificationListBox')
+        $notificationPopup = $window.FindName('NotificationPopup')
+        $notificationPopupRoot = $window.FindName('NotificationPopupRoot')
+        $notificationPopupSurface = $window.FindName('NotificationPopupSurface')
+        Test-Condition (
+            $badge.Visibility.ToString() -eq 'Visible' -and
+            $badgeText.Text -eq '1' -and
+            $notificationList.Items.Count -eq 1
+        ) 'Notification center shows an unread badge'
+        Test-Condition (
+            $notificationPopup.StaysOpen -and
+            $notificationPopupSurface.CornerRadius.TopLeft -eq 16 -and
+            $notificationPopupSurface.Effect -ne $null -and
+            $notificationPopupSurface.Margin.Left -ge
+                ($notificationPopupSurface.Effect.BlurRadius + [Math]::Abs($notificationPopupSurface.Effect.ShadowDepth))
+        ) 'Notification popup has a padded floating shadow without clipped corners'
+
+        $togglePopupState = $windowType.GetMethod(
+            'GetNotificationPopupStateAfterButtonClick',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $openAfterClick = [bool]$togglePopupState.Invoke($null, [object[]]@($false))
+        $closedAfterClick = -not [bool]$togglePopupState.Invoke($null, [object[]]@($true))
+        Test-Condition ($openAfterClick -and $closedAfterClick) 'Notification button toggles the popup open and closed'
+
+        $shouldClosePopup = $windowType.GetMethod(
+            'ShouldCloseNotificationPopup',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $closeForOutsideClick = [bool]$shouldClosePopup.Invoke(
+            $null,
+            [object[]]@($true, $false, $false, $false))
+        $keepForButtonClick = -not [bool]$shouldClosePopup.Invoke(
+            $null,
+            [object[]]@($true, $true, $false, $false))
+        $keepForInsideClick = -not [bool]$shouldClosePopup.Invoke(
+            $null,
+            [object[]]@($true, $false, $true, $false))
+        $keepForFilterClick = -not [bool]$shouldClosePopup.Invoke(
+            $null,
+            [object[]]@($true, $false, $false, $true))
+        Test-Condition (
+            $closeForOutsideClick -and
+            $keepForButtonClick -and
+            $keepForInsideClick -and
+            $keepForFilterClick
+        ) 'Only clicks outside the notification popup close it'
+
+        $popupOpened = $windowType.GetMethod('NotificationPopup_Opened', [Reflection.BindingFlags]'NonPublic,Instance')
+        [void]$popupOpened.Invoke($window, [object[]]@($null, [EventArgs]::Empty))
+        Test-Condition (
+            $badge.Visibility.ToString() -eq 'Collapsed' -and
+            $notificationList.Items.Count -eq 1
+        ) 'Opening the notification center marks messages as read'
+
+        $clearNotifications = $windowType.GetMethod('NotificationClearButton_Click', [Reflection.BindingFlags]'NonPublic,Instance')
+        [void]$clearNotifications.Invoke($window, [object[]]@($null, $null))
+        Test-Condition ($notificationList.Items.Count -eq 0) 'Notification center clears message history'
+
+        $successNotificationLevel = [Enum]::Parse($notificationLevelType, 'Success')
+        $warningNotificationLevel = [Enum]::Parse($notificationLevelType, 'Warning')
+        $errorNotificationLevel = [Enum]::Parse($notificationLevelType, 'Error')
+        $connectionNotificationCategory = [Enum]::Parse($notificationCategoryType, 'Connection')
+        $taskNotificationCategory = [Enum]::Parse($notificationCategoryType, 'Task')
+        $updateNotificationCategory = [Enum]::Parse($notificationCategoryType, 'Update')
+        $testNotifications = @(
+            [pscustomobject]@{ Title = 'Socket connected'; Message = 'ready'; Level = $successNotificationLevel; Category = $connectionNotificationCategory },
+            [pscustomobject]@{ Title = 'COM pin changed'; Message = 'RI:1'; Level = $infoNotificationLevel; Category = $pinNotificationCategory },
+            [pscustomobject]@{ Title = 'File transfer failed'; Message = 'timeout'; Level = $errorNotificationLevel; Category = $taskNotificationCategory },
+            [pscustomobject]@{ Title = 'Version available'; Message = '1.2.4'; Level = $warningNotificationLevel; Category = $updateNotificationCategory }
+        )
+        foreach ($notification in $testNotifications) {
+            [void]$addNotification.Invoke(
+                $window,
+                [object[]]@(
+                    [DateTime]::Now,
+                    $notification.Title,
+                    $notification.Message,
+                    $notification.Level,
+                    $notification.Category))
+        }
+
+        $notificationFilter = $window.FindName('NotificationFilterComboBox')
+        $filterCounts = @()
+        for ($filterIndex = 0; $filterIndex -lt 5; $filterIndex++) {
+            $notificationFilter.SelectedIndex = $filterIndex
+            $filterCounts += $notificationList.Items.Count
+        }
+        Test-Condition (
+            ($filterCounts -join ',') -eq '4,1,1,1,1'
+        ) 'Notification center filters messages by info, success, warning, and error colors'
+        [void]$clearNotifications.Invoke($window, [object[]]@($null, $null))
+    }
+    finally {
+        if ($window -ne $null) {
+            try { $window.Close() } catch { }
+        }
+        try { $app.Shutdown() } catch { }
+    }
 }
 finally {
     Pop-Location

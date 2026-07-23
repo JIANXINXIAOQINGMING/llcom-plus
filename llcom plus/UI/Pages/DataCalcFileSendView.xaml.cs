@@ -113,6 +113,16 @@ namespace llcom_plus.Pages
                 sendState = SendRunState.Completed;
                 resumeSentBytes = totalLength;
                 UpdateSendProgress(totalLength, totalLength);
+                var source = TryFindResource("NotificationFileSendSource") as string ?? "文件发送";
+                Global.PublishNotification(
+                    string.Format(
+                        TryFindResource("NotificationOperationCompletedTitleFormat") as string ?? "{0} 已完成",
+                        source),
+                    isFileSource
+                        ? $"{Path.GetFileName(selectedFilePath)} · {totalLength:N0} bytes"
+                        : $"{totalLength:N0} bytes",
+                    AppNotificationLevel.Success,
+                    category: AppNotificationCategory.Task);
             }
             catch (OperationCanceledException)
             {
@@ -136,11 +146,13 @@ namespace llcom_plus.Pages
             catch (TimeoutException ex)
             {
                 sendState = SendRunState.Ready;
+                PublishSendFailure(ex.Message);
                 Tools.MessageBox.Show($"{TryFindResource("DataCalcSendTimeout") as string ?? "Serial write timed out. Send stopped."}\r\n" + ex.Message);
             }
             catch (Exception ex)
             {
                 sendState = SendRunState.Ready;
+                PublishSendFailure(ex.Message);
                 Tools.MessageBox.Show(ex.Message);
             }
             finally
@@ -150,6 +162,18 @@ namespace llcom_plus.Pages
                 cts.Dispose();
                 SetSendingState(false);
             }
+        }
+
+        private void PublishSendFailure(string detail)
+        {
+            var source = TryFindResource("NotificationFileSendSource") as string ?? "文件发送";
+            Global.PublishNotification(
+                string.Format(
+                    TryFindResource("NotificationOperationFailedTitleFormat") as string ?? "{0} 失败",
+                    source),
+                detail ?? string.Empty,
+                AppNotificationLevel.Error,
+                category: AppNotificationCategory.Task);
         }
 
         private void CalculateDataButton_Click(object sender, RoutedEventArgs e)

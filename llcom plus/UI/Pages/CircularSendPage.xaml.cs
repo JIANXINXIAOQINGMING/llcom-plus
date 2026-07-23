@@ -22,6 +22,7 @@ namespace llcom_plus.Pages
         private const int DefaultRowCount = 10;
         private bool suppressSave = false;
         private CancellationTokenSource loopCts = null;
+        private string lastStorageNotificationMessage = string.Empty;
 
         public ObservableCollection<CircularSendItem> Items { get; } = new ObservableCollection<CircularSendItem>();
 
@@ -124,6 +125,7 @@ namespace llcom_plus.Pages
                 File.Copy(tempPath, StoragePath, true);
                 StorageErrorTextBlock.Text = string.Empty;
                 StorageErrorTextBlock.Visibility = Visibility.Collapsed;
+                lastStorageNotificationMessage = string.Empty;
             }
             catch (Exception ex)
             {
@@ -140,6 +142,18 @@ namespace llcom_plus.Pages
             var format = TryFindResource("CircularSendSaveFailedFormat") as string ?? "循环发送配置保存/读取失败：{0}";
             StorageErrorTextBlock.Text = string.Format(format, ex.Message);
             StorageErrorTextBlock.Visibility = Visibility.Visible;
+            if (!string.Equals(lastStorageNotificationMessage, ex.Message, StringComparison.Ordinal))
+            {
+                lastStorageNotificationMessage = ex.Message;
+                var source = TryFindResource("NotificationCircularSendSource") as string ?? "循环发送配置";
+                Global.PublishNotification(
+                    string.Format(
+                        TryFindResource("NotificationOperationFailedTitleFormat") as string ?? "{0} 失败",
+                        source),
+                    ex.Message,
+                    AppNotificationLevel.Error,
+                    category: AppNotificationCategory.Task);
+            }
         }
 
         private void RefreshIndexes()

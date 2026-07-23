@@ -83,7 +83,10 @@ namespace llcom_plus.Pages
 
                 ownerWindow = Window.GetWindow(this);
                 if (ownerWindow != null)
+                {
                     ownerWindow.PreviewMouseDown += OwnerWindow_PreviewMouseDown;
+                    ownerWindow.Deactivated += OwnerWindow_Deactivated;
+                }
 
                 lastPackShowMode = Tools.Global.setting.timeout >= 0;
                 MainListScrollViewer.Visibility = lastPackShowMode ? Visibility.Visible : Visibility.Collapsed;
@@ -102,6 +105,7 @@ namespace llcom_plus.Pages
             if (ownerWindow != null)
             {
                 ownerWindow.PreviewMouseDown -= OwnerWindow_PreviewMouseDown;
+                ownerWindow.Deactivated -= OwnerWindow_Deactivated;
                 ownerWindow = null;
             }
             loaded = false;
@@ -117,6 +121,11 @@ namespace llcom_plus.Pages
             if (LogOptionsButton.IsMouseOver || (placementTarget?.IsMouseOver ?? false) || (popupChild?.IsMouseOver ?? false))
                 return;
 
+            LogOptionsButton.IsChecked = false;
+        }
+
+        private void OwnerWindow_Deactivated(object sender, EventArgs e)
+        {
             LogOptionsButton.IsChecked = false;
         }
 
@@ -379,6 +388,35 @@ namespace llcom_plus.Pages
                 Tools.Global.uart.Dtr = value;
                 Tools.Global.setting?.SaveActiveUartProfile();
             }
+        }
+
+        private void ControlLineCheckBox_Click(object sender, RoutedEventArgs e)
+        {
+            if (!(sender is System.Windows.Controls.CheckBox checkBox))
+                return;
+
+            var lineName = ReferenceEquals(checkBox, RTSCheckBox) ? "RTS" : "DTR";
+            var portName = Tools.Global.uart.GetName();
+            if (string.IsNullOrWhiteSpace(portName))
+                portName = TryFindResource("SerialPinUnknownPort") as string ?? "串口";
+
+            var title = string.Format(
+                TryFindResource("NotificationControlLineTitleFormat") as string ??
+                    "{0} 手动切换 {1}",
+                portName,
+                lineName);
+            var message = string.Format(
+                TryFindResource("NotificationControlLineMessageFormat") as string ??
+                    "RTS:{0}  DTR:{1}",
+                RTSCheckBox.IsChecked == true ? "1" : "0",
+                DTRCheckBox.IsChecked == true ? "1" : "0");
+            Tools.Global.PublishNotification(
+                title,
+                message,
+                AppNotificationLevel.Info,
+                category: AppNotificationCategory.SerialPin);
+            Tools.Logger.AddUartLogDebug(
+                $"[ControlLineManual]{portName} {lineName} {message}");
         }
 
         /// <summary>
