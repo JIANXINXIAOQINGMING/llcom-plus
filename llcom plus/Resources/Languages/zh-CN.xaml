@@ -32,6 +32,10 @@
     <system:String x:Key="SplitSendAllOpenFailed">以下窗口打开失败，其他窗口已继续发送：</system:String>
     <system:String x:Key="SplitModeStatus">分屏模式</system:String>
     <system:String x:Key="SplitModeConnectionStatus">窗口 {0} · {1}</system:String>
+    <system:String x:Key="AddSerialSplitPane">增加分屏</system:String>
+    <system:String x:Key="AddSerialSplitPaneTip">新增一个串口分屏，最多支持 4 个；已有分屏内容和连接保持不变。</system:String>
+    <system:String x:Key="AddSerialSplitPaneMaximumTip">已达到最多 4 个分屏。</system:String>
+    <system:String x:Key="RemoveSerialSplitPaneTip">删除这个分屏</system:String>
     <system:String x:Key="RefreshPortButton">刷新串口</system:String>
     <system:String x:Key="ShowPorts">串口：</system:String>
     <system:String x:Key="ShowBaudRate">波特率：</system:String>
@@ -54,6 +58,7 @@
     <system:String x:Key="QuickSendIdTip">右击序号，可更改改条目位置。</system:String>
     <system:String x:Key="QuickSendAppendCrlfTip">勾选后，点击发送此快捷项时追加回车换行。</system:String>
     <system:String x:Key="QuickSendDisableSuggestionTip">勾选后，这条快捷发送不会出现在发送框快速补全里。</system:String>
+    <system:String x:Key="QuickSendKeyboardNavigationTip">键盘操作：首次按方向键进入查看模式；上下键循环换行，左右键切换内容/发送/选项；回车发送；空格编辑内容或切换选项；编辑时按 Esc 返回查看模式。</system:String>
     <system:String x:Key="QuickSendListNameTip">直接编辑当前快捷发送列表名称。</system:String>
     <system:String x:Key="QuickSendListNameChangeTip">更改当前快捷发送列表名称</system:String>
     <system:String x:Key="QuickSendButton">发送</system:String>

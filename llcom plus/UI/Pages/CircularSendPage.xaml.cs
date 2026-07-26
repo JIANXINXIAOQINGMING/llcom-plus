@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace llcom_plus.Pages
 {
@@ -21,6 +22,7 @@ namespace llcom_plus.Pages
     {
         private const int DefaultRowCount = 10;
         private bool suppressSave = false;
+        private bool suppressSelectionHeader = false;
         private CancellationTokenSource loopCts = null;
         private string lastStorageNotificationMessage = string.Empty;
 
@@ -38,6 +40,7 @@ namespace llcom_plus.Pages
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
             SetRunning(false);
+            UpdateSelectionHeader();
         }
 
         private void CommandDataGrid_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -105,10 +108,12 @@ namespace llcom_plus.Pages
         {
             item.Changed += Item_Changed;
             Items.Add(item);
+            UpdateSelectionHeader();
         }
 
         private void Item_Changed(object sender, EventArgs e)
         {
+            UpdateSelectionHeader();
             SaveItems();
         }
 
@@ -182,6 +187,7 @@ namespace llcom_plus.Pages
             if (Items.Count == 0)
                 AddItem(new CircularSendItem());
             RefreshIndexes();
+            UpdateSelectionHeader();
             SaveItems();
         }
 
@@ -208,14 +214,27 @@ namespace llcom_plus.Pages
             StatusTextBlock.Text = TryFindResource("CircularSendCleared") as string ?? "已清空";
         }
 
-        private void SelectAllButton_Click(object sender, RoutedEventArgs e)
+        private void EnableAllCheckBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            SetSelection(true);
+            ToggleSelectionFromHeader();
+            e.Handled = true;
         }
 
-        private void ClearSelectionButton_Click(object sender, RoutedEventArgs e)
+        private void EnableAllCheckBox_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            SetSelection(false);
+            if (e.Key != Key.Space && e.Key != Key.Enter)
+                return;
+
+            ToggleSelectionFromHeader();
+            e.Handled = true;
+        }
+
+        private void ToggleSelectionFromHeader()
+        {
+            if (suppressSelectionHeader)
+                return;
+
+            SetSelection(EnableAllCheckBox.IsChecked != true);
         }
 
         private void SetSelection(bool selected)
@@ -224,13 +243,42 @@ namespace llcom_plus.Pages
             try
             {
                 foreach (var item in Items)
-                    item.IsSelected = selected && !string.IsNullOrWhiteSpace(item.Command);
+                    item.IsSelected = selected;
             }
             finally
             {
                 suppressSave = false;
             }
             SaveItems();
+            UpdateSelectionHeader();
+        }
+
+        private void UpdateSelectionHeader()
+        {
+            if (EnableAllCheckBox == null)
+                return;
+
+            var eligibleItems = Items.ToList();
+            bool? state = false;
+            if (eligibleItems.Count > 0)
+            {
+                var selectedCount = eligibleItems.Count(item => item.IsSelected);
+                state = selectedCount == 0
+                    ? false
+                    : selectedCount == eligibleItems.Count
+                        ? true
+                        : (bool?)null;
+            }
+
+            suppressSelectionHeader = true;
+            try
+            {
+                EnableAllCheckBox.IsChecked = state;
+            }
+            finally
+            {
+                suppressSelectionHeader = false;
+            }
         }
 
         private void ImportQuickSendButton_Click(object sender, RoutedEventArgs e)
@@ -498,6 +546,7 @@ namespace llcom_plus.Pages
             StartButton.IsEnabled = !running;
             StopButton.IsEnabled = running;
             CommandDataGrid.IsReadOnly = running;
+            EnableAllCheckBox.IsEnabled = !running;
         }
     }
 

@@ -183,6 +183,13 @@ namespace llcom_plus.Pages
             MainTextBox.SelectAll();
         }
 
+        public string GetLogTextSnapshot()
+        {
+            return lastPackShowMode
+                ? BuildPackedLogText()
+                : MainTextBox.Text ?? string.Empty;
+        }
+
         private void MainTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
             if (packedLogSelectionMode)

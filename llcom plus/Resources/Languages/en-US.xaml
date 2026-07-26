@@ -32,6 +32,10 @@
     <system:String x:Key="SplitSendAllOpenFailed">These panes could not be opened; sending continued to the others:</system:String>
     <system:String x:Key="SplitModeStatus">Split mode</system:String>
     <system:String x:Key="SplitModeConnectionStatus">Pane {0} · {1}</system:String>
+    <system:String x:Key="AddSerialSplitPane">Add pane</system:String>
+    <system:String x:Key="AddSerialSplitPaneTip">Add one serial pane, up to 4. Existing pane content and connections are preserved.</system:String>
+    <system:String x:Key="AddSerialSplitPaneMaximumTip">The maximum of 4 panes has been reached.</system:String>
+    <system:String x:Key="RemoveSerialSplitPaneTip">Remove this pane</system:String>
     <system:String x:Key="RefreshPortButton">Refresh List</system:String>
     <system:String x:Key="ShowPorts">Serial Ports:</system:String>
     <system:String x:Key="ShowBaudRate">Baud Rate:</system:String>
@@ -54,6 +58,7 @@
     <system:String x:Key="QuickSendIdTip">Right click id to change the index of this line.</system:String>
     <system:String x:Key="QuickSendAppendCrlfTip">When checked, clicking this quick send item appends CRLF.</system:String>
     <system:String x:Key="QuickSendDisableSuggestionTip">When checked, this quick send item will not appear in send box suggestions.</system:String>
+    <system:String x:Key="QuickSendKeyboardNavigationTip">Keyboard: press an arrow key once to enter browse mode; Up/Down wraps rows and Left/Right changes content/send/options; Enter sends; Space edits or toggles; Esc returns to browse mode while editing.</system:String>
     <system:String x:Key="QuickSendListNameTip">Edit the current quick send list name directly.</system:String>
     <system:String x:Key="QuickSendListNameChangeTip">change this quick send list name</system:String>
     <system:String x:Key="QuickSendButton">Send</system:String>

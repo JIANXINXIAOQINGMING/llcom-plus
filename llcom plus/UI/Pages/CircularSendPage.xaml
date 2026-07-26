@@ -32,20 +32,6 @@
             HorizontalAlignment="Right"
             ItemHeight="44">
             <Button
-                Width="96"
-                Height="36"
-                Margin="0,0,8,0"
-                Click="ClearSelectionButton_Click"
-                Content="{DynamicResource CircularSendClearSelection}"
-                Style="{StaticResource CircularActionButtonStyle}" />
-            <Button
-                Width="72"
-                Height="36"
-                Margin="0,0,8,0"
-                Click="SelectAllButton_Click"
-                Content="{DynamicResource CircularSendSelectAll}"
-                Style="{StaticResource CircularActionButtonStyle}" />
-            <Button
                 Width="72"
                 Height="36"
                 Margin="0,0,8,0"
@@ -93,7 +79,19 @@
             <DataGrid.Columns>
                 <DataGridCheckBoxColumn Width="44" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}">
                     <DataGridCheckBoxColumn.Header>
-                        <TextBlock Text="{DynamicResource CircularSendEnabled}" />
+                        <StackPanel HorizontalAlignment="Center">
+                            <CheckBox
+                                x:Name="EnableAllCheckBox"
+                                HorizontalAlignment="Center"
+                                IsThreeState="True"
+                                PreviewKeyDown="EnableAllCheckBox_PreviewKeyDown"
+                                PreviewMouseLeftButtonDown="EnableAllCheckBox_PreviewMouseLeftButtonDown"
+                                ToolTip="{DynamicResource CircularSendSelectAll}" />
+                            <TextBlock
+                                Margin="0,2,0,0"
+                                HorizontalAlignment="Center"
+                                Text="{DynamicResource CircularSendEnabled}" />
+                        </StackPanel>
                     </DataGridCheckBoxColumn.Header>
                 </DataGridCheckBoxColumn>
                 <DataGridTextColumn Width="28" Binding="{Binding Index}" IsReadOnly="True">

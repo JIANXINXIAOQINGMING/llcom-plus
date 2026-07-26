@@ -731,6 +731,23 @@
                             ToolTip="{DynamicResource ClearCountTip}" />
                         </StackPanel>
                     </Border>
+                    <Button
+                        Name="AddSerialSplitPaneButton"
+                        MinHeight="32"
+                        Margin="8,0,0,0"
+                        Click="AddSerialSplitPaneButton_Click"
+                        Style="{StaticResource StatusToggleButtonStyle}"
+                        ToolTip="{DynamicResource AddSerialSplitPaneTip}">
+                        <StackPanel Orientation="Horizontal">
+                            <fa:FontAwesome
+                                Margin="0,0,6,0"
+                                VerticalAlignment="Center"
+                                Icon="Plus" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Text="{DynamicResource AddSerialSplitPane}" />
+                        </StackPanel>
+                    </Button>
             </WrapPanel>
         </Border>
         <!--  中间改变分割大小的东西  -->
@@ -828,14 +845,17 @@
                                                 Text="{Binding id}"
                                                 ToolTip="{DynamicResource QuickSendIdTip}" />
                                                 <TextBox
+                                                x:Name="QuickSendRowTextBox"
                                                 Grid.Column="1"
                                                 Margin="0,0,2,0"
                                                 HorizontalAlignment="Stretch"
                                                 MinWidth="60"
                                                 MouseDoubleClick="QuickSendTextBox_MouseDoubleClick"
+                                                PreviewMouseLeftButtonDown="QuickSendTextBox_PreviewMouseLeftButtonDown"
                                                 PreviewKeyDown="QuickSendTextBox_PreviewKeyDown"
                                                 Text="{Binding text, UpdateSourceTrigger=PropertyChanged}" />
                                                 <Button
+                                                x:Name="QuickSendRowSendButton"
                                                 Grid.Column="2"
                                                 MinWidth="58"
                                                 Margin="0,0,2,0"
@@ -848,12 +868,14 @@
                                                 Tag="{Binding}"
                                                 ToolTip="{DynamicResource QuickSendButtonTip}" />
                                                 <CheckBox
+                                                x:Name="QuickSendRowHexCheckBox"
                                                 Grid.Column="3"
                                                 Margin="2"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
                                                 IsChecked="{Binding hex}" />
                                                 <CheckBox
+                                                x:Name="QuickSendRowCrlfCheckBox"
                                                 Grid.Column="4"
                                                 Margin="2"
                                                 HorizontalAlignment="Center"
@@ -861,6 +883,7 @@
                                                 IsChecked="{Binding appendCrlf}"
                                                 ToolTip="{DynamicResource QuickSendAppendCrlfTip}" />
                                                 <CheckBox
+                                                x:Name="QuickSendRowExcludeCheckBox"
                                                 Grid.Column="5"
                                                 Margin="2"
                                                 HorizontalAlignment="Center"
@@ -1016,8 +1039,10 @@
                         BorderBrush="Transparent"
                         BorderThickness="0"
                         ItemContainerStyle="{StaticResource toSendListStyle}"
+                        PreviewKeyDown="QuickSendList_PreviewKeyDown"
                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                        ToolTip="{DynamicResource QuickSendKeyboardNavigationTip}"
                         VirtualizingPanel.CacheLength="1,2"
                         VirtualizingPanel.CacheLengthUnit="Page"
                         VirtualizingPanel.IsVirtualizing="True"

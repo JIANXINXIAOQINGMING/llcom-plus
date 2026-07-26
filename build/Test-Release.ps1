@@ -30,6 +30,37 @@ if (-not (Test-Path -LiteralPath $exePath)) {
     exit 1
 }
 
+Add-Type -AssemblyName System.Drawing
+$appIcon = [Drawing.Icon]::ExtractAssociatedIcon($exePath)
+$appIconBitmap = $appIcon.ToBitmap()
+try {
+    $minIconX = $appIconBitmap.Width
+    $minIconY = $appIconBitmap.Height
+    $maxIconX = -1
+    $maxIconY = -1
+    for ($iconY = 0; $iconY -lt $appIconBitmap.Height; $iconY++) {
+        for ($iconX = 0; $iconX -lt $appIconBitmap.Width; $iconX++) {
+            if ($appIconBitmap.GetPixel($iconX, $iconY).A -le 8) {
+                continue
+            }
+            $minIconX = [Math]::Min($minIconX, $iconX)
+            $minIconY = [Math]::Min($minIconY, $iconY)
+            $maxIconX = [Math]::Max($maxIconX, $iconX)
+            $maxIconY = [Math]::Max($maxIconY, $iconY)
+        }
+    }
+    $iconContentWidth = $maxIconX - $minIconX + 1
+    $iconContentHeight = $maxIconY - $minIconY + 1
+    Test-Condition (
+        $iconContentWidth -ge 26 -and
+        $iconContentHeight -ge 26
+    ) 'Application taskbar icon fills the 32-pixel icon frame'
+}
+finally {
+    $appIconBitmap.Dispose()
+    $appIcon.Dispose()
+}
+
 Push-Location $outputDir
 try {
     [void][Reflection.Assembly]::LoadFrom((Join-Path $outputDir 'Newtonsoft.Json.dll'))
@@ -159,6 +190,60 @@ try {
         [void]$appType.GetMethod('InitializeComponent').Invoke($app, $null)
         $windowType = $assembly.GetType('llcom_plus.MainWindow', $true)
         $window = [Activator]::CreateInstance($windowType)
+        $createDefaultQuickSendRows = $settingsType.GetMethod(
+            'CreateDefaultQuickSendRows',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $defaultQuickSendRows = @($createDefaultQuickSendRows.Invoke($settings, $null))
+        $isBlankQuickSendRow = $settingsType.GetMethod(
+            'IsBlankQuickSendRow',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $allDefaultRowsAppendCrlf = $defaultQuickSendRows.Count -gt 0 -and
+            @($defaultQuickSendRows | Where-Object { -not $_.appendCrlf }).Count -eq 0
+        $defaultRowsRemainBlank = $defaultQuickSendRows.Count -gt 0 -and
+            [bool]$isBlankQuickSendRow.Invoke(
+                $settings,
+                [object[]]@($defaultQuickSendRows[0]))
+        Test-Condition (
+            $allDefaultRowsAppendCrlf -and
+            $defaultRowsRemainBlank
+        ) 'New quick-send rows enable CRLF without treating untouched rows as content'
+
+        $createBlankQuickSendItem = $windowType.GetMethod(
+            'CreateBlankQuickSendItem',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $blankQuickSendItem = $createBlankQuickSendItem.Invoke(
+            $window,
+            [object[]]@(11))
+        Test-Condition (
+            $blankQuickSendItem.id -eq 11 -and
+            $blankQuickSendItem.appendCrlf
+        ) 'The add-row action creates a CRLF-enabled quick-send item'
+
+        $wrapQuickSendRow = $windowType.GetMethod(
+            'GetWrappedQuickSendRowIndex',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $wrapUpFromFirst = [int]$wrapQuickSendRow.Invoke(
+            $null,
+            [object[]]@(0, -1, 8))
+        $wrapDownFromLast = [int]$wrapQuickSendRow.Invoke(
+            $null,
+            [object[]]@(7, 1, 8))
+        $clampQuickSendColumn = $windowType.GetMethod(
+            'GetClampedQuickSendNavigationColumn',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $leftColumnBoundary = [int]$clampQuickSendColumn.Invoke(
+            $null,
+            [object[]]@(0, -1))
+        $rightColumnBoundary = [int]$clampQuickSendColumn.Invoke(
+            $null,
+            [object[]]@(4, 1))
+        Test-Condition (
+            $wrapUpFromFirst -eq 7 -and
+            $wrapDownFromLast -eq 0 -and
+            $leftColumnBoundary -eq 0 -and
+            $rightColumnBoundary -eq 4
+        ) 'Quick-send keyboard navigation wraps rows and bounds columns'
+
         $shouldNotifyBaudRateChange = $windowType.GetMethod(
             'ShouldNotifyBaudRateChange',
             [Reflection.BindingFlags]'NonPublic,Static')
@@ -196,6 +281,125 @@ try {
             $logOptionsPopup.StaysOpen -and
             $logOptionsButton.IsChecked -ne $true
         ) 'Send and log options stay open for internal clicks and close when the application deactivates'
+
+        $addSplitPaneButton = $window.FindName('AddSerialSplitPaneButton')
+        Test-Condition ($null -ne $addSplitPaneButton) 'The main status bar exposes an add-split-pane button'
+
+        $multiPortPageType = $assembly.GetType('llcom_plus.Pages.MultiPortPage', $true)
+        $multiPortConstructor = $multiPortPageType.GetConstructor(
+            [Type[]]@([int], [bool], [string], [string]))
+        $multiPortPage = $multiPortConstructor.Invoke(
+            [object[]]@(2, $false, $null, "preserved single-pane log"))
+        $multiPortLoaded = $multiPortPageType.GetMethod(
+            'Page_Loaded',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $multiPortUnloaded = $multiPortPageType.GetMethod(
+            'Page_Unloaded',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $multiPortSlotsField = $multiPortPageType.GetField(
+            'slots',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        try {
+            [void]$multiPortLoaded.Invoke(
+                $multiPortPage,
+                [object[]]@($null, $null))
+            $slots = $multiPortSlotsField.GetValue($multiPortPage)
+            $firstSlot = $slots[0]
+            $firstSlotType = $firstSlot.GetType()
+            $getSlotLogText = $firstSlotType.GetMethod('GetLogText')
+            $closeButtonField = $firstSlotType.GetField(
+                'closeButton',
+                [Reflection.BindingFlags]'NonPublic,Instance')
+            $initialLogPreserved = $getSlotLogText.Invoke(
+                $firstSlot,
+                $null).Contains('preserved single-pane log')
+
+            $addSplitSlot = $multiPortPageType.GetMethod('AddSlot')
+            $removeSplitSlot = $multiPortPageType.GetMethod('RemoveSlot')
+            $resizeSplitSlots = $multiPortPageType.GetMethod('ResizeSlotCount')
+            $addedThirdSlot = [bool]$addSplitSlot.Invoke($multiPortPage, $null)
+            $slots = $multiPortSlotsField.GetValue($multiPortPage)
+            $thirdSlot = $slots[2]
+            $threePaneLayoutPreserved =
+                [Windows.Controls.Grid]::GetRow($thirdSlot.Root) -eq 1 -and
+                [Windows.Controls.Grid]::GetColumn($thirdSlot.Root) -eq 0 -and
+                [Windows.Controls.Grid]::GetColumnSpan($thirdSlot.Root) -eq 2
+            $removedMiddleSlot = [bool]$removeSplitSlot.Invoke(
+                $multiPortPage,
+                [object[]]@(2))
+            $slots = $multiPortSlotsField.GetValue($multiPortPage)
+            $existingSlotsPreserved =
+                [object]::ReferenceEquals($firstSlot, $slots[0]) -and
+                [object]::ReferenceEquals($thirdSlot, $slots[1]) -and
+                $slots[1].Index -eq 2 -and
+                $getSlotLogText.Invoke($firstSlot, $null).Contains('preserved single-pane log')
+
+            [void]$addSplitSlot.Invoke($multiPortPage, $null)
+            [void]$addSplitSlot.Invoke($multiPortPage, $null)
+            $rejectedFifthSlot = -not [bool]$addSplitSlot.Invoke($multiPortPage, $null)
+            $maximumIsFour = $multiPortPage.SlotCount -eq 4
+            $slots = $multiPortSlotsField.GetValue($multiPortPage)
+            $fourPaneLayoutPreserved =
+                [Windows.Controls.Grid]::GetRow($slots[0].Root) -eq 0 -and
+                [Windows.Controls.Grid]::GetColumn($slots[0].Root) -eq 0 -and
+                [Windows.Controls.Grid]::GetRow($slots[1].Root) -eq 0 -and
+                [Windows.Controls.Grid]::GetColumn($slots[1].Root) -eq 1 -and
+                [Windows.Controls.Grid]::GetRow($slots[2].Root) -eq 1 -and
+                [Windows.Controls.Grid]::GetColumn($slots[2].Root) -eq 0 -and
+                [Windows.Controls.Grid]::GetRow($slots[3].Root) -eq 1 -and
+                [Windows.Controls.Grid]::GetColumn($slots[3].Root) -eq 1
+            $closeButton = $closeButtonField.GetValue($firstSlot)
+            $multiPaneCloseVisible = $closeButton.Visibility.ToString() -eq 'Visible'
+            [void]$resizeSplitSlots.Invoke(
+                $multiPortPage,
+                [object[]]@(1))
+            $singlePaneCloseHidden = $closeButton.Visibility.ToString() -eq 'Collapsed'
+
+            Test-Condition (
+                $initialLogPreserved -and
+                $addedThirdSlot -and
+                $removedMiddleSlot -and
+                $existingSlotsPreserved -and
+                $threePaneLayoutPreserved
+            ) 'Adding and removing a selected split pane preserves all unaffected pane instances and logs'
+            Test-Condition (
+                $maximumIsFour -and
+                $rejectedFifthSlot -and
+                $fourPaneLayoutPreserved -and
+                $multiPaneCloseVisible -and
+                $singlePaneCloseHidden
+            ) 'Split panes are limited to four and the last pane cannot remove itself'
+        }
+        finally {
+            [void]$multiPortUnloaded.Invoke(
+                $multiPortPage,
+                [object[]]@($null, $null))
+        }
+
+        $circularSendPageType = $assembly.GetType('llcom_plus.Pages.CircularSendPage', $true)
+        $circularSendPage = [Activator]::CreateInstance($circularSendPageType)
+        $enableAllCheckBox = $circularSendPage.FindName('EnableAllCheckBox')
+        $circularItems = $circularSendPage.Items
+        $circularItems[0].IsSelected = $true
+        $circularItems[1].IsSelected = $false
+        $circularItems[2].IsSelected = $false
+        $mixedSelectionShown = $enableAllCheckBox.IsChecked -eq $null
+        $toggleCircularSelection = $circularSendPageType.GetMethod(
+            'ToggleSelectionFromHeader',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        [void]$toggleCircularSelection.Invoke($circularSendPage, $null)
+        $allCircularRowsSelected =
+            $enableAllCheckBox.IsChecked -eq $true -and
+            @($circularItems | Where-Object { -not $_.IsSelected }).Count -eq 0
+        [void]$toggleCircularSelection.Invoke($circularSendPage, $null)
+        $allCircularRowsCleared =
+            $enableAllCheckBox.IsChecked -eq $false -and
+            @($circularItems | Where-Object { $_.IsSelected }).Count -eq 0
+        Test-Condition (
+            $mixedSelectionShown -and
+            $allCircularRowsSelected -and
+            $allCircularRowsCleared
+        ) 'Circular-send header checkbox shows mixed state and toggles all rows'
 
         $calculatePopupOffset = $windowType.GetMethod(
             'CalculateNotificationPopupOffset',
@@ -344,6 +548,12 @@ $enNs = New-Object Xml.XmlNamespaceManager($en.NameTable)
 $enNs.AddNamespace('x', 'http://schemas.microsoft.com/winfx/2006/xaml')
 $enKeys = @($en.SelectNodes('//*[@x:Key]', $enNs) | ForEach-Object { $_.GetAttribute('Key', 'http://schemas.microsoft.com/winfx/2006/xaml') } | Sort-Object -Unique)
 Test-Condition (($zhKeys -join "`n") -eq ($enKeys -join "`n")) 'Chinese and English resource keys match'
+$settingWindowXaml = [IO.File]::ReadAllText(
+    (Join-Path $projectDir 'UI\View\SettingWindow.xaml'),
+    [Text.Encoding]::UTF8)
+Test-Condition (
+    -not $settingWindowXaml.Contains('serialSplitScreenCount')
+) 'Settings no longer exposes a split-pane count selector'
 
 if ($Configuration -eq 'Release') {
     $versionProps = [xml](Get-Content -LiteralPath (Join-Path $root 'Version.props'))

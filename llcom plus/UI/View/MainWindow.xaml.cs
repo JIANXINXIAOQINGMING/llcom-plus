@@ -91,6 +91,13 @@ namespace llcom_plus
             StartupProfiler.Mark("MainWindow ctor exit");
         }
         ObservableCollection<ToSendData> toSendListItems = new ObservableCollection<ToSendData>();
+        private const int QuickSendNavigationFirstColumn = 0;
+        private const int QuickSendNavigationLastColumn = 4;
+        private bool quickSendKeyboardNavigationMode = false;
+        private bool quickSendExplicitEditMode = false;
+        private int quickSendNavigationRowIndex = -1;
+        private int quickSendNavigationColumn = QuickSendNavigationFirstColumn;
+        private TextBox quickSendNavigationTextBox = null;
         private bool forcusClosePort = true;
         private bool canSaveSendList = true;
         private bool isOpeningPort = false;
@@ -326,6 +333,9 @@ namespace llcom_plus
             if (!ReferenceEquals(e.OriginalSource, MainTabControl))
                 return;
 
+            if (MainTabControl.SelectedItem != QuickSendTab)
+                ExitQuickSendKeyboardNavigation();
+
             if (MainTabControl.SelectedItem == ScriptTab)
                 EnsureScriptEditorInitialized();
             else if (MainTabControl.SelectedItem == ToolsTab)
@@ -414,6 +424,52 @@ namespace llcom_plus
             Dispatcher.BeginInvoke(new Action(ApplySerialSplitLayout));
         }
 
+        private void AddSerialSplitPaneButton_Click(object sender, RoutedEventArgs e)
+        {
+            var currentCount = mainSplitPortPage?.SlotCount ?? GetSerialSplitScreenCount();
+            if (currentCount >= 4)
+            {
+                UpdateAddSerialSplitPaneButton();
+                return;
+            }
+
+            if (mainSplitPortPage?.AddSlot() == true)
+                return;
+
+            Tools.Global.setting.serialSplitScreenCount = Math.Max(2, currentCount + 1);
+            ApplySerialSplitLayout();
+        }
+
+        private void MainSplitPortPage_SlotCountChanged(int count)
+        {
+            var normalizedCount = Math.Max(1, Math.Min(4, count));
+            appliedSerialSplitScreenCount = normalizedCount;
+            lastSerialSendTargetSlot = Math.Max(
+                1,
+                Math.Min(lastSerialSendTargetSlot, normalizedCount));
+
+            if (Tools.Global.setting.serialSplitScreenCount != normalizedCount)
+                Tools.Global.setting.serialSplitScreenCount = normalizedCount;
+
+            RefreshSerialSplitTargetSelector(normalizedCount);
+            UpdateAddSerialSplitPaneButton();
+            UpdateMainPaneMinimum();
+            UpdateSelectedSplitSlotControls();
+        }
+
+        private void UpdateAddSerialSplitPaneButton()
+        {
+            if (AddSerialSplitPaneButton == null)
+                return;
+
+            var count = mainSplitPortPage?.SlotCount ?? GetSerialSplitScreenCount();
+            var canAdd = count < 4;
+            AddSerialSplitPaneButton.IsEnabled = canAdd;
+            AddSerialSplitPaneButton.ToolTip = TryFindResource(
+                canAdd ? "AddSerialSplitPaneTip" : "AddSerialSplitPaneMaximumTip") as string ??
+                (canAdd ? "新增一个串口分屏，最多支持 4 个。" : "已达到最多 4 个分屏。");
+        }
+
         private int GetSerialSplitScreenCount()
         {
             return Math.Max(1, Math.Min(4, Tools.Global.setting?.serialSplitScreenCount ?? 1));
@@ -421,12 +477,12 @@ namespace llcom_plus
 
         private bool IsSerialSplitModeRequested()
         {
-            return GetSerialSplitScreenCount() > 1;
+            return mainSplitPortPage != null || GetSerialSplitScreenCount() > 1;
         }
 
         private bool IsSerialSplitModeActive()
         {
-            return mainSplitPortPage != null && appliedSerialSplitScreenCount > 1;
+            return mainSplitPortPage != null && appliedSerialSplitScreenCount >= 1;
         }
 
         private void ApplySerialSplitLayout()
@@ -436,6 +492,25 @@ namespace llcom_plus
 
             var count = GetSerialSplitScreenCount();
             UpdateMainPaneMinimum();
+
+            // 已进入分屏页面后直接原地调整 PortSlot，不能重建页面，否则其它
+            // 分屏的串口连接、日志和滚动位置都会丢失。
+            if (mainSplitPortPage != null &&
+                ReferenceEquals(dataShowFrame.Content, mainSplitPortPage))
+            {
+                mainSplitPortPage.ResizeSlotCount(count);
+                appliedSerialSplitScreenCount = mainSplitPortPage.SlotCount;
+                serialSplitSendTargetPanel.Visibility = Visibility.Visible;
+                RefreshSerialSplitTargetSelector(appliedSerialSplitScreenCount);
+                serialSplitSendTargetComboBox.IsEnabled =
+                    ShouldEnableSendTargetSelector(appliedSerialSplitScreenCount);
+                UpdateAddSerialSplitPaneButton();
+                if (!IsMainSendTargetSelected())
+                    mainSplitPortPage.SetActiveSlot(GetSelectedSerialSplitSlot());
+                UpdateSelectedSplitSlotControls();
+                return;
+            }
+
             RefreshSerialSplitTargetSelector(count);
 
             if (count <= 1)
@@ -445,6 +520,7 @@ namespace llcom_plus
                     serialSplitSendTargetPanel.Visibility = Visibility.Visible;
                     serialSplitSendTargetComboBox.IsEnabled = ShouldEnableSendTargetSelector(count);
                     SetMainSerialControlsEnabled(true);
+                    UpdateAddSerialSplitPaneButton();
                     return;
                 }
 
@@ -453,6 +529,7 @@ namespace llcom_plus
                 if (mainSplitPortPage != null)
                 {
                     mainSplitPortPage.ActiveSlotChanged -= MainSplitPortPage_ActiveSlotChanged;
+                    mainSplitPortPage.SlotCountChanged -= MainSplitPortPage_SlotCountChanged;
                     // 必须在切换回单屏页面之前同步关闭并 Dispose 所有分屏串口，
                     // 不能再依赖旧页面稍后触发的 Unloaded。
                     mainSplitPortPage.ReleaseAllPortsForLayoutChange();
@@ -463,6 +540,7 @@ namespace llcom_plus
                     dataShowFrame.Navigate(new Uri("UI/Pages/DataShowPage.xaml", UriKind.Relative));
                 SetMainSerialControlsEnabled(true);
                 UpdateMainSerialConnectionStatus();
+                UpdateAddSerialSplitPaneButton();
                 return;
             }
 
@@ -471,27 +549,29 @@ namespace llcom_plus
             var initialFirstPortName = mainSplitPortPage?.GetSlotPortName(1);
             if (string.IsNullOrWhiteSpace(initialFirstPortName))
                 initialFirstPortName = GetSelectedPortName();
+            var initialFirstLogText =
+                (dataShowFrame.Content as Pages.DataShowPage)?.GetLogTextSnapshot() ??
+                string.Empty;
 
             // 分屏串口全部使用独立 SerialPort。进入分屏前必须释放主大屏的
             // Global.uart，否则它仍会占用旧端口并把收发事件错误投到窗口 1。
             if (!ReleaseMainSerialPortBeforeSplit())
                 return;
 
-            if (mainSplitPortPage != null && appliedSerialSplitScreenCount != count)
+            if (mainSplitPortPage == null)
             {
-                mainSplitPortPage.ActiveSlotChanged -= MainSplitPortPage_ActiveSlotChanged;
-                mainSplitPortPage.ReleaseAllPortsForLayoutChange();
-                mainSplitPortPage = null;
-            }
-
-            if (mainSplitPortPage == null || appliedSerialSplitScreenCount != count)
-            {
-                mainSplitPortPage = new Pages.MultiPortPage(count, false, initialFirstPortName);
+                mainSplitPortPage = new Pages.MultiPortPage(
+                    count,
+                    false,
+                    initialFirstPortName,
+                    initialFirstLogText);
                 mainSplitPortPage.ActiveSlotChanged += MainSplitPortPage_ActiveSlotChanged;
+                mainSplitPortPage.SlotCountChanged += MainSplitPortPage_SlotCountChanged;
                 dataShowFrame.Navigate(mainSplitPortPage);
                 appliedSerialSplitScreenCount = count;
             }
 
+            UpdateAddSerialSplitPaneButton();
             if (!IsMainSendTargetSelected())
                 mainSplitPortPage.SetActiveSlot(GetSelectedSerialSplitSlot());
             UpdateSelectedSplitSlotControls();
@@ -1153,6 +1233,7 @@ namespace llcom_plus
 
         private void LoadQuickSendList()
         {
+            ExitQuickSendKeyboardNavigation();
             NormalizeQuickSendRows();
             toSendListItems.Clear();
             foreach (var i in Tools.Global.setting.quickSend)
@@ -1194,7 +1275,7 @@ namespace llcom_plus
                     {
                         item.text = "";
                         item.hex = false;
-                        item.appendCrlf = false;
+                        item.appendCrlf = true;
                         item.disableSuggestion = false;
                     }
 
@@ -2921,6 +3002,7 @@ namespace llcom_plus
             if (item == null)
                 return;
 
+            ExitQuickSendKeyboardNavigation();
             if (toSendListItems.Count <= 1)
             {
                 ClearQuickSendItem(item, 1);
@@ -2947,7 +3029,7 @@ namespace llcom_plus
                     commit = TryFindResource("QuickSendButton") as string ?? "?!",
                     recvScriptPath = "",
                     recvScriptPara = "",
-                    appendCrlf = false,
+                    appendCrlf = true,
                     disableSuggestion = false
                 };
             }
@@ -2972,7 +3054,7 @@ namespace llcom_plus
                 item.commit = TryFindResource("QuickSendButton") as string ?? "?!";
                 item.recvScriptPath = "";
                 item.recvScriptPara = "";
-                item.appendCrlf = false;
+                item.appendCrlf = true;
                 item.disableSuggestion = false;
             }
             finally
@@ -2985,7 +3067,6 @@ namespace llcom_plus
         {
             return item != null &&
                    (!string.IsNullOrWhiteSpace(item.text) ||
-                    item.appendCrlf ||
                     !string.IsNullOrWhiteSpace(item.recvScriptPath) ||
                     !string.IsNullOrWhiteSpace(item.recvScriptPara));
         }
@@ -2993,6 +3074,315 @@ namespace llcom_plus
         private void knowSendDataButton_click(object sender, RoutedEventArgs e)
         {
             SendQuickSendItem(((Button)sender).Tag as ToSendData);
+        }
+
+        private void QuickSendList_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            var data = GetQuickSendDataFromSource(e.OriginalSource as DependencyObject);
+
+            if (!quickSendKeyboardNavigationMode)
+            {
+                if (quickSendExplicitEditMode)
+                {
+                    if (key == Key.Escape && data != null)
+                    {
+                        BeginQuickSendKeyboardNavigation(data, QuickSendNavigationFirstColumn);
+                        e.Handled = true;
+                    }
+                    return;
+                }
+
+                if (!IsQuickSendNavigationKey(key) || data == null)
+                    return;
+
+                var column = GetQuickSendNavigationColumnFromSource(e.OriginalSource as DependencyObject);
+                if (column < QuickSendNavigationFirstColumn)
+                    return;
+
+                // The first arrow key only changes edit mode into browse mode.
+                BeginQuickSendKeyboardNavigation(data, column);
+                e.Handled = true;
+                return;
+            }
+
+            if (quickSendNavigationRowIndex < 0 ||
+                quickSendNavigationRowIndex >= toSendListItems.Count)
+            {
+                ExitQuickSendKeyboardNavigation();
+                return;
+            }
+
+            data = toSendListItems[quickSendNavigationRowIndex];
+            switch (key)
+            {
+                case Key.Up:
+                    MoveQuickSendNavigationRow(-1);
+                    e.Handled = true;
+                    break;
+                case Key.Down:
+                    MoveQuickSendNavigationRow(1);
+                    e.Handled = true;
+                    break;
+                case Key.Left:
+                    MoveQuickSendNavigationColumn(-1);
+                    e.Handled = true;
+                    break;
+                case Key.Right:
+                    MoveQuickSendNavigationColumn(1);
+                    e.Handled = true;
+                    break;
+                case Key.Enter:
+                    SendQuickSendItem(data);
+                    e.Handled = true;
+                    break;
+                case Key.Space:
+                    ActivateQuickSendNavigationCell(data);
+                    e.Handled = true;
+                    break;
+                case Key.Escape:
+                    ExitQuickSendKeyboardNavigation();
+                    e.Handled = true;
+                    break;
+            }
+        }
+
+        private void QuickSendTextBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            ExitQuickSendKeyboardNavigation();
+            quickSendExplicitEditMode = false;
+        }
+
+        private static bool IsQuickSendNavigationKey(Key key)
+        {
+            return key == Key.Up ||
+                key == Key.Down ||
+                key == Key.Left ||
+                key == Key.Right;
+        }
+
+        private static int GetWrappedQuickSendRowIndex(int currentIndex, int delta, int rowCount)
+        {
+            if (rowCount <= 0)
+                return -1;
+
+            var normalizedIndex = currentIndex;
+            if (normalizedIndex < 0 || normalizedIndex >= rowCount)
+                normalizedIndex = 0;
+
+            return (normalizedIndex + delta % rowCount + rowCount) % rowCount;
+        }
+
+        private static int GetClampedQuickSendNavigationColumn(int currentColumn, int delta)
+        {
+            return Math.Max(
+                QuickSendNavigationFirstColumn,
+                Math.Min(QuickSendNavigationLastColumn, currentColumn + delta));
+        }
+
+        private void BeginQuickSendKeyboardNavigation(ToSendData data, int column)
+        {
+            var rowIndex = data == null ? -1 : toSendListItems.IndexOf(data);
+            if (rowIndex < 0)
+                return;
+
+            quickSendExplicitEditMode = false;
+            quickSendKeyboardNavigationMode = true;
+            quickSendNavigationRowIndex = rowIndex;
+            quickSendNavigationColumn = Math.Max(
+                QuickSendNavigationFirstColumn,
+                Math.Min(QuickSendNavigationLastColumn, column));
+            FocusQuickSendNavigationCell();
+        }
+
+        private void MoveQuickSendNavigationRow(int delta)
+        {
+            var nextRow = GetWrappedQuickSendRowIndex(
+                quickSendNavigationRowIndex,
+                delta,
+                toSendListItems.Count);
+            if (nextRow < 0)
+                return;
+
+            quickSendNavigationRowIndex = nextRow;
+            FocusQuickSendNavigationCell();
+        }
+
+        private void MoveQuickSendNavigationColumn(int delta)
+        {
+            var nextColumn = GetClampedQuickSendNavigationColumn(
+                quickSendNavigationColumn,
+                delta);
+            if (nextColumn == quickSendNavigationColumn)
+                return;
+
+            quickSendNavigationColumn = nextColumn;
+            FocusQuickSendNavigationCell();
+        }
+
+        private void ActivateQuickSendNavigationCell(ToSendData data)
+        {
+            switch (quickSendNavigationColumn)
+            {
+                case 0:
+                    var textBox = GetQuickSendNavigationElement(
+                        quickSendNavigationRowIndex,
+                        QuickSendNavigationFirstColumn) as TextBox;
+                    ExitQuickSendKeyboardNavigation();
+                    quickSendExplicitEditMode = true;
+                    if (textBox != null)
+                    {
+                        textBox.IsReadOnly = false;
+                        textBox.Focus();
+                        Keyboard.Focus(textBox);
+                        textBox.CaretIndex = textBox.Text?.Length ?? 0;
+                    }
+                    break;
+                case 1:
+                    SendQuickSendItem(data);
+                    break;
+                case 2:
+                    data.hex = !data.hex;
+                    break;
+                case 3:
+                    data.appendCrlf = !data.appendCrlf;
+                    break;
+                case 4:
+                    data.disableSuggestion = !data.disableSuggestion;
+                    break;
+            }
+        }
+
+        private void FocusQuickSendNavigationCell()
+        {
+            RestoreQuickSendNavigationTextBox();
+            if (quickSendNavigationRowIndex < 0 ||
+                quickSendNavigationRowIndex >= toSendListItems.Count)
+            {
+                return;
+            }
+
+            toSendList.SelectedIndex = quickSendNavigationRowIndex;
+            var target = GetQuickSendNavigationElement(
+                quickSendNavigationRowIndex,
+                quickSendNavigationColumn);
+            if (target == null)
+                return;
+
+            if (target is TextBox textBox)
+            {
+                textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+                textBox.IsReadOnly = true;
+                textBox.Cursor = Cursors.Arrow;
+                quickSendNavigationTextBox = textBox;
+            }
+
+            target.Focus();
+            Keyboard.Focus(target);
+        }
+
+        private FrameworkElement GetQuickSendNavigationElement(int rowIndex, int column)
+        {
+            if (rowIndex < 0 || rowIndex >= toSendListItems.Count)
+                return null;
+
+            var item = toSendListItems[rowIndex];
+            toSendList.ScrollIntoView(item);
+            toSendList.UpdateLayout();
+            var container = toSendList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem;
+            if (container == null)
+                return null;
+
+            container.ApplyTemplate();
+            var elementName = column == 0
+                ? "QuickSendRowTextBox"
+                : column == 1
+                    ? "QuickSendRowSendButton"
+                    : column == 2
+                        ? "QuickSendRowHexCheckBox"
+                        : column == 3
+                            ? "QuickSendRowCrlfCheckBox"
+                            : "QuickSendRowExcludeCheckBox";
+            return container.Template.FindName(elementName, container) as FrameworkElement;
+        }
+
+        private static ToSendData GetQuickSendDataFromSource(DependencyObject source)
+        {
+            var current = source;
+            while (current != null)
+            {
+                if (current is FrameworkElement element &&
+                    element.DataContext is ToSendData data)
+                {
+                    return data;
+                }
+
+                current = GetQuickSendNavigationParent(current);
+            }
+
+            return null;
+        }
+
+        private static int GetQuickSendNavigationColumnFromSource(DependencyObject source)
+        {
+            var current = source;
+            while (current != null)
+            {
+                if (current is FrameworkElement element)
+                {
+                    switch (element.Name)
+                    {
+                        case "QuickSendRowTextBox":
+                            return 0;
+                        case "QuickSendRowSendButton":
+                            return 1;
+                        case "QuickSendRowHexCheckBox":
+                            return 2;
+                        case "QuickSendRowCrlfCheckBox":
+                            return 3;
+                        case "QuickSendRowExcludeCheckBox":
+                            return 4;
+                    }
+                }
+
+                current = GetQuickSendNavigationParent(current);
+            }
+
+            return -1;
+        }
+
+        private void ExitQuickSendKeyboardNavigation()
+        {
+            RestoreQuickSendNavigationTextBox();
+            quickSendKeyboardNavigationMode = false;
+            quickSendExplicitEditMode = false;
+            quickSendNavigationRowIndex = -1;
+            quickSendNavigationColumn = QuickSendNavigationFirstColumn;
+        }
+
+        private static DependencyObject GetQuickSendNavigationParent(DependencyObject child)
+        {
+            if (child is Visual ||
+                child is System.Windows.Media.Media3D.Visual3D)
+            {
+                return VisualTreeHelper.GetParent(child);
+            }
+
+            if (child is ContentElement contentElement)
+                return ContentOperations.GetParent(contentElement) ??
+                    (contentElement as FrameworkContentElement)?.Parent;
+
+            return null;
+        }
+
+        private void RestoreQuickSendNavigationTextBox()
+        {
+            if (quickSendNavigationTextBox == null)
+                return;
+
+            quickSendNavigationTextBox.IsReadOnly = false;
+            quickSendNavigationTextBox.ClearValue(CursorProperty);
+            quickSendNavigationTextBox = null;
         }
 
         private void QuickSendTextBox_PreviewKeyDown(object sender, KeyEventArgs e)

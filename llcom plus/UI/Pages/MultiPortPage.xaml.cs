@@ -25,7 +25,7 @@ namespace llcom_plus.Pages
         private const int MaxSlotCount = 4;
         private const int MaxLogCharsPerSlot = 256 * 1024;
         private const int LogTrimChars = 64 * 1024;
-        private readonly int slotCount;
+        private int slotCount;
         private readonly bool showSlotSendPanel;
         private readonly List<PortSlot> slots = new List<PortSlot>();
         private bool slotsCreated;
@@ -37,19 +37,31 @@ namespace llcom_plus.Pages
         private int activeSlotNumber = 1;
         private Window ownerWindow;
         private string initialFirstPortName;
+        private string initialFirstLogText;
 
         public event Action<int> ActiveSlotChanged;
-        public int SlotCount => slotCount;
+        public event Action<int> SlotCountChanged;
+        public int SlotCount => slotsCreated ? slots.Count : slotCount;
 
         public MultiPortPage() : this(MaxSlotCount, true, null)
         {
         }
 
         public MultiPortPage(int slotCount, bool showSlotSendPanel = true, string initialFirstPortName = null)
+            : this(slotCount, showSlotSendPanel, initialFirstPortName, null)
+        {
+        }
+
+        public MultiPortPage(
+            int slotCount,
+            bool showSlotSendPanel,
+            string initialFirstPortName,
+            string initialFirstLogText)
         {
             this.slotCount = Math.Max(1, Math.Min(MaxSlotCount, slotCount));
             this.showSlotSendPanel = showSlotSendPanel;
             this.initialFirstPortName = NormalizePortName(initialFirstPortName);
+            this.initialFirstLogText = initialFirstLogText ?? string.Empty;
             InitializeComponent();
             ToolbarPanel.Visibility = showSlotSendPanel ? Visibility.Visible : Visibility.Collapsed;
             ExternalOptionsButton.Visibility = Visibility.Collapsed;
@@ -60,15 +72,14 @@ namespace llcom_plus.Pages
             if (!slotsCreated)
             {
                 slotsCreated = true;
-                ConfigureGridLayout();
                 for (var i = 0; i < slotCount; i++)
                 {
                     // 分屏中的每一路都拥有独立 SerialPort。串口 1 不再复用主大屏
                     // 的 Global.uart，避免继承旧端口的打开状态和收发事件。
                     var slot = new PortSlot(this, i + 1, false);
                     slots.Add(slot);
-                    AddSlotToGrid(slot);
                 }
+                RebuildGridLayout();
             }
 
             if (!subscribedProgramClosed)
@@ -85,23 +96,111 @@ namespace llcom_plus.Pages
                 ownerWindow.Deactivated += OwnerWindow_Deactivated;
             }
             RefreshPorts();
-            ApplyInitialFirstPort();
+            ApplyInitialFirstState();
             UpdateStatus();
             ActiveSlotChanged?.Invoke(activeSlotNumber);
         }
 
-        private void ApplyInitialFirstPort()
+        private void ApplyInitialFirstState()
         {
-            if (string.IsNullOrWhiteSpace(initialFirstPortName))
-                return;
-
             var slot = GetSlot(1);
-            if (slot != null && !slot.IsOpen)
+            if (slot != null &&
+                !slot.IsOpen &&
+                !string.IsNullOrWhiteSpace(initialFirstPortName))
             {
                 slot.SetPortName(initialFirstPortName);
                 ApplyPortProfile(slot);
             }
+
+            if (slot != null && !string.IsNullOrEmpty(initialFirstLogText))
+                slot.SetLogTextSnapshot(initialFirstLogText);
+
             initialFirstPortName = string.Empty;
+            initialFirstLogText = string.Empty;
+        }
+
+        public bool AddSlot()
+        {
+            if (showSlotSendPanel || SlotCount >= MaxSlotCount)
+                return false;
+
+            AddSlotCore();
+            SlotCountChanged?.Invoke(SlotCount);
+            SetActiveSlot(SlotCount, true);
+            return true;
+        }
+
+        public bool RemoveSlot(int slotNumber)
+        {
+            if (showSlotSendPanel || SlotCount <= 1)
+                return false;
+
+            if (!RemoveSlotCore(slotNumber))
+                return false;
+
+            SlotCountChanged?.Invoke(SlotCount);
+            ActiveSlotChanged?.Invoke(activeSlotNumber);
+            return true;
+        }
+
+        public void ResizeSlotCount(int requestedCount)
+        {
+            var normalizedCount = Math.Max(1, Math.Min(MaxSlotCount, requestedCount));
+            if (!slotsCreated)
+            {
+                slotCount = normalizedCount;
+                return;
+            }
+
+            while (slots.Count < normalizedCount)
+                AddSlotCore();
+            while (slots.Count > normalizedCount)
+                RemoveSlotCore(slots.Count);
+
+            activeSlotNumber = Math.Max(1, Math.Min(activeSlotNumber, SlotCount));
+            RefreshExternalControls();
+            UpdateStatus();
+        }
+
+        private void AddSlotCore()
+        {
+            var slot = new PortSlot(this, slots.Count + 1, false);
+            slots.Add(slot);
+            slotCount = slots.Count;
+            slot.RefreshPorts(GetPortNames());
+            ApplyPortProfile(slot);
+            if (Global.setting?.sessionLogEnabled == true)
+                slot.RestartSessionLog();
+            RebuildGridLayout();
+            UpdateStatus();
+        }
+
+        private bool RemoveSlotCore(int slotNumber)
+        {
+            var index = slotNumber - 1;
+            if (index < 0 || index >= slots.Count || slots.Count <= 1)
+                return false;
+
+            var slot = slots[index];
+            slot.Close(waitForDispose: true);
+            slot.DisposeOwnedPort();
+            SlotsGrid.Children.Remove(slot.Root);
+            slots.RemoveAt(index);
+
+            for (var i = 0; i < slots.Count; i++)
+                slots[i].SetIndex(i + 1);
+
+            slotCount = slots.Count;
+            if (activeSlotNumber > slotNumber)
+                activeSlotNumber--;
+            else if (activeSlotNumber == slotNumber)
+                activeSlotNumber = Math.Min(slotNumber, slotCount);
+            activeSlotNumber = Math.Max(1, activeSlotNumber);
+
+            RebuildGridLayout();
+            RefreshExternalControls();
+            UpdateStatus();
+            return true;
         }
 
         private void BindExternalGlobalOptions()
@@ -175,8 +274,20 @@ namespace llcom_plus.Pages
                 SlotsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         }
 
+        private void RebuildGridLayout()
+        {
+            ConfigureGridLayout();
+            foreach (var slot in slots)
+            {
+                AddSlotToGrid(slot);
+                slot.UpdateCloseButtonVisibility();
+            }
+        }
+
         private void AddSlotToGrid(PortSlot slot)
         {
+            Grid.SetRowSpan(slot.Root, 1);
+            Grid.SetColumnSpan(slot.Root, 1);
             if (slotCount == 1)
             {
                 Grid.SetRow(slot.Root, 0);
@@ -726,6 +837,7 @@ namespace llcom_plus.Pages
             private readonly Button openButton = new Button();
             private readonly Button clearButton = new Button();
             private readonly Button sendButton = new Button();
+            private readonly Button closeButton = new Button();
             private readonly RichTextBox logTextBox = new RichTextBox();
             private readonly TextBox sendTextBox = new TextBox();
             private readonly TextBlock titleTextBlock = new TextBlock();
@@ -758,7 +870,7 @@ namespace llcom_plus.Pages
                 }
             }
 
-            public int Index { get; }
+            public int Index { get; private set; }
             public Border Root { get; }
             public string DisplayTitle => titleTextBlock.Text ?? string.Format("Port {0}", Index);
             public bool UsesMainUart => useMainUart;
@@ -830,6 +942,20 @@ namespace llcom_plus.Pages
             {
                 get { return hexCheckBox.IsChecked == true; }
                 set { hexCheckBox.IsChecked = value; }
+            }
+
+            public void SetIndex(int index)
+            {
+                Index = Math.Max(1, index);
+                UpdateTitle();
+            }
+
+            public void UpdateCloseButtonVisibility()
+            {
+                closeButton.Visibility =
+                    !owner.showSlotSendPanel && owner.SlotCount > 1
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
             }
 
             public void RefreshPorts(string[] ports)
@@ -1015,10 +1141,23 @@ namespace llcom_plus.Pages
                 grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
                 grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+                var header = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 titleTextBlock.FontWeight = FontWeights.SemiBold;
-                titleTextBlock.Margin = new Thickness(0, 0, 0, 6);
-                Grid.SetRow(titleTextBlock, 0);
-                grid.Children.Add(titleTextBlock);
+                titleTextBlock.VerticalAlignment = VerticalAlignment.Center;
+                header.Children.Add(titleTextBlock);
+
+                closeButton.Content = "×";
+                closeButton.Margin = new Thickness(8, 0, 0, 0);
+                closeButton.ToolTip = owner.FindText("RemoveSerialSplitPaneTip", "删除这个分屏");
+                closeButton.SetResourceReference(FrameworkElement.StyleProperty, "SplitPaneCloseButtonStyle");
+                closeButton.Click += CloseButton_Click;
+                Grid.SetColumn(closeButton, 1);
+                header.Children.Add(closeButton);
+                Grid.SetRow(header, 0);
+                grid.Children.Add(header);
+                UpdateCloseButtonVisibility();
 
                 var options = new WrapPanel
                 {
@@ -1293,6 +1432,37 @@ namespace llcom_plus.Pages
             public string GetLogText()
             {
                 return new TextRange(logTextBox.Document.ContentStart, logTextBox.Document.ContentEnd).Text;
+            }
+
+            public void SetLogTextSnapshot(string text)
+            {
+                var snapshot = text ?? string.Empty;
+                if (snapshot.Length > MaxLogCharsPerSlot)
+                    snapshot = snapshot.Substring(snapshot.Length - MaxLogCharsPerSlot);
+
+                logTextBox.Document.Blocks.Clear();
+                logCharCount = snapshot.Length;
+                if (snapshot.Length == 0)
+                    return;
+
+                var paragraph = new Paragraph
+                {
+                    Margin = new Thickness(0),
+                    FontFamily = new FontFamily("Consolas"),
+                    FontSize = 13
+                };
+                paragraph.Inlines.Add(new Run(snapshot)
+                {
+                    Foreground = ResourceBrush("AppGlassTextBrush", Brushes.Black)
+                });
+                logTextBox.Document.Blocks.Add(paragraph);
+                logTextBox.ScrollToEnd();
+            }
+
+            private void CloseButton_Click(object sender, RoutedEventArgs e)
+            {
+                owner.RemoveSlot(Index);
+                e.Handled = true;
             }
 
             private async void SendButton_Click(object sender, RoutedEventArgs e)

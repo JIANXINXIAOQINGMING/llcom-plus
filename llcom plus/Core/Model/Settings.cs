@@ -497,7 +497,6 @@ namespace llcom_plus.Model
             return item == null ||
                    (string.IsNullOrWhiteSpace(item.text) &&
                     !item.hex &&
-                    !item.appendCrlf &&
                     string.IsNullOrWhiteSpace(item.recvScriptPath) &&
                     string.IsNullOrWhiteSpace(item.recvScriptPara));
         }
@@ -598,7 +597,7 @@ namespace llcom_plus.Model
                     id = i + 1,
                     text = "",
                     hex = false,
-                    appendCrlf = false,
+                    appendCrlf = true,
                     commit = ""
                 });
             }
