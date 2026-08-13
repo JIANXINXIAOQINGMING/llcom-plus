@@ -8,6 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName PresentationCore
 
 $resolvedIconPath = (Resolve-Path -LiteralPath $IconPath).Path
 $resolvedImagesPath = (Resolve-Path -LiteralPath $ImagesPath).Path
@@ -60,9 +61,21 @@ function Save-PngIfChanged {
         [string]$Path
     )
 
+    $gdiStream = [System.IO.MemoryStream]::new()
     $stream = [System.IO.MemoryStream]::new()
     try {
-        $Bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+        # GDI+ emits unusually large transparent PNGs for high-scale tiles. Re-encode
+        # the same pixels through Windows Imaging Component so MSIX assets stay below
+        # the 204,800-byte manifest limit without shrinking or degrading the artwork.
+        $Bitmap.Save($gdiStream, [System.Drawing.Imaging.ImageFormat]::Png)
+        $gdiStream.Position = 0
+        $decoder = [System.Windows.Media.Imaging.PngBitmapDecoder]::new(
+            $gdiStream,
+            [System.Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat,
+            [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+        $encoder = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
+        $encoder.Frames.Add($decoder.Frames[0])
+        $encoder.Save($stream)
         $newBytes = $stream.ToArray()
 
         if ((Test-Path -LiteralPath $Path)) {
@@ -83,6 +96,7 @@ function Save-PngIfChanged {
         [System.IO.File]::WriteAllBytes($Path, $newBytes)
     }
     finally {
+        $gdiStream.Dispose()
         $stream.Dispose()
     }
 }

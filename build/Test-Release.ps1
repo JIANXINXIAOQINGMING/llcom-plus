@@ -61,10 +61,61 @@ finally {
     $appIcon.Dispose()
 }
 
+$taskbarIconPath = Join-Path $outputDir 'llcom-plus-taskbar-v2.ico'
+Test-Condition (Test-Path -LiteralPath $taskbarIconPath) 'Dedicated taskbar pin icon exists'
+if (Test-Path -LiteralPath $taskbarIconPath) {
+    $sourceIconPath = Join-Path $projectDir 'Resources\Assets\AppIcon.ico'
+    Test-Condition (
+        (Get-FileHash -LiteralPath $taskbarIconPath -Algorithm SHA256).Hash -eq
+            (Get-FileHash -LiteralPath $sourceIconPath -Algorithm SHA256).Hash
+    ) 'Dedicated taskbar pin icon matches the current application icon'
+}
+
 Push-Location $outputDir
 try {
     [void][Reflection.Assembly]::LoadFrom((Join-Path $outputDir 'Newtonsoft.Json.dll'))
     $assembly = [Reflection.Assembly]::LoadFrom($exePath)
+
+    $taskbarType = $assembly.GetType('llcom_plus.Tools.TaskbarIntegration', $true)
+    $taskbarFlags = [Reflection.BindingFlags]'NonPublic,Static'
+    $appUserModelId = $taskbarType.GetField('AppUserModelId', $taskbarFlags).GetRawConstantValue()
+    $taskbarIconFileName = $taskbarType.GetField('TaskbarIconFileName', $taskbarFlags).GetRawConstantValue()
+    Test-Condition (
+        $appUserModelId -eq 'LawrenceLiu.LlcomPlus' -and
+        -not $appUserModelId.Contains(' ')
+    ) 'Portable build exposes a stable version-independent AppUserModelID'
+    Test-Condition (
+        $taskbarIconFileName -eq 'llcom-plus-taskbar-v2.ico'
+    ) 'Taskbar relaunch identity uses the cache-busting icon file'
+
+    $buildRelaunchCommand = $taskbarType.GetMethod('BuildRelaunchCommand', $taskbarFlags)
+    $relaunchCommandArguments = New-Object object[] 1
+    $relaunchCommandArguments[0] = [string]$exePath
+    $relaunchCommand = $buildRelaunchCommand.Invoke($null, $relaunchCommandArguments)
+    Test-Condition (
+        $relaunchCommand -eq ('"' + $exePath + '"')
+    ) 'Pinned taskbar shortcut relaunches the current executable path'
+
+    $buildRelaunchIcon = $taskbarType.GetMethod('BuildRelaunchIconResource', $taskbarFlags)
+    $relaunchIconArguments = New-Object object[] 2
+    $relaunchIconArguments[0] = [string]$outputDir
+    $relaunchIconArguments[1] = [string]$exePath
+    $relaunchIcon = $buildRelaunchIcon.Invoke($null, $relaunchIconArguments)
+    Test-Condition (
+        $relaunchIcon -eq ($taskbarIconPath + ',0')
+    ) 'Pinned taskbar shortcut explicitly uses the current icon'
+
+    $programSource = [IO.File]::ReadAllText((Join-Path $projectDir 'Program.cs'))
+    Test-Condition (
+        $programSource.IndexOf('TaskbarIntegration.InitializeProcessIdentity', [StringComparison]::Ordinal) -ge 0 -and
+        $programSource.IndexOf('TaskbarIntegration.InitializeProcessIdentity', [StringComparison]::Ordinal) -lt
+            $programSource.IndexOf('new App()', [StringComparison]::Ordinal)
+    ) 'Taskbar process identity is assigned before WPF creates UI'
+
+    $mainWindowSource = [IO.File]::ReadAllText((Join-Path $projectDir 'UI\View\MainWindow.xaml.cs'))
+    Test-Condition (
+        $mainWindowSource.Contains('TaskbarIntegration.ConfigureWindow(this)')
+    ) 'Main window publishes taskbar relaunch and pinning properties'
 
     $calculatorType = $assembly.GetType('llcom_plus.Tools.DataCalcCalculator', $true)
     $calculate = $calculatorType.GetMethod('Calculate', [Reflection.BindingFlags]'Public,Static')
@@ -642,6 +693,13 @@ Test-Condition (
     -not $settingWindowXaml.Contains('serialSplitScreenCount')
 ) 'Settings no longer exposes a split-pane count selector'
 
+$largestAppxIcon = Get-ChildItem -LiteralPath (Join-Path $root 'WapProj\Images') -Filter '*.png' |
+    Sort-Object Length -Descending |
+    Select-Object -First 1
+Test-Condition (
+    $null -ne $largestAppxIcon -and $largestAppxIcon.Length -le 204800
+) 'Generated MSIX icon assets stay within the manifest file-size limit'
+
 if ($Configuration -eq 'Release') {
     $versionProps = [xml](Get-Content -LiteralPath (Join-Path $root 'Version.props'))
     $version = $versionProps.Project.PropertyGroup.AppVersion
@@ -652,6 +710,7 @@ if ($Configuration -eq 'Release') {
         $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
         try {
             Test-Condition ($null -ne $zip.GetEntry('llcom plus.exe')) 'Release ZIP contains the application'
+            Test-Condition ($null -ne $zip.GetEntry('llcom-plus-taskbar-v2.ico')) 'Release ZIP contains the dedicated taskbar icon'
             Test-Condition ($null -ne $zip.GetEntry('OpenSSL/openssl.exe')) 'Release ZIP contains OpenSSL'
             Test-Condition ($null -eq $zip.GetEntry('settings.json')) 'Release ZIP excludes settings.json'
             Test-Condition ($null -eq $zip.GetEntry('circular_send.json')) 'Release ZIP excludes circular_send.json'

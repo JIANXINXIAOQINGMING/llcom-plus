@@ -3724,6 +3724,7 @@ namespace llcom_plus
         }
         private void Window_SourceInitialized(object sender, EventArgs e)
         {
+            Tools.TaskbarIntegration.ConfigureWindow(this);
             var darkMode = Tools.Global.setting?.darkMode ?? Tools.Global.IsDarkTheme;
             Tools.Win32.ApplyWindowTheme(this, darkMode, false);
         }

@@ -286,6 +286,7 @@
     <Compile Include="Core\Tools\SshCli.cs" />
     <Compile Include="Core\Tools\SerialPinMonitor.cs" />
     <Compile Include="Core\Tools\StartupProfiler.cs" />
+    <Compile Include="Core\Tools\TaskbarIntegration.cs" />
     <Compile Include="Core\Tools\Win32.cs" />
     <Compile Include="Core\HttpTools\HeaderParser.cs" />
     <Compile Include="Core\HttpTools\HttpRequestService.cs" />
@@ -573,7 +574,10 @@
     <Copy SourceFiles="@(OpenSslSharedRuntimeFile)" DestinationFiles="@(OpenSslSharedRuntimeFile->'$(TargetDir)OpenSSL\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(OpenSslPlatformRuntimeFile)" DestinationFiles="@(OpenSslPlatformRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
-  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="CopyTaskbarIcon" AfterTargets="Build" DependsOnTargets="GenerateApplicationIcon">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Resources\Assets\AppIcon.ico" DestinationFiles="$(TargetDir)llcom-plus-taskbar-v2.ico" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles;CopyTaskbarIcon" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <ReleasePackageVersion>$(AppVersion)</ReleasePackageVersion>
       <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>

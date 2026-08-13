@@ -11,6 +11,10 @@ namespace llcom_plus
             StartupProfiler.Begin();
             StartupProfiler.Mark("Program.Main enter");
 
+            StartupProfiler.Measure(
+                "Program.Main taskbar identity",
+                TaskbarIntegration.InitializeProcessIdentity);
+
             var app = new App();
             StartupProfiler.Mark("Program.Main App created");
 
