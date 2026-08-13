@@ -37,13 +37,16 @@ jobs:
         run: |
           Remove-Item -Recurse -Force "${{ env.RELEASE_ARTIFACT_DIR }}" -ErrorAction SilentlyContinue
 
-      - name: Build
+      - name: Build x64
         run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x64 /v:normal
+
+      - name: Build x86
+        run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x86 /v:normal
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: llcom-plus-release-x64
+          name: llcom-plus-release
           path: artifacts/release/*.zip
           if-no-files-found: error
 

@@ -208,6 +208,7 @@ namespace llcom_plus.Pages
             if (showSlotSendPanel)
                 return;
 
+            ExternalOptionsButton.DataContext = Global.setting;
             ExtraEnterCheckBox.DataContext = Global.setting;
             EnterSendCheckBox.DataContext = Global.setting;
             EnableSymbolCheckBox.DataContext = Global.setting;
@@ -494,6 +495,11 @@ namespace llcom_plus.Pages
         {
             var slot = GetSlot(slotNumber);
             return slot?.SelectedPortName ?? "";
+        }
+
+        public string GetSlotLogTextSnapshot(int slotNumber)
+        {
+            return GetSlot(slotNumber)?.GetLogText() ?? string.Empty;
         }
 
         public void SetSlotPortName(int slotNumber, string portName)
@@ -1143,20 +1149,23 @@ namespace llcom_plus.Pages
 
                 var header = new Grid { Margin = new Thickness(0, 0, 0, 6) };
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 titleTextBlock.FontWeight = FontWeights.SemiBold;
                 titleTextBlock.VerticalAlignment = VerticalAlignment.Center;
                 header.Children.Add(titleTextBlock);
 
                 closeButton.Content = "×";
-                closeButton.Margin = new Thickness(8, 0, 0, 0);
+                closeButton.HorizontalAlignment = HorizontalAlignment.Right;
+                closeButton.VerticalAlignment = VerticalAlignment.Top;
+                closeButton.Margin = new Thickness(0, -16, -16, 0);
                 closeButton.ToolTip = owner.FindText("RemoveSerialSplitPaneTip", "删除这个分屏");
                 closeButton.SetResourceReference(FrameworkElement.StyleProperty, "SplitPaneCloseButtonStyle");
                 closeButton.Click += CloseButton_Click;
-                Grid.SetColumn(closeButton, 1);
-                header.Children.Add(closeButton);
                 Grid.SetRow(header, 0);
                 grid.Children.Add(header);
+                Grid.SetRow(closeButton, 0);
+                Grid.SetRowSpan(closeButton, 4);
+                Panel.SetZIndex(closeButton, 40);
+                grid.Children.Add(closeButton);
                 UpdateCloseButtonVisibility();
 
                 var options = new WrapPanel

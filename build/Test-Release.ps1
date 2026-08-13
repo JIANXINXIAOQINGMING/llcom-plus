@@ -52,9 +52,9 @@ try {
     $iconContentWidth = $maxIconX - $minIconX + 1
     $iconContentHeight = $maxIconY - $minIconY + 1
     Test-Condition (
-        $iconContentWidth -ge 26 -and
-        $iconContentHeight -ge 26
-    ) 'Application taskbar icon fills the 32-pixel icon frame'
+        $iconContentWidth -ge 30 -and
+        $iconContentHeight -ge 30
+    ) 'Application taskbar icon visibly fills the 32-pixel icon frame'
 }
 finally {
     $appIconBitmap.Dispose()
@@ -116,6 +116,7 @@ try {
     $serializedSettings = $serialize.Invoke($null, [object[]]@($settings))
     Test-Condition (-not $serializedSettings.Contains('do-not-persist')) 'TLS certificate password value is not serialized'
     Test-Condition (-not $serializedSettings.Contains('tcpClientSslClientCertPassword')) 'TLS certificate password field is not serialized'
+    Test-Condition ($settings.showSerialByteCounts) 'Serial byte counters remain visible by default'
 
     $migrationDir = Join-Path ([IO.Path]::GetTempPath()) ('llcom-settings-migration-' + [Guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($migrationDir)
@@ -139,6 +140,7 @@ try {
             Remove-Item -LiteralPath $migrationDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+    $profilePathField.SetValue($null, $outputDir + [IO.Path]::DirectorySeparatorChar)
 
     $openSslType = $assembly.GetType('llcom_plus.Tools.OpenSslCli', $true)
     $optionsType = $assembly.GetType('llcom_plus.Tools.OpenSslClientOptions', $true)
@@ -262,6 +264,14 @@ try {
             $skipForSameBaudRate
         ) 'Baud-rate notifications require an open port and an actual change'
 
+        $shouldUseSerialSplitPage = $windowType.GetMethod(
+            'ShouldUseSerialSplitPage',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        Test-Condition (
+            -not [bool]$shouldUseSerialSplitPage.Invoke($null, [object[]]@(1)) -and
+            [bool]$shouldUseSerialSplitPage.Invoke($null, [object[]]@(2))
+        ) 'A single remaining serial pane returns to the normal log page'
+
         $dataShowPageType = $assembly.GetType('llcom_plus.Pages.DataShowPage', $true)
         $controlLineHandler = $dataShowPageType.GetMethod(
             'ControlLineCheckBox_Click',
@@ -270,6 +280,12 @@ try {
         $dataShowPage = [Activator]::CreateInstance($dataShowPageType)
         $logOptionsButton = $dataShowPage.FindName('LogOptionsButton')
         $logOptionsPopup = $dataShowPage.FindName('LogOptionsPopup')
+        $showSerialByteCountsCheckBox = $dataShowPage.FindName('ShowSerialByteCountsCheckBox')
+        $serialByteCountPanel = $window.FindName('SerialByteCountPanel')
+        Test-Condition (
+            $null -ne $showSerialByteCountsCheckBox -and
+            $null -ne $serialByteCountPanel
+        ) 'Send options expose the status-bar TX/RX byte counter toggle'
         $logOptionsButton.IsChecked = $true
         $closeLogOptionsOnDeactivate = $dataShowPageType.GetMethod(
             'OwnerWindow_Deactivated',
@@ -313,6 +329,10 @@ try {
             $initialLogPreserved = $getSlotLogText.Invoke(
                 $firstSlot,
                 $null).Contains('preserved single-pane log')
+            $getSlotLogTextSnapshot = $multiPortPageType.GetMethod('GetSlotLogTextSnapshot')
+            $publicSlotLogSnapshotPreserved = $getSlotLogTextSnapshot.Invoke(
+                $multiPortPage,
+                [object[]]@(1)).Contains('preserved single-pane log')
 
             $addSplitSlot = $multiPortPageType.GetMethod('AddSlot')
             $removeSplitSlot = $multiPortPageType.GetMethod('RemoveSlot')
@@ -349,14 +369,41 @@ try {
                 [Windows.Controls.Grid]::GetRow($slots[3].Root) -eq 1 -and
                 [Windows.Controls.Grid]::GetColumn($slots[3].Root) -eq 1
             $closeButton = $closeButtonField.GetValue($firstSlot)
+            $externalByteCountsCheckBox = $multiPortPage.FindName('ExternalShowSerialByteCountsCheckBox')
             $multiPaneCloseVisible = $closeButton.Visibility.ToString() -eq 'Visible'
+            [void]$closeButton.ApplyTemplate()
+            $closeGlyphPrimary = $closeButton.Template.FindName('CloseGlyphPrimary', $closeButton)
+            $closeGlyphSecondary = $closeButton.Template.FindName('CloseGlyphSecondary', $closeButton)
+            $compactSolidRedCloseButton =
+                [string]$closeButton.Content -eq [string][char]0x00D7 -and
+                $closeButton.Width -eq 16 -and
+                $closeButton.BorderThickness.Left -eq 0 -and
+                $closeButton.Background -is [Windows.Media.SolidColorBrush] -and
+                $closeButton.Background.Color.A -eq 255 -and
+                $closeButton.Foreground.ToString() -eq '#FFFFFFFF' -and
+                $null -ne $closeGlyphPrimary -and
+                $null -ne $closeGlyphSecondary -and
+                $closeButton.HorizontalAlignment.ToString() -eq 'Right' -and
+                $closeButton.VerticalAlignment.ToString() -eq 'Top' -and
+                $closeButton.Margin.Top -lt 0 -and
+                $closeButton.Margin.Right -lt 0 -and
+                [Windows.Controls.Grid]::GetRowSpan($closeButton) -eq 4
             [void]$resizeSplitSlots.Invoke(
                 $multiPortPage,
                 [object[]]@(1))
             $singlePaneCloseHidden = $closeButton.Visibility.ToString() -eq 'Collapsed'
+            $createSingleSerialLogPage = $windowType.GetMethod(
+                'CreateSingleSerialLogPage',
+                [Reflection.BindingFlags]'NonPublic,Static')
+            $restoredSingleLogPage = $createSingleSerialLogPage.Invoke(
+                $null,
+                [object[]]@($multiPortPage))
+            $singlePaneHistoryRestored = $restoredSingleLogPage.GetLogTextSnapshot().Contains(
+                'preserved single-pane log')
 
             Test-Condition (
                 $initialLogPreserved -and
+                $publicSlotLogSnapshotPreserved -and
                 $addedThirdSlot -and
                 $removedMiddleSlot -and
                 $existingSlotsPreserved -and
@@ -367,14 +414,54 @@ try {
                 $rejectedFifthSlot -and
                 $fourPaneLayoutPreserved -and
                 $multiPaneCloseVisible -and
-                $singlePaneCloseHidden
-            ) 'Split panes are limited to four and the last pane cannot remove itself'
+                $compactSolidRedCloseButton -and
+                $null -ne $externalByteCountsCheckBox -and
+                $singlePaneCloseHidden -and
+                $singlePaneHistoryRestored
+            ) 'Split panes preserve the remaining history when returning to one pane'
         }
         finally {
             [void]$multiPortUnloaded.Invoke(
                 $multiPortPage,
                 [object[]]@($null, $null))
         }
+
+        $serialSplitCountField = $settingsType.GetField(
+            '_serialSplitScreenCount',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $applySerialSplitLayout = $windowType.GetMethod(
+            'ApplySerialSplitLayout',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $dataShowFrame = $window.FindName('dataShowFrame')
+        $mainSplitPortPageField = $windowType.GetField(
+            'mainSplitPortPage',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $pendingSingleSerialLogPageField = $windowType.GetField(
+            'pendingSingleSerialLogPage',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $serialSplitCountField.SetValue($settings, 2)
+        [void]$applySerialSplitLayout.Invoke($window, $null)
+        $runtimeSplitPage = $mainSplitPortPageField.GetValue($window)
+        $dataShowFrame = $windowType.GetField(
+            'dataShowFrame',
+            [Reflection.BindingFlags]'NonPublic,Instance').GetValue($window)
+        [void]$multiPortLoaded.Invoke(
+            $runtimeSplitPage,
+            [object[]]@($null, $null))
+        $runtimeSlots = $multiPortSlotsField.GetValue($runtimeSplitPage)
+        $runtimeSlots[0].SetLogTextSnapshot('real frame transition history')
+        [void]$runtimeSplitPage.RemoveSlot(2)
+        # Reproduce the queued duplicate notification that used to replace the
+        # first preserved page with a second blank page before navigation ended.
+        [void]$applySerialSplitLayout.Invoke($window, $null)
+        $runtimeSinglePage = $pendingSingleSerialLogPageField.GetValue($window)
+        $realFrameTransitionPreservesHistory =
+            $null -ne $runtimeSinglePage -and
+            $runtimeSinglePage.GetLogTextSnapshot().Contains('real frame transition history')
+        Test-Condition (
+            $realFrameTransitionPreservesHistory
+        ) 'Duplicate layout notifications preserve the pending single-pane history'
+        $serialSplitCountField.SetValue($settings, 1)
 
         $circularSendPageType = $assembly.GetType('llcom_plus.Pages.CircularSendPage', $true)
         $circularSendPage = [Activator]::CreateInstance($circularSendPageType)

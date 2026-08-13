@@ -417,6 +417,7 @@
                 FocusVisualStyle="{x:Null}"
                 GotFocus="uartDataFlowDocument_GotFocus"
                 LostFocus="uartDataFlowDocument_LostFocus"
+                Navigated="DataShowFrame_Navigated"
                 NavigationUIVisibility="Hidden"
                 PreviewKeyDown="uartDataFlowDocument_PreviewKeyDown"
                 PreviewTextInput="uartDataFlowDocument_PreviewTextInput" />
@@ -697,40 +698,45 @@
                             <TextBlock Name="statusTextBlock" Style="{StaticResource StatusValueStyle}" Text="{DynamicResource OpenPort_close}" />
                         </StackPanel>
                     </Button>
-                    <Border Margin="0,0,8,0" Style="{StaticResource StatusPillStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock
-                            Cursor="Cross"
-                            MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
-                            Style="{StaticResource StatusLabelStyle}"
-                            Text="{DynamicResource SentCount}"
-                            ToolTip="{DynamicResource ClearCountTip}" />
-                            <TextBlock
-                            Name="sentCountTextBlock"
-                            Cursor="Cross"
-                            MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
-                            Style="{StaticResource StatusValueStyle}"
-                            Text="{Binding SentCount}"
-                            ToolTip="{DynamicResource ClearCountTip}" />
-                        </StackPanel>
-                    </Border>
-                    <Border Style="{StaticResource StatusPillStyle}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock
-                            Cursor="Cross"
-                            MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
-                            Style="{StaticResource StatusLabelStyle}"
-                            Text="{DynamicResource ReceivedCount}"
-                            ToolTip="{DynamicResource ClearCountTip}" />
-                            <TextBlock
-                            Name="receivedCountTextBlock"
-                            Cursor="Cross"
-                            MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
-                            Style="{StaticResource StatusValueStyle}"
-                            Text="{Binding ReceivedCount}"
-                            ToolTip="{DynamicResource ClearCountTip}" />
-                        </StackPanel>
-                    </Border>
+                    <StackPanel
+                        Name="SerialByteCountPanel"
+                        Orientation="Horizontal"
+                        Visibility="{Binding DataContext.showSerialByteCounts, ElementName=sentCountTextBlock, Converter={StaticResource boolVisibeConverter}}">
+                        <Border Margin="0,0,8,0" Style="{StaticResource StatusPillStyle}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock
+                                    Cursor="Cross"
+                                    MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
+                                    Style="{StaticResource StatusLabelStyle}"
+                                    Text="{DynamicResource SentCount}"
+                                    ToolTip="{DynamicResource ClearCountTip}" />
+                                <TextBlock
+                                    Name="sentCountTextBlock"
+                                    Cursor="Cross"
+                                    MouseRightButtonDown="sentCountTextBlock_MouseRightButtonDown"
+                                    Style="{StaticResource StatusValueStyle}"
+                                    Text="{Binding SentCount}"
+                                    ToolTip="{DynamicResource ClearCountTip}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource StatusPillStyle}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock
+                                    Cursor="Cross"
+                                    MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
+                                    Style="{StaticResource StatusLabelStyle}"
+                                    Text="{DynamicResource ReceivedCount}"
+                                    ToolTip="{DynamicResource ClearCountTip}" />
+                                <TextBlock
+                                    Name="receivedCountTextBlock"
+                                    Cursor="Cross"
+                                    MouseRightButtonDown="receivedCountTextBlock_MouseRightButtonDown"
+                                    Style="{StaticResource StatusValueStyle}"
+                                    Text="{Binding ReceivedCount}"
+                                    ToolTip="{DynamicResource ClearCountTip}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                     <Button
                         Name="AddSerialSplitPaneButton"
                         MinHeight="32"

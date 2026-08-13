@@ -52,14 +52,13 @@
             </Setter>
         </Style>
         <Style x:Key="SplitPaneCloseButtonStyle" TargetType="{x:Type Button}">
-            <Setter Property="Width" Value="26" />
-            <Setter Property="Height" Value="26" />
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Foreground" Value="{DynamicResource AppPopupBackground}" />
-            <Setter Property="Background" Value="{DynamicResource AppGlassTextBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="{DynamicResource AppDangerBrush}" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="FontSize" Value="17" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -67,18 +66,105 @@
                         <Border
                             x:Name="Chrome"
                             Background="{TemplateBinding Background}"
-                            CornerRadius="13">
-                            <ContentPresenter
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center" />
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8"
+                            RenderTransformOrigin="0.5,0.5">
+                            <Border.Effect>
+                                <DropShadowEffect
+                                    BlurRadius="3"
+                                    Opacity="0.18"
+                                    ShadowDepth="0.7" />
+                            </Border.Effect>
+                            <Border.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform ScaleX="1" ScaleY="1" />
+                                    <RotateTransform Angle="0" />
+                                </TransformGroup>
+                            </Border.RenderTransform>
+                            <Grid
+                                Width="9"
+                                Height="9"
+                                IsHitTestVisible="False">
+                                <Border
+                                    x:Name="CloseGlyphPrimary"
+                                    Width="9"
+                                    Height="2"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{TemplateBinding Foreground}"
+                                    CornerRadius="1"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <RotateTransform Angle="45" />
+                                    </Border.RenderTransform>
+                                </Border>
+                                <Border
+                                    x:Name="CloseGlyphSecondary"
+                                    Width="9"
+                                    Height="2"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{TemplateBinding Foreground}"
+                                    CornerRadius="1"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <RotateTransform Angle="-45" />
+                                    </Border.RenderTransform>
+                                </Border>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppDangerBrush}" />
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.94" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Chrome" Property="Opacity" Value="0.72" />
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.76" />
                             </Trigger>
+                            <EventTrigger RoutedEvent="Mouse.MouseEnter">
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation
+                                            Storyboard.TargetName="Chrome"
+                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)"
+                                            To="1.14"
+                                            Duration="0:0:0.16" />
+                                        <DoubleAnimation
+                                            Storyboard.TargetName="Chrome"
+                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleY)"
+                                            To="1.14"
+                                            Duration="0:0:0.16" />
+                                        <DoubleAnimationUsingKeyFrames
+                                            Storyboard.TargetName="Chrome"
+                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)">
+                                            <LinearDoubleKeyFrame KeyTime="0:0:0.06" Value="-5" />
+                                            <LinearDoubleKeyFrame KeyTime="0:0:0.13" Value="4" />
+                                            <LinearDoubleKeyFrame KeyTime="0:0:0.21" Value="0" />
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </EventTrigger>
+                            <EventTrigger RoutedEvent="Mouse.MouseLeave">
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation
+                                            Storyboard.TargetName="Chrome"
+                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)"
+                                            To="1"
+                                            Duration="0:0:0.12" />
+                                        <DoubleAnimation
+                                            Storyboard.TargetName="Chrome"
+                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleY)"
+                                            To="1"
+                                            Duration="0:0:0.12" />
+                                        <DoubleAnimation
+                                            Storyboard.TargetName="Chrome"
+                                            Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)"
+                                            To="0"
+                                            Duration="0:0:0.12" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </EventTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -111,7 +197,7 @@
         <Grid
             x:Name="SlotsGrid"
             Grid.Row="1"
-            ClipToBounds="True" />
+            ClipToBounds="False" />
         <ToggleButton
             x:Name="ExternalOptionsButton"
             Grid.RowSpan="2"
@@ -138,7 +224,8 @@
                 Background="{DynamicResource AppPopupBackground}"
                 BorderBrush="{DynamicResource AppGlassBorderBrush}"
                 BorderThickness="1"
-                CornerRadius="13">
+                CornerRadius="13"
+                DataContext="{Binding DataContext, ElementName=ExternalOptionsButton}">
                 <Border.Effect>
                     <DropShadowEffect
                         BlurRadius="22"
@@ -196,6 +283,11 @@
                             x:Name="DisableLogCheckBox"
                             Content="{DynamicResource DisableLog}"
                             IsChecked="{Binding DisableLog}"
+                            Style="{StaticResource SplitLogOptionCheckBoxStyle}" />
+                        <CheckBox
+                            x:Name="ExternalShowSerialByteCountsCheckBox"
+                            Content="{DynamicResource ShowSerialByteCounts}"
+                            IsChecked="{Binding showSerialByteCounts}"
                             Style="{StaticResource SplitLogOptionCheckBoxStyle}" />
                         <CheckBox
                             x:Name="SessionLogCheckBox"

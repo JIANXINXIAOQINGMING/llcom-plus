@@ -76,6 +76,7 @@ namespace llcom_plus.Model
         private bool _extraEnter = false;
         private bool _enterSend = false;
         private bool _enableSymbol = true;
+        private bool _showSerialByteCounts = true;
         private bool _sessionLogEnabled = false;
         private string _sessionLogFolder = "";
         private bool _darkMode = false;
@@ -1034,6 +1035,16 @@ namespace llcom_plus.Model
         }
 
         public bool DisableLog { get; set; } = false;
+
+        public bool showSerialByteCounts
+        {
+            get => _showSerialByteCounts;
+            set
+            {
+                _showSerialByteCounts = value;
+                Save();
+            }
+        }
 
         public bool EnableSymbol
         {

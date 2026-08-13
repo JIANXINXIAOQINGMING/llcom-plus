@@ -482,6 +482,7 @@
     <system:String x:Key="Loading">加载中...</system:String>
     <system:String x:Key="SaveSucceed">文件保存成功！</system:String>
     <system:String x:Key="DisableLog">停止打印</system:String>
+    <system:String x:Key="ShowSerialByteCounts">显示收发字节</system:String>
     <system:String x:Key="ShowSymbol">替换不可见字符</system:String>
     <system:String x:Key="ShowSymbolTooltip">将不可见字符显示为\r、\n、\t等文本，仅支持UTF8编码</system:String>
     <system:String x:Key="SessionLog">保存日志</system:String>

@@ -20,6 +20,11 @@
 
 llcom plus 是在原 [llcom](https://github.com/chenxuuu/llcom) 基础上继续扩展的串口调试工具，保留了原项目“能跑 JavaScript 脚本”的高自由度，同时加入了多串口分屏、快捷发送补全、文件发送、TLS/OpenSSL、日志回放、HTTP/MQTT/socket 等开发调试中常用的工具页。
 
+## 编译
+
+- 日常开发请用 Visual Studio 打开 `llcom plus.sln`；该解决方案只包含主 WPF 项目，不要求安装 WAP/MSIX 打包组件。
+- 需要生成应用包时，请打开 `llcom-plus.Package.sln`。其中的 `WapProj` 需要 Visual Studio 2022 的 **通用 Windows 平台开发** 工作负载和 **MSIX Packaging Tools** 可选组件；缺少这些组件时项目会显示为“不兼容”，但不影响主程序编译。
+
 ## 下载
 
 - 正式版本：[GitHub Releases](https://github.com/JIANXINXIAOQINGMING/llcom-plus/releases/latest)

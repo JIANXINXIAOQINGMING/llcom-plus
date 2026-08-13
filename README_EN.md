@@ -20,6 +20,11 @@
 
 llcom plus is a serial debugging tool extended from the original [llcom](https://github.com/chenxuuu/llcom) project. It keeps the original project's flexible JavaScript scripting capability and adds common development/debugging tools such as multi-port split view, quick-send suggestions, file sending, TLS/OpenSSL, log replay, HTTP/MQTT/socket utilities, and more.
 
+## Building
+
+- For regular development, open `llcom plus.sln` in Visual Studio. It contains only the main WPF project and does not require WAP/MSIX packaging components.
+- To produce an app package, open `llcom-plus.Package.sln`. Its `WapProj` requires the Visual Studio 2022 **Universal Windows Platform development** workload and the optional **MSIX Packaging Tools** component. Without them, the packaging project is shown as incompatible, but regular application builds are unaffected.
+
 ## Download
 
 - Stable builds: [GitHub Releases](https://github.com/JIANXINXIAOQINGMING/llcom-plus/releases/latest)

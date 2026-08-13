@@ -189,7 +189,8 @@
                 Background="{DynamicResource AppPopupBackground}"
                 BorderBrush="{DynamicResource AppGlassBorderBrush}"
                 BorderThickness="1"
-                CornerRadius="13">
+                CornerRadius="13"
+                DataContext="{Binding DataContext, ElementName=LogOptionsButton}">
                 <Border.Effect>
                     <DropShadowEffect
                         BlurRadius="22"
@@ -243,6 +244,11 @@
                             Name="DisableLogCheckBox"
                             Content="{DynamicResource DisableLog}"
                             IsChecked="{Binding DisableLog}"
+                            Style="{StaticResource LogOptionCheckBoxStyle}" />
+                        <CheckBox
+                            Name="ShowSerialByteCountsCheckBox"
+                            Content="{DynamicResource ShowSerialByteCounts}"
+                            IsChecked="{Binding showSerialByteCounts}"
                             Style="{StaticResource LogOptionCheckBoxStyle}" />
                         <CheckBox
                             Name="SessionLogCheckBox"

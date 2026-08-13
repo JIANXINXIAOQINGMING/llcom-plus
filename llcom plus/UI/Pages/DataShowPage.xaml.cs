@@ -73,6 +73,7 @@ namespace llcom_plus.Pages
                 MainList.DataContext = Tools.Global.setting;
                 MainTextBox.DataContext = Tools.Global.setting;
 
+                LogOptionsButton.DataContext = Tools.Global.setting;
                 HexSendCheckBox.DataContext = Tools.Global.setting;
                 this.ExtraEnterCheckBox.DataContext = Tools.Global.setting;
                 EnterSendCheckBox.DataContext = Tools.Global.setting;
@@ -188,6 +189,38 @@ namespace llcom_plus.Pages
             return lastPackShowMode
                 ? BuildPackedLogText()
                 : MainTextBox.Text ?? string.Empty;
+        }
+
+        public void SetLogTextSnapshot(string text)
+        {
+            var snapshot = text ?? string.Empty;
+            if (snapshot.Length > MaxPlainTextLogChars)
+                snapshot = snapshot.Substring(snapshot.Length - MaxPlainTextLogChars);
+
+            var needPack = Tools.Global.setting?.timeout >= 0;
+            lastPackShowMode = needPack;
+            packedLogSelectionMode = false;
+            MainList.Items.Clear();
+            MainTextBox.Clear();
+
+            if (needPack)
+            {
+                if (snapshot.Length > 0)
+                    MainList.Items.Add(new DataShow(snapshot));
+                MainListScrollViewer.Visibility = Visibility.Visible;
+                MainTextBox.Visibility = Visibility.Collapsed;
+                if (!LockLog)
+                    MainListScrollViewer.ScrollToEnd();
+            }
+            else
+            {
+                MainTextBox.Text = snapshot;
+                MainTextBox.CaretIndex = snapshot.Length;
+                MainListScrollViewer.Visibility = Visibility.Collapsed;
+                MainTextBox.Visibility = Visibility.Visible;
+                if (!LockLog)
+                    MainTextBox.ScrollToEnd();
+            }
         }
 
         private void MainTextBox_LostFocus(object sender, RoutedEventArgs e)
@@ -432,6 +465,7 @@ namespace llcom_plus.Pages
         public class DataShow
         {
             public bool IsVisible { get; private set; }
+            public bool IsRestoredSnapshot { get; private set; }
             public string TimeText { get; set; }
             public string ArrowText { get; set; }
             public string DataText { get; set; }
@@ -447,6 +481,15 @@ namespace llcom_plus.Pages
             /// </summary>
             public string HexText { get; set; }
             public SolidColorBrush HexTextColor { get; set; }
+
+
+            internal DataShow(string restoredSnapshot)
+            {
+                RawText = restoredSnapshot ?? string.Empty;
+                RawTextColor = ResourceBrush("AppGlassTextBrush", Brushes.Black);
+                IsRestoredSnapshot = RawText.Length > 0;
+                IsVisible = IsRestoredSnapshot;
+            }
 
 
             internal DataShow(DataShowPara source)
@@ -536,6 +579,12 @@ namespace llcom_plus.Pages
                             var item = MainList.Items[i] as DataShow;
                             if (item == null)
                                 continue;
+
+                            if (item.IsRestoredSnapshot)
+                            {
+                                sw.Write(item.RawText);
+                                continue;
+                            }
 
                             if (string.IsNullOrEmpty(item.RawTitle))
                                 sw.WriteLine(item.TimeText + (item.ArrowText == " ← " ? " [send] " : " [recv] ") + item.DataText);

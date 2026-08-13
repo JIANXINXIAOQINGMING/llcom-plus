@@ -115,6 +115,7 @@ namespace llcom_plus
         private double expandedRightToolsWidth = ExpandedRightToolsDefaultWidth;
         private double mainGridLayoutWidth;
         private Pages.MultiPortPage mainSplitPortPage = null;
+        private Pages.DataShowPage pendingSingleSerialLogPage = null;
         private int appliedSerialSplitScreenCount = -1;
         private bool syncingSerialSplitControls = false;
         private bool refreshingSendTargetSelector = false;
@@ -455,6 +456,11 @@ namespace llcom_plus
             UpdateAddSerialSplitPaneButton();
             UpdateMainPaneMinimum();
             UpdateSelectedSplitSlotControls();
+
+            // 删除到只剩一个窗口时，立刻恢复普通单串口日志页。仅把分屏
+            // 数量缩到 1 会让 PortSlot 的标题继续留在界面上。
+            if (normalizedCount == 1)
+                ApplySerialSplitLayout();
         }
 
         private void UpdateAddSerialSplitPaneButton()
@@ -485,6 +491,35 @@ namespace llcom_plus
             return mainSplitPortPage != null && appliedSerialSplitScreenCount >= 1;
         }
 
+        private static bool ShouldUseSerialSplitPage(int count)
+        {
+            return count > 1;
+        }
+
+        private static Pages.DataShowPage CreateSingleSerialLogPage(Pages.MultiPortPage splitPage)
+        {
+            var page = new Pages.DataShowPage();
+            page.SetLogTextSnapshot(splitPage?.GetSlotLogTextSnapshot(1) ?? string.Empty);
+            return page;
+        }
+
+        private void ShowSerialLogPage(Page page)
+        {
+            if (dataShowFrame == null || page == null || ReferenceEquals(dataShowFrame.Content, page))
+                return;
+
+            dataShowFrame.Navigate(page);
+        }
+
+        private void DataShowFrame_Navigated(object sender, NavigationEventArgs e)
+        {
+            if (pendingSingleSerialLogPage != null &&
+                ReferenceEquals(e.Content, pendingSingleSerialLogPage))
+            {
+                pendingSingleSerialLogPage = null;
+            }
+        }
+
         private void ApplySerialSplitLayout()
         {
             if (dataShowFrame == null || serialSplitSendTargetPanel == null)
@@ -495,7 +530,8 @@ namespace llcom_plus
 
             // 已进入分屏页面后直接原地调整 PortSlot，不能重建页面，否则其它
             // 分屏的串口连接、日志和滚动位置都会丢失。
-            if (mainSplitPortPage != null &&
+            if (ShouldUseSerialSplitPage(count) &&
+                mainSplitPortPage != null &&
                 ReferenceEquals(dataShowFrame.Content, mainSplitPortPage))
             {
                 mainSplitPortPage.ResizeSlotCount(count);
@@ -513,8 +549,21 @@ namespace llcom_plus
 
             RefreshSerialSplitTargetSelector(count);
 
-            if (count <= 1)
+            if (!ShouldUseSerialSplitPage(count))
             {
+                // serialSplitScreenCount 会再异步通知一次布局更新。第一次更新已
+                // 保存日志并开始导航时，第二次必须等待同一个页面完成，不能再
+                // 从已置空的 mainSplitPortPage 创建一个空白日志页覆盖它。
+                if (pendingSingleSerialLogPage != null)
+                {
+                    appliedSerialSplitScreenCount = 1;
+                    serialSplitSendTargetPanel.Visibility = Visibility.Visible;
+                    serialSplitSendTargetComboBox.IsEnabled = ShouldEnableSendTargetSelector(count);
+                    SetMainSerialControlsEnabled(true);
+                    UpdateAddSerialSplitPaneButton();
+                    return;
+                }
+
                 if (appliedSerialSplitScreenCount == 1 && dataShowFrame.Content is Pages.DataShowPage)
                 {
                     serialSplitSendTargetPanel.Visibility = Visibility.Visible;
@@ -526,6 +575,10 @@ namespace llcom_plus
 
                 serialSplitSendTargetPanel.Visibility = Visibility.Visible;
                 serialSplitSendTargetComboBox.IsEnabled = ShouldEnableSendTargetSelector(count);
+                // 在释放分屏串口和页面之前先保存最后一个窗口的日志。否则切回
+                // 普通日志页时只能创建一个空页面，窗口 1 的历史记录会全部丢失。
+                var singleLogPage = dataShowFrame.Content as Pages.DataShowPage ??
+                    CreateSingleSerialLogPage(mainSplitPortPage);
                 if (mainSplitPortPage != null)
                 {
                     mainSplitPortPage.ActiveSlotChanged -= MainSplitPortPage_ActiveSlotChanged;
@@ -536,8 +589,11 @@ namespace llcom_plus
                 }
                 mainSplitPortPage = null;
                 appliedSerialSplitScreenCount = 1;
-                if (!(dataShowFrame.Content is Pages.DataShowPage))
-                    dataShowFrame.Navigate(new Uri("UI/Pages/DataShowPage.xaml", UriKind.Relative));
+                if (!ReferenceEquals(dataShowFrame.Content, singleLogPage))
+                {
+                    pendingSingleSerialLogPage = singleLogPage;
+                    ShowSerialLogPage(singleLogPage);
+                }
                 SetMainSerialControlsEnabled(true);
                 UpdateMainSerialConnectionStatus();
                 UpdateAddSerialSplitPaneButton();
@@ -560,6 +616,7 @@ namespace llcom_plus
 
             if (mainSplitPortPage == null)
             {
+                pendingSingleSerialLogPage = null;
                 mainSplitPortPage = new Pages.MultiPortPage(
                     count,
                     false,
@@ -567,7 +624,7 @@ namespace llcom_plus
                     initialFirstLogText);
                 mainSplitPortPage.ActiveSlotChanged += MainSplitPortPage_ActiveSlotChanged;
                 mainSplitPortPage.SlotCountChanged += MainSplitPortPage_SlotCountChanged;
-                dataShowFrame.Navigate(mainSplitPortPage);
+                ShowSerialLogPage(mainSplitPortPage);
                 appliedSerialSplitScreenCount = count;
             }
 

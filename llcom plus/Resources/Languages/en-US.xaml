@@ -482,6 +482,7 @@
     <system:String x:Key="Loading">Loading...</system:String>
     <system:String x:Key="SaveSucceed">File saved!</system:String>
     <system:String x:Key="DisableLog">Stop print</system:String>
+    <system:String x:Key="ShowSerialByteCounts">Show TX/RX byte counts</system:String>
     <system:String x:Key="ShowSymbol">Replace invisible characters</system:String>
     <system:String x:Key="ShowSymbolTooltip">Show invisible characters as \r, \n, \t text. Only supports UTF8.</system:String>
     <system:String x:Key="SessionLog">Save log</system:String>

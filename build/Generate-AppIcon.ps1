@@ -5,10 +5,41 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-$imagesDir = Join-Path $Root 'WapProj\Images'
+$sourcePath = Join-Path $Root 'llcom plus\Resources\Assets\AppIcon.Source.png'
 $outputPath = Join-Path $Root 'llcom plus\Resources\Assets\AppIcon.ico'
 $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $pngFrames = New-Object 'System.Collections.Generic.List[byte[]]'
+
+if (-not (Test-Path -LiteralPath $sourcePath)) {
+    throw "Missing master icon source: $sourcePath"
+}
+
+function Get-VisibleBounds {
+    param([Drawing.Bitmap]$Bitmap)
+
+    $minX = $Bitmap.Width
+    $minY = $Bitmap.Height
+    $maxX = -1
+    $maxY = -1
+    for ($y = 0; $y -lt $Bitmap.Height; $y++) {
+        for ($x = 0; $x -lt $Bitmap.Width; $x++) {
+            if ($Bitmap.GetPixel($x, $y).A -le 8) { continue }
+            $minX = [Math]::Min($minX, $x)
+            $minY = [Math]::Min($minY, $y)
+            $maxX = [Math]::Max($maxX, $x)
+            $maxY = [Math]::Max($maxY, $y)
+        }
+    }
+
+    if ($maxX -lt $minX -or $maxY -lt $minY) {
+        return [Drawing.Rectangle]::new(0, 0, $Bitmap.Width, $Bitmap.Height)
+    }
+    return [Drawing.Rectangle]::new(
+        $minX,
+        $minY,
+        $maxX - $minX + 1,
+        $maxY - $minY + 1)
+}
 
 function New-ResizedPngFrame {
     param(
@@ -23,18 +54,22 @@ function New-ResizedPngFrame {
         $graphics = [Drawing.Graphics]::FromImage($target)
         try {
             $graphics.Clear([Drawing.Color]::Transparent)
-            $graphics.CompositingMode = [Drawing.Drawing2D.CompositingMode]::SourceCopy
+            $graphics.CompositingMode = [Drawing.Drawing2D.CompositingMode]::SourceOver
             $graphics.CompositingQuality = [Drawing.Drawing2D.CompositingQuality]::HighQuality
             $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::HighQuality
+
+            # The master already contains the high-contrast plate. Cropping its outer
+            # transparent margin lets the logo visibly fill every Windows icon frame.
+            $sourceBounds = Get-VisibleBounds -Bitmap $source
             $graphics.DrawImage(
                 $source,
-                (New-Object Drawing.Rectangle(0, 0, $Size, $Size)),
-                0,
-                0,
-                $source.Width,
-                $source.Height,
+                ([Drawing.Rectangle]::new(0, 0, $Size, $Size)),
+                $sourceBounds.X,
+                $sourceBounds.Y,
+                $sourceBounds.Width,
+                $sourceBounds.Height,
                 [Drawing.GraphicsUnit]::Pixel)
         }
         finally {
@@ -57,13 +92,6 @@ function New-ResizedPngFrame {
 }
 
 foreach ($size in $sizes) {
-    $exactPath = Join-Path $imagesDir "Square44x44Logo.targetsize-$size.png"
-    $sourcePath = if (Test-Path -LiteralPath $exactPath) {
-        $exactPath
-    }
-    else {
-        Join-Path $imagesDir 'Square44x44Logo.targetsize-256.png'
-    }
     $pngFrames.Add((New-ResizedPngFrame -SourcePath $sourcePath -Size $size))
 }
 
