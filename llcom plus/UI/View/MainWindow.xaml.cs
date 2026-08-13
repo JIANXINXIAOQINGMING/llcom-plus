@@ -60,6 +60,7 @@ namespace llcom_plus
         {
             StartupProfiler.Mark("MainWindow ctor enter");
             StartupProfiler.Measure("MainWindow.InitializeComponent", InitializeComponent);
+            updateCheckController = new UpdateCheckController(this, CheckUpdateButton, CheckUpdateIcon);
             notificationView = CollectionViewSource.GetDefaultView(notificationItems);
             notificationView.Filter = FilterNotification;
             NotificationListBox.ItemsSource = notificationView;
@@ -129,6 +130,7 @@ namespace llcom_plus
         private int unreadNotificationCount;
         private string lastMainSendTargetDisplayName = string.Empty;
         private bool windowIsClosing;
+        private readonly UpdateCheckController updateCheckController;
         public static string recvScriptBackup = "";
 
         private sealed class SendSuggestionItem
@@ -341,8 +343,6 @@ namespace llcom_plus
                 EnsureScriptEditorInitialized();
             else if (MainTabControl.SelectedItem == ToolsTab)
                 EnsureToolModulesInitialized();
-            else if (MainTabControl.SelectedItem == AboutTab)
-                NavigateFrameOnce(aboutFrame, "UI/Pages/AboutPage.xaml");
         }
 
         private void EnsureScriptEditorInitialized()
@@ -4237,6 +4237,11 @@ namespace llcom_plus
                 TextBlock.TextProperty,
                 notificationItems.Count == 0 ? "NotificationEmpty" : "NotificationFilterEmpty");
             NotificationClearButton.IsEnabled = notificationItems.Count > 0;
+        }
+
+        private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+        {
+            await updateCheckController.CheckAsync();
         }
 
         private void NotificationCenterButton_Click(object sender, RoutedEventArgs e)

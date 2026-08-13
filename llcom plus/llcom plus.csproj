@@ -309,9 +309,6 @@
     <Compile Include="Core\Model\Settings.cs" />
     <Compile Include="Core\Model\ToSendData.cs" />
     <Compile Include="Core\Model\Uart.cs" />
-    <Compile Include="UI\Pages\AboutPage.xaml.cs">
-      <DependentUpon>AboutPage.xaml</DependentUpon>
-    </Compile>
     <Compile Include="UI\Pages\DataShowPage.xaml.cs">
       <DependentUpon>DataShowPage.xaml</DependentUpon>
     </Compile>
@@ -412,10 +409,7 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
-    <Page Include="UI\Pages\AboutPage.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
+    <Compile Include="UI\View\UpdateCheckController.cs" />
     <Page Include="UI\Pages\DataShowPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>

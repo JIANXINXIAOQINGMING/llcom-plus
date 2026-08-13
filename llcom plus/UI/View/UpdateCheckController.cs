@@ -1,59 +1,46 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using FontAwesomeControl = FontAwesome.WPF.FontAwesome;
 
-namespace llcom_plus.Pages
+namespace llcom_plus
 {
-    /// <summary>
-    /// AboutPage.xaml 的交互逻辑
-    /// </summary>
-    public partial class AboutPage : Page
+    internal sealed class UpdateCheckController
     {
-        private const string OriginalProjectUrl = "https://github.com/chenxuuu/llcom";
         private const string ProjectUrl = "https://github.com/JIANXINXIAOQINGMING/llcom-plus";
         private const string ReleasesUrl = ProjectUrl + "/releases";
-        private bool checkingUpdate = false;
 
-        public AboutPage()
+        private readonly Window owner;
+        private readonly Button updateButton;
+        private readonly FontAwesomeControl updateIcon;
+        private bool checkingUpdate;
+
+        public UpdateCheckController(Window owner, Button updateButton, FontAwesomeControl updateIcon)
         {
-            InitializeComponent();
+            this.owner = owner ?? throw new ArgumentNullException(nameof(owner));
+            this.updateButton = updateButton ?? throw new ArgumentNullException(nameof(updateButton));
+            this.updateIcon = updateIcon ?? throw new ArgumentNullException(nameof(updateIcon));
         }
 
-        private static bool loaded = false;
-        private void Page_Loaded(object sender, RoutedEventArgs e)
-        {
-            if (loaded)
-                return;
-            loaded = true;
-            this.DataContext = Tools.Global.setting;
-            aboutScrollViewer.ScrollToTop();
-            versionTextBlock.Text = Tools.AppInfo.DisplayVersion;
-        }
-
-        private void OpenSourceButton_Click(object sender, RoutedEventArgs e)
-        {
-            System.Diagnostics.Process.Start(ProjectUrl);
-        }
-
-        private void OpenOriginalSourceButton_Click(object sender, RoutedEventArgs e)
-        {
-            System.Diagnostics.Process.Start(OriginalProjectUrl);
-        }
-
-        private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+        public async Task CheckAsync()
         {
             if (checkingUpdate)
                 return;
 
             checkingUpdate = true;
-            CheckUpdateButton.IsEnabled = false;
-            CheckUpdateButton.Content = ResourceText("AboutUpdateChecking", "Checking...");
+            updateButton.IsEnabled = false;
+            updateIcon.Spin = true;
+            SetStatus("AboutUpdateChecking", "Checking...");
             var shouldShutdown = false;
+
             try
             {
                 if (Tools.Global.IsMSIX())
                 {
-                    Tools.MessageBox.Show(ResourceText("AboutUpdateMsix", "Please update the MSIX package from the store or release page."));
+                    Tools.MessageBox.Show(ResourceText(
+                        "AboutUpdateMsix",
+                        "Please update the MSIX package from the store or release page."));
                     System.Diagnostics.Process.Start(ReleasesUrl);
                     return;
                 }
@@ -88,8 +75,9 @@ namespace llcom_plus.Pages
                         var localFallback = Tools.GitHubReleaseUpdater.FindLatestLocalUpdatePackage();
                         if (localFallback != null)
                         {
-                            CheckUpdateButton.Content = string.Format(
-                                ResourceText("AboutUpdateInstallingLocal", "Found local update {0}; validating and preparing installation..."),
+                            SetStatus(
+                                "AboutUpdateInstallingLocal",
+                                "Found local update {0}; validating and preparing installation...",
                                 localFallback.DisplayVersion);
                             StartLocalUpdateAndShutdown(localFallback.Path);
                             shouldShutdown = true;
@@ -97,20 +85,26 @@ namespace llcom_plus.Pages
                         }
 
                         Tools.MessageBox.Show(string.Format(
-                            ResourceText("AboutUpdateNoAsset", "Found {0}, but no zip package is attached. Opening release page."),
+                            ResourceText(
+                                "AboutUpdateNoAsset",
+                                "Found {0}, but no zip package is attached. Opening release page."),
                             release.Version));
                         System.Diagnostics.Process.Start(release.ReleaseUrl);
                         return;
                     }
 
-                    var assetName = string.IsNullOrWhiteSpace(release.AssetName) ? ResourceText("AboutUpdateAssetUnknown", "Unknown package") : release.AssetName;
+                    var assetName = string.IsNullOrWhiteSpace(release.AssetName)
+                        ? ResourceText("AboutUpdateAssetUnknown", "Unknown package")
+                        : release.AssetName;
                     var sizeText = FormatByteSize(release.AssetSizeBytes);
                     var hasCachedPackage = Tools.GitHubReleaseUpdater.TryGetCachedUpdatePackage(release, out var zipPath);
                     if (!hasCachedPackage)
                     {
                         var updateConfirm = Tools.InputDialog.OpenDialog(
                             string.Format(
-                                ResourceText("AboutUpdateFoundConfirm", "Found a new version.\r\nCurrent version: {0}\r\nLatest version: {1}\r\nPackage: {2}\r\nSize: {3}\r\n\r\nDownload and update now?"),
+                                ResourceText(
+                                    "AboutUpdateFoundConfirm",
+                                    "Found a new version.\r\nCurrent version: {0}\r\nLatest version: {1}\r\nPackage: {2}\r\nSize: {3}\r\n\r\nDownload and update now?"),
                                 Tools.AppInfo.DisplayVersion,
                                 release.Version,
                                 assetName,
@@ -120,7 +114,7 @@ namespace llcom_plus.Pages
                         if (!updateConfirm)
                             return;
 
-                        CheckUpdateButton.Content = ResourceText("AboutUpdateDownloading", "Downloading...");
+                        SetStatus("AboutUpdateDownloading", "Downloading...");
                         zipPath = await DownloadUpdateWithProgressAsync(release);
                     }
 
@@ -132,7 +126,9 @@ namespace llcom_plus.Pages
 
                     var installConfirm = Tools.InputDialog.OpenDialog(
                         string.Format(
-                            ResourceText("AboutUpdateInstallConfirm", "Version {0} has been downloaded.\r\nPackage: {1}\r\n\r\nRestart and install now? The app will reopen automatically after installation.\r\nIf you choose No, the package will be kept for next time; closing the app will install it without reopening."),
+                            ResourceText(
+                                "AboutUpdateInstallConfirm",
+                                "Version {0} has been downloaded.\r\nPackage: {1}\r\n\r\nRestart and install now? The app will reopen automatically after installation.\r\nIf you choose No, the package will be kept for next time; closing the app will install it without reopening."),
                             release.Version,
                             zipPath),
                         null,
@@ -145,12 +141,15 @@ namespace llcom_plus.Pages
                     return;
                 }
 
-                CheckUpdateButton.Content = ResourceText("AboutUpdateCheckingLocal", "Checking the installation directory for local updates...");
+                SetStatus(
+                    "AboutUpdateCheckingLocal",
+                    "Checking the installation directory for local updates...");
                 var localPackage = Tools.GitHubReleaseUpdater.FindLatestLocalUpdatePackage();
                 if (localPackage != null)
                 {
-                    CheckUpdateButton.Content = string.Format(
-                        ResourceText("AboutUpdateInstallingLocal", "Found local update {0}; validating and preparing installation..."),
+                    SetStatus(
+                        "AboutUpdateInstallingLocal",
+                        "Found local update {0}; validating and preparing installation...",
                         localPackage.DisplayVersion);
                     StartLocalUpdateAndShutdown(localPackage.Path);
                     shouldShutdown = true;
@@ -158,9 +157,15 @@ namespace llcom_plus.Pages
                 }
 
                 if (onlineError != null)
-                    throw new InvalidOperationException(string.Format(
-                        ResourceText("AboutUpdateOnlineFailedLocalNone", "Online update check failed, and no usable local package was found.\r\n{0}"),
-                        onlineError.GetBaseException().Message), onlineError);
+                {
+                    throw new InvalidOperationException(
+                        string.Format(
+                            ResourceText(
+                                "AboutUpdateOnlineFailedLocalNone",
+                                "Online update check failed, and no usable local package was found.\r\n{0}"),
+                            onlineError.GetBaseException().Message),
+                        onlineError);
+                }
 
                 Tools.MessageBox.Show(string.Format(
                     ResourceText("AboutUpdateNoNewVersion", "Already latest version: {0}"),
@@ -175,25 +180,35 @@ namespace llcom_plus.Pages
                     ex.GetBaseException().Message,
                     Tools.AppNotificationLevel.Error,
                     category: Tools.AppNotificationCategory.Update);
-                Tools.MessageBox.Show($"{ResourceText("AboutUpdateFailed", "Update failed.")}\r\n{ex.Message}");
+                Tools.MessageBox.Show(
+                    $"{ResourceText("AboutUpdateFailed", "Update failed.")}\r\n{ex.Message}");
             }
             finally
             {
                 if (!shouldShutdown)
                 {
-                    CheckUpdateButton.Content = ResourceText("AboutReleaseButton", "Check updates");
-                    CheckUpdateButton.IsEnabled = true;
+                    updateIcon.Spin = false;
+                    updateButton.SetResourceReference(FrameworkElement.ToolTipProperty, "AboutReleaseButton");
+                    updateButton.IsEnabled = true;
                     checkingUpdate = false;
                 }
             }
         }
 
+        private void SetStatus(string resourceKey, string fallback, params object[] arguments)
+        {
+            var status = ResourceText(resourceKey, fallback);
+            updateButton.ToolTip = arguments == null || arguments.Length == 0
+                ? status
+                : string.Format(status, arguments);
+        }
+
         private static void StartLocalUpdateAndShutdown(string packagePath)
         {
             Tools.GitHubReleaseUpdater.StartInstallAfterExit(packagePath);
-            _ = System.Threading.Tasks.Task.Run(async () =>
+            _ = Task.Run(async () =>
             {
-                await System.Threading.Tasks.Task.Delay(1500);
+                await Task.Delay(1500);
                 Environment.Exit(0);
             });
             Application.Current.Shutdown();
@@ -201,18 +216,20 @@ namespace llcom_plus.Pages
 
         private string ResourceText(string key, string fallback)
         {
-            return TryFindResource(key) as string ?? fallback;
+            return owner.TryFindResource(key) as string ?? fallback;
         }
 
-        private async System.Threading.Tasks.Task<string> DownloadUpdateWithProgressAsync(Tools.GitHubReleaseInfo release)
+        private async Task<string> DownloadUpdateWithProgressAsync(Tools.GitHubReleaseInfo release)
         {
             UpdateProgressWindow progressWindow = null;
             try
             {
                 progressWindow = new UpdateProgressWindow(
                     ResourceText("AboutUpdateProgressTitle", "Download update"),
-                    ResourceText("AboutUpdateDownloading", "Downloading..."));
-                progressWindow.Owner = Window.GetWindow(this);
+                    ResourceText("AboutUpdateDownloading", "Downloading..."))
+                {
+                    Owner = owner
+                };
                 progressWindow.Show();
 
                 var progress = new Progress<Tools.GitHubDownloadProgress>(value =>
@@ -237,7 +254,9 @@ namespace llcom_plus.Pages
 
         private string FormatByteSize(long bytes)
         {
-            return bytes > 0 ? FormatByteSizeValue(bytes) : ResourceText("AboutUpdateSizeUnknown", "Unknown");
+            return bytes > 0
+                ? FormatByteSizeValue(bytes)
+                : ResourceText("AboutUpdateSizeUnknown", "Unknown");
         }
 
         private static string FormatByteSizeValue(long bytes)
@@ -251,7 +270,9 @@ namespace llcom_plus.Pages
                 unitIndex++;
             }
 
-            return unitIndex == 0 ? $"{bytes} {units[unitIndex]}" : $"{value:0.##} {units[unitIndex]}";
+            return unitIndex == 0
+                ? $"{bytes} {units[unitIndex]}"
+                : $"{value:0.##} {units[unitIndex]}";
         }
 
         private sealed class UpdateProgressWindow : Window
@@ -265,9 +286,9 @@ namespace llcom_plus.Pages
                 Title = title;
                 Width = 420;
                 MinHeight = 120;
-                SizeToContent = System.Windows.SizeToContent.Height;
-                ResizeMode = System.Windows.ResizeMode.NoResize;
-                WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner;
+                SizeToContent = SizeToContent.Height;
+                ResizeMode = ResizeMode.NoResize;
+                WindowStartupLocation = WindowStartupLocation.CenterOwner;
                 ShowInTaskbar = false;
                 Topmost = true;
 
@@ -301,7 +322,10 @@ namespace llcom_plus.Pages
                 canClose = true;
             }
 
-            public void Report(Tools.GitHubDownloadProgress progress, string downloadingText, string unknownSizeText)
+            public void Report(
+                Tools.GitHubDownloadProgress progress,
+                string downloadingText,
+                string unknownSizeText)
             {
                 if (progress == null)
                     return;

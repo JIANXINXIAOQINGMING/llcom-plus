@@ -111,10 +111,6 @@
     <system:String x:Key="ScriptInvalidName">The file name cannot contain paths or invalid characters.</system:String>
     <system:String x:Key="ScriptExist">File is exist!</system:String>
     <system:String x:Key="ScriptCreateFail">Create file failed, please check.</system:String>
-    <system:String x:Key="AboutCard">About</system:String>
-    <system:String x:Key="AboutSubTitle">Debug with your own script!</system:String>
-    <system:String x:Key="AboutDiscriptionMain">llcom plus is a serial debugging tool with reliable connections, automatic reconnect after disconnect, and a quick-send panel.</system:String>
-    <system:String x:Key="AboutDiscriptionMore">llcom plus adds a JavaScript runtime on top of serial data send/receive features, so users can build their own automation flows.</system:String>
     <system:String x:Key="AboutReleaseButton">Check updates</system:String>
     <system:String x:Key="AboutUpdateChecking">Checking...</system:String>
     <system:String x:Key="AboutUpdateCheckingLocal">No online update is available; checking the installation directory...</system:String>
@@ -132,15 +128,6 @@
     <system:String x:Key="AboutUpdateInstallConfirm">Version {0} has been downloaded.&#x0d;&#x0a;Package: {1}&#x0d;&#x0a;&#x0d;&#x0a;Restart and install now? The app will reopen automatically after installation.&#x0d;&#x0a;Choose No to keep the package for next time; closing the app will install it without reopening.</system:String>
     <system:String x:Key="AboutUpdateFailed">Update check or install failed.</system:String>
     <system:String x:Key="AboutUpdateMsix">Please update the Store/MSIX build from the store or release page.</system:String>
-    <system:String x:Key="AboutOriginalDevelopers">original developers: chenxuuu、whc2001</system:String>
-    <system:String x:Key="AboutOriginalGitHubText">Based on the original llcom plus open-source project under Apache 2.0</system:String>
-    <system:String x:Key="AboutOriginalGitHubButton">Open original GitHub project</system:String>
-    <system:String x:Key="AboutDevelopers">developers: lawrence.liu</system:String>
-    <system:String x:Key="AboutTranslator">translators: chenxuuu</system:String>
-    <system:String x:Key="AboutGitHubText">Project repository</system:String>
-    <system:String x:Key="AboutGitHubButton">Open GitHub repository</system:String>
-    <system:String x:Key="AboutThanksProjects">Thanks these projects:</system:String>
-    <system:String x:Key="AboutVersion">Software version</system:String>
     <system:String x:Key="InputDialogConfirm">OK</system:String>
     <system:String x:Key="InputDialogCancel">Cancel</system:String>
     <system:String x:Key="InputDialogTitle">Notice</system:String>

@@ -243,6 +243,28 @@ try {
         [void]$appType.GetMethod('InitializeComponent').Invoke($app, $null)
         $windowType = $assembly.GetType('llcom_plus.MainWindow', $true)
         $window = [Activator]::CreateInstance($windowType)
+        $checkUpdateButton = $window.FindName('CheckUpdateButton')
+        $checkUpdateIcon = $window.FindName('CheckUpdateIcon')
+        Test-Condition (
+            $null -eq $window.FindName('AboutTab')
+        ) 'The obsolete About tab is removed from the main navigation'
+        Test-Condition (
+            $null -ne $checkUpdateButton -and
+            $null -ne $checkUpdateIcon -and
+            $checkUpdateIcon.Icon.ToString() -eq 'Refresh'
+        ) 'The top-right toolbar exposes a refresh-style update button'
+        $topRightButtonPanel = $checkUpdateButton.Parent
+        Test-Condition (
+            $null -ne $topRightButtonPanel -and
+            $topRightButtonPanel.Children.IndexOf($checkUpdateButton) -eq
+                ($topRightButtonPanel.Children.Count - 1)
+        ) 'The update button is the final top-right toolbar action'
+        Test-Condition (
+            $null -ne $assembly.GetType('llcom_plus.UpdateCheckController', $false) -and
+            $null -ne $windowType.GetMethod(
+                'CheckUpdateButton_Click',
+                [Reflection.BindingFlags]'NonPublic,Instance')
+        ) 'The top-right update button keeps the complete update workflow'
         $createDefaultQuickSendRows = $settingsType.GetMethod(
             'CreateDefaultQuickSendRows',
             [Reflection.BindingFlags]'NonPublic,Instance')

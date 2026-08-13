@@ -111,10 +111,6 @@
     <system:String x:Key="ScriptInvalidName">文件名不能包含路径或非法字符。</system:String>
     <system:String x:Key="ScriptExist">该文件已存在！</system:String>
     <system:String x:Key="ScriptCreateFail">新建失败，请检查！</system:String>
-    <system:String x:Key="AboutCard">关于</system:String>
-    <system:String x:Key="AboutSubTitle">能跑JavaScript脚本的串口调试工具</system:String>
-    <system:String x:Key="AboutDiscriptionMain">llcom plus是一款串口调试工具，工具连接可靠，断线后可自动重连，同时右侧具有快捷发送区的功能。</system:String>
-    <system:String x:Key="AboutDiscriptionMore">本工具除了具有与其他同类工具所包含的数据收发功能外，还添加了JavaScript运行环境。用户可自行使用JavaScript完成自动化操作，大大提高了串口工具的可用性。</system:String>
     <system:String x:Key="AboutReleaseButton">检查更新</system:String>
     <system:String x:Key="AboutUpdateChecking">正在检查...</system:String>
     <system:String x:Key="AboutUpdateCheckingLocal">网页端无可用更新，正在检查安装目录中的本地更新包...</system:String>
@@ -132,15 +128,6 @@
     <system:String x:Key="AboutUpdateInstallConfirm">新版本 {0} 已下载完成。&#x0d;&#x0a;安装包：{1}&#x0d;&#x0a;&#x0d;&#x0a;是否现在重启并安装？安装完成后会自动打开。&#x0d;&#x0a;选择“否”会保留安装包，下次检查更新不再重复下载；关闭软件时会自动安装且不会自动打开。</system:String>
     <system:String x:Key="AboutUpdateFailed">检查或安装更新失败。</system:String>
     <system:String x:Key="AboutUpdateMsix">商店/MSIX 版本请通过商店或发布页更新。</system:String>
-    <system:String x:Key="AboutOriginalDevelopers">原开发者：chenxuuu、whc2001</system:String>
-    <system:String x:Key="AboutOriginalGitHubText">本项目基于原 llcom plus 开源项目，遵循 Apache 2.0 协议</system:String>
-    <system:String x:Key="AboutOriginalGitHubButton">前往原项目 GitHub</system:String>
-    <system:String x:Key="AboutDevelopers">开发者：lawrence.liu</system:String>
-    <system:String x:Key="AboutTranslator">简体中文为原版语言</system:String>
-    <system:String x:Key="AboutGitHubText">项目仓库</system:String>
-    <system:String x:Key="AboutGitHubButton">前往 GitHub 仓库</system:String>
-    <system:String x:Key="AboutThanksProjects">感谢以下项目：</system:String>
-    <system:String x:Key="AboutVersion">软件版本</system:String>
     <system:String x:Key="InputDialogConfirm">确定</system:String>
     <system:String x:Key="InputDialogCancel">取消</system:String>
     <system:String x:Key="InputDialogTitle">提示</system:String>

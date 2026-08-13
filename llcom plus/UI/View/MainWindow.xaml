@@ -1374,9 +1374,6 @@
                         </Border>
                     </Grid>
                 </TabItem>
-                <TabItem Name="AboutTab" Header="{DynamicResource AboutCard}" Margin="0,2,0,-8" Width="118">
-                    <Frame Name="aboutFrame" NavigationUIVisibility="Hidden" />
-                </TabItem>
             </TabControl>
         </Border>
         <Border
@@ -1461,6 +1458,7 @@
                         Name="LanguageMenuButton"
                         Width="36"
                         Height="36"
+                        Margin="0,0,4,0"
                         Padding="0"
                         Click="LanguageMenuButton_Click"
                         ToolTip="{DynamicResource ChangeLanguage}">
@@ -1482,6 +1480,22 @@
                                     Tag="en-US" />
                             </ContextMenu>
                         </Button.ContextMenu>
+                    </Button>
+                    <Button
+                        Name="CheckUpdateButton"
+                        Width="36"
+                        Height="36"
+                        Padding="0"
+                        Click="CheckUpdateButton_Click"
+                        ToolTip="{DynamicResource AboutReleaseButton}">
+                        <fa:FontAwesome
+                            Name="CheckUpdateIcon"
+                            Width="17"
+                            Height="17"
+                            FontSize="17"
+                            Foreground="{DynamicResource AppSuccessBrush}"
+                            Icon="Refresh"
+                            SpinDuration="1" />
                     </Button>
                 </StackPanel>
             </Border>
