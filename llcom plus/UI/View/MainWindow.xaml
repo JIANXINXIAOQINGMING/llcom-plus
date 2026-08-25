@@ -594,14 +594,6 @@
             Padding="4"
             Style="{StaticResource FloatingToolbarPanelStyle}">
             <WrapPanel VerticalAlignment="Center">
-                <Button
-                Name="refreshPortButton"
-                MinHeight="32"
-                Margin="0,0,8,0"
-                Style="{StaticResource GlassButtonStyle}"
-                Click="RefreshPortButton_Click"
-                Content="{DynamicResource RefreshPortButton}"
-                IsEnabled="{Binding ElementName=serialPortsListComboBox, Path=IsEnabled}" />
                 <StackPanel
                 Name="serialSplitSendTargetPanel"
                 Margin="0,0,8,0"
@@ -641,6 +633,7 @@
                     MinWidth="96"
                     MaxWidth="280"
                     MinHeight="32"
+                    DropDownOpened="SerialPortsListComboBox_DropDownOpened"
                     SelectionChanged="SerialPortsListComboBox_SelectionChanged" />
                 </StackPanel>
                 <StackPanel

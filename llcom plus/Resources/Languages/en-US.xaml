@@ -36,7 +36,6 @@
     <system:String x:Key="AddSerialSplitPaneTip">Add one serial pane, up to 4. Existing pane content and connections are preserved.</system:String>
     <system:String x:Key="AddSerialSplitPaneMaximumTip">The maximum of 4 panes has been reached.</system:String>
     <system:String x:Key="RemoveSerialSplitPaneTip">Remove this pane</system:String>
-    <system:String x:Key="RefreshPortButton">Refresh List</system:String>
     <system:String x:Key="ShowPorts">Serial Ports:</system:String>
     <system:String x:Key="ShowBaudRate">Baud Rate:</system:String>
     <system:String x:Key="OtherRate">Custom</system:String>
@@ -188,7 +187,7 @@
     <system:String x:Key="SettingScriptText3">Common returns: return uartData; return stringToBytes('OK'); return [0x01,0x02]. See the API doc button for details.</system:String>
     <system:String x:Key="SettingScriptRunResult">Result</system:String>
     <system:String x:Key="SettingScriptRawText">Raw text:</system:String>
-    <system:String x:Key="ChangeLanguage">语言/Language</system:String>
+    <system:String x:Key="ChangeLanguage">Language</system:String>
     <system:String x:Key="DarkMode">Dark mode</system:String>
     <system:String x:Key="LightMode">Light mode</system:String>
     <system:String x:Key="TcpClientTitle">Socket Client</system:String>

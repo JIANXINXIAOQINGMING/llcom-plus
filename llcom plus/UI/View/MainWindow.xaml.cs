@@ -681,7 +681,7 @@ namespace llcom_plus
             if (serialPortsListComboBox != null)
                 // 端口下拉框始终保持可选。选中端口只是记录“待使用端口”，
                 // 真正的关闭旧端口/打开新端口由发送或状态按钮触发。
-                serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
+                serialPortsListComboBox.IsEnabled = true;
             if (connectionStatusButton != null)
                 connectionStatusButton.IsEnabled = enabled &&
                     (serialPortsListComboBox.Items.Count > 0 || Tools.Global.uart.IsOpen());
@@ -849,7 +849,7 @@ namespace llcom_plus
                 SelectSerialPortComboBoxItem(slotPort);
                 SetBaudRateComboBoxValue(mainSplitPortPage.GetSlotBaudRate(slot));
 
-                serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
+                serialPortsListComboBox.IsEnabled = true;
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0 || isOpen;
                 baudRateComboBox.IsEnabled = true;
                 FlowControlButton.IsEnabled = false;
@@ -983,7 +983,7 @@ namespace llcom_plus
                 Tools.Global.uart.SetName(port);
                 Tools.Global.uart.Open();
                 Tools.Logger.StartSessionLog(port);
-                serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
+                serialPortsListComboBox.IsEnabled = true;
                 connectionStatusButton.IsEnabled = true;
                 UpdateMainSerialConnectionStatus();
                 AddSerialConnectionNotification(port, reconnected: false);
@@ -1632,6 +1632,11 @@ namespace llcom_plus
             UpdateMainSerialConnectionStatus();
         }
 
+        private void SerialPortsListComboBox_DropDownOpened(object sender, EventArgs e)
+        {
+            refreshPortList();
+        }
+
         private bool IsSelectedMainSerialPortOpen()
         {
             var selectedPort = GetSelectedPortName();
@@ -1856,7 +1861,8 @@ namespace llcom_plus
                     }
                     else
                     {
-                        serialPortsListComboBox.IsEnabled = false;
+                        // 即使当前没有串口，也允许再次展开下拉框触发扫描。
+                        serialPortsListComboBox.IsEnabled = true;
                         connectionStatusButton.IsEnabled = Tools.Global.uart.IsOpen();
                     }
                     refreshLock = false;
@@ -1877,7 +1883,7 @@ namespace llcom_plus
                                 Tools.Logger.StartSessionLog(Tools.Global.uart.GetName());
                                 Dispatcher.Invoke(new Action(delegate
                                 {
-                                    serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
+                                    serialPortsListComboBox.IsEnabled = true;
                                     connectionStatusButton.IsEnabled = true;
                                     statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
                                     AddSerialConnectionNotification(Tools.Global.uart.GetName(), reconnected: true);
@@ -2242,7 +2248,7 @@ namespace llcom_plus
                     Tools.Logger.AddUartLogDebug($"[openPort]change show and send pending data");
                     this.Dispatcher.Invoke(new Action(delegate
                     {
-                        serialPortsListComboBox.IsEnabled = serialPortsListComboBox.Items.Count > 0;
+                        serialPortsListComboBox.IsEnabled = true;
                         connectionStatusButton.IsEnabled = true;
                         UpdateMainSerialConnectionStatus();
                         AddSerialConnectionNotification(port, reconnected: false);
@@ -3937,11 +3943,6 @@ namespace llcom_plus
         {
             if(e.Key == Key.Enter)
                 ScriptEnv.JavaScriptRunEnv.RunCommand(runOneLineScriptTextBox.Text);
-        }
-
-        private void RefreshPortButton_Click(object sender, RoutedEventArgs e)
-        {
-            refreshPortList();
         }
 
         private void sentCountTextBlock_MouseRightButtonDown(object sender, MouseButtonEventArgs e)

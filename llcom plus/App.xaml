@@ -37,6 +37,37 @@
                 <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
             </Style>
 
+            <!-- Keep tooltip surface and text in the same palette. The stock theme's
+                 light tooltip background otherwise clashes with dark-mode text. -->
+            <Style TargetType="{x:Type ToolTip}">
+                <Setter Property="Background" Value="{DynamicResource AppPopupBackground}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
+                <Setter Property="Padding" Value="9,6" />
+                <Setter Property="OverridesDefaultStyle" Value="True" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ToolTip}">
+                            <Border
+                                x:Name="ToolTipChrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
+                                <ContentPresenter
+                                    Margin="{TemplateBinding Padding}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentStringFormat="{TemplateBinding ContentStringFormat}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <Style TargetType="{x:Type RadioButton}">
                 <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
             </Style>

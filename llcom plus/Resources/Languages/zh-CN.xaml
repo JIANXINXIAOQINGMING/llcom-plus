@@ -36,7 +36,6 @@
     <system:String x:Key="AddSerialSplitPaneTip">新增一个串口分屏，最多支持 4 个；已有分屏内容和连接保持不变。</system:String>
     <system:String x:Key="AddSerialSplitPaneMaximumTip">已达到最多 4 个分屏。</system:String>
     <system:String x:Key="RemoveSerialSplitPaneTip">删除这个分屏</system:String>
-    <system:String x:Key="RefreshPortButton">刷新串口</system:String>
     <system:String x:Key="ShowPorts">串口：</system:String>
     <system:String x:Key="ShowBaudRate">波特率：</system:String>
     <system:String x:Key="OtherRate">自定义</system:String>

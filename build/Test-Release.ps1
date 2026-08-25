@@ -243,6 +243,65 @@ try {
         [void]$appType.GetMethod('InitializeComponent').Invoke($app, $null)
         $windowType = $assembly.GetType('llcom_plus.MainWindow', $true)
         $window = [Activator]::CreateInstance($windowType)
+        $serialPortComboBox = $window.FindName('serialPortsListComboBox')
+        $serialPortDropDownHandler = $windowType.GetMethod(
+            'SerialPortsListComboBox_DropDownOpened',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        Test-Condition (
+            $null -eq $window.FindName('refreshPortButton') -and
+            $null -ne $serialPortComboBox -and
+            $null -ne $serialPortDropDownHandler
+        ) 'Opening the serial-port selector replaces the removed refresh button'
+        $setMainSerialControlsEnabled = $windowType.GetMethod(
+            'SetMainSerialControlsEnabled',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $serialPortComboBox.IsEnabled = $false
+        [void]$setMainSerialControlsEnabled.Invoke($window, [object[]]@($false))
+        $serialSelectorLocalEnabled = $serialPortComboBox.ReadLocalValue(
+            [Windows.UIElement]::IsEnabledProperty)
+        Test-Condition (
+            $serialSelectorLocalEnabled -eq $true
+        ) 'The serial-port selector remains available when no ports are currently listed'
+
+        $applyTheme = $globalType.GetMethod(
+            'ApplyTheme',
+            [Reflection.BindingFlags]'Public,Static')
+        foreach ($darkMode in @($false, $true)) {
+            [void]$applyTheme.Invoke($null, [object[]]@($darkMode))
+            $themeName = if ($darkMode) { 'dark' } else { 'light' }
+            $toolTip = New-Object Windows.Controls.ToolTip
+            $toolTip.Content = 'Tooltip contrast test'
+            [void]$toolTip.ApplyTemplate()
+            $toolTipChrome = $toolTip.Template.FindName('ToolTipChrome', $toolTip)
+            $expectedBackground = $app.TryFindResource('AppPopupBackground').ToString()
+            $expectedForeground = $app.TryFindResource('AppGlassTextBrush').ToString()
+            Test-Condition (
+                $null -ne $toolTipChrome -and
+                $toolTip.Background.ToString() -eq $expectedBackground -and
+                $toolTip.Foreground.ToString() -eq $expectedForeground -and
+                $expectedBackground -ne $expectedForeground
+            ) "Tooltips keep readable foreground/background contrast in $themeName mode"
+        }
+
+        $loadLanguage = $globalType.GetMethod(
+            'LoadLanguageFile',
+            [Reflection.BindingFlags]'Public,Static')
+        [void]$loadLanguage.Invoke($null, [object[]]@('en-US'))
+        $settingsType.GetProperty('darkMode').SetValue($settings, $false, $null)
+        [void]$applyTheme.Invoke($null, [object[]]@($false))
+        $updateThemeToggleMenu = $windowType.GetMethod(
+            'UpdateThemeToggleMenu',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        [void]$updateThemeToggleMenu.Invoke($window, $null)
+        Test-Condition (
+            $window.FindName('NotificationCenterButton').ToolTip -eq 'Notification center' -and
+            $window.FindName('ThemeToggleMenuItem').ToolTip -eq 'Dark mode' -and
+            $window.FindName('LanguageMenuButton').ToolTip -eq 'Language' -and
+            $window.FindName('CheckUpdateButton').ToolTip -eq 'Check updates'
+        ) 'The complete top-right toolbar has valid English tooltips'
+        [void]$loadLanguage.Invoke($null, [object[]]@('zh-CN'))
+        [void]$updateThemeToggleMenu.Invoke($window, $null)
+
         $checkUpdateButton = $window.FindName('CheckUpdateButton')
         $checkUpdateIcon = $window.FindName('CheckUpdateIcon')
         Test-Condition (
