@@ -8,6 +8,14 @@
     <system:String x:Key="OpenPort_close">Close</system:String>
     <system:String x:Key="OpenPort_port">Port</system:String>
     <system:String x:Key="ConnectionStatusToggleTip">Click to open or close the current serial port</system:String>
+    <system:String x:Key="MainSerialClosedStatus">{0} · Closed</system:String>
+    <system:String x:Key="MainSerialOpenStatus">{0} · Open</system:String>
+    <system:String x:Key="MainSerialPendingSwitchStatus">{0} open → Switch to {1}</system:String>
+    <system:String x:Key="MainSerialNoPortStatus">No serial port selected</system:String>
+    <system:String x:Key="ConnectionStatusOpenTip">Click to open {0}</system:String>
+    <system:String x:Key="ConnectionStatusCloseTip">Click to close {0}</system:String>
+    <system:String x:Key="ConnectionStatusSwitchTip">{0} is still connected. Click to close {0} and open {1}.</system:String>
+    <system:String x:Key="SerialPortSwitchRequiredBeforeSend">{0} is still connected and {1} is not open. Click “Switch to {1}” before sending.</system:String>
     <system:String x:Key="SendAndLogOptions">Send and log options</system:String>
     <system:String x:Key="SendAndLogOptionsTip">Open send, serial-control, and log options</system:String>
     <system:String x:Key="ErrorOpenPort">Serial port open failed!</system:String>

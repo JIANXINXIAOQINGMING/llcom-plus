@@ -111,6 +111,64 @@ try {
         $programSource.IndexOf('TaskbarIntegration.InitializeProcessIdentity', [StringComparison]::Ordinal) -lt
             $programSource.IndexOf('new App()', [StringComparison]::Ordinal)
     ) 'Taskbar process identity is assigned before WPF creates UI'
+    Test-Condition (
+        $programSource.IndexOf('Global.TryAcquireSingleInstance', [StringComparison]::Ordinal) -ge 0 -and
+        $programSource.IndexOf('Global.TryAcquireSingleInstance', [StringComparison]::Ordinal) -lt
+            $programSource.IndexOf('new App()', [StringComparison]::Ordinal) -and
+        $programSource.Contains('duplicate instance silent exit')
+    ) 'Duplicate instances exit before WPF creates any UI'
+
+    $startupGlobalType = $assembly.GetType('llcom_plus.Tools.Global', $true)
+    $privateStaticFlags = [Reflection.BindingFlags]'NonPublic,Static'
+    $tryAcquireNamedInstance = $startupGlobalType.GetMethod(
+        'TryAcquireSingleInstance',
+        $privateStaticFlags,
+        $null,
+        [Type[]]@([string]),
+        $null)
+    $releaseSingleInstance = $startupGlobalType.GetMethod(
+        'ReleaseSingleInstanceMutex',
+        $privateStaticFlags)
+    $testMutexName = 'Local\llcom_plus_single_instance_test_' + [Guid]::NewGuid().ToString('N')
+    $createdTestMutex = $false
+    $blockingMutex = [Threading.Mutex]::new($true, $testMutexName, [ref]$createdTestMutex)
+    try {
+        $duplicateWasRejected = -not [bool]$tryAcquireNamedInstance.Invoke(
+            $null,
+            [object[]]@($testMutexName))
+    }
+    finally {
+        if ($createdTestMutex) {
+            $blockingMutex.ReleaseMutex()
+        }
+        $blockingMutex.Dispose()
+    }
+    try {
+        $firstInstanceWasAccepted = [bool]$tryAcquireNamedInstance.Invoke(
+            $null,
+            [object[]]@($testMutexName))
+    }
+    finally {
+        [void]$releaseSingleInstance.Invoke($null, $null)
+    }
+    Test-Condition (
+        $duplicateWasRejected -and $firstInstanceWasAccepted
+    ) 'Single-instance locking rejects duplicates silently and accepts the first process'
+
+    $globalSource = [IO.File]::ReadAllText((Join-Path $projectDir 'Core\Tools\Global.cs'))
+    $singleInstanceStart = $globalSource.IndexOf(
+        'internal static bool TryAcquireSingleInstance()',
+        [StringComparison]::Ordinal)
+    $singleInstanceEnd = $globalSource.IndexOf(
+        'private static void ReleaseSingleInstanceMutex()',
+        [StringComparison]::Ordinal)
+    $singleInstanceSource = $globalSource.Substring(
+        $singleInstanceStart,
+        $singleInstanceEnd - $singleInstanceStart)
+    Test-Condition (
+        -not $singleInstanceSource.Contains('MessageBox.Show') -and
+        -not $singleInstanceSource.Contains('Environment.Exit')
+    ) 'Duplicate-instance detection has no dialog or error-exit path'
 
     $mainWindowSource = [IO.File]::ReadAllText((Join-Path $projectDir 'UI\View\MainWindow.xaml.cs'))
     Test-Condition (
@@ -395,6 +453,28 @@ try {
             $skipForClosedPort -and
             $skipForSameBaudRate
         ) 'Baud-rate notifications require an open port and an actual change'
+
+        $shouldAutoReconnectAfterPortRefresh = $windowType.GetMethod(
+            'ShouldAutoReconnectAfterPortRefresh',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $reconnectClosedMatchingPort = [bool]$shouldAutoReconnectAfterPortRefresh.Invoke(
+            $null,
+            [object[]]@('COM4', 'COM4', $false, $false, $true, $false))
+        $skipReconnectForOpenPort = -not [bool]$shouldAutoReconnectAfterPortRefresh.Invoke(
+            $null,
+            [object[]]@('COM4', 'COM4', $true, $false, $true, $false))
+        $skipReconnectForDifferentPort = -not [bool]$shouldAutoReconnectAfterPortRefresh.Invoke(
+            $null,
+            [object[]]@('COM4', 'COM5', $false, $false, $true, $false))
+        $skipReconnectWhileOpening = -not [bool]$shouldAutoReconnectAfterPortRefresh.Invoke(
+            $null,
+            [object[]]@('COM4', 'COM4', $false, $false, $true, $true))
+        Test-Condition (
+            $reconnectClosedMatchingPort -and
+            $skipReconnectForOpenPort -and
+            $skipReconnectForDifferentPort -and
+            $skipReconnectWhileOpening
+        ) 'Port-list refresh never reopens an already-open serial port'
 
         $shouldUseSerialSplitPage = $windowType.GetMethod(
             'ShouldUseSerialSplitPage',

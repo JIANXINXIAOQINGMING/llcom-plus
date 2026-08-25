@@ -8,6 +8,14 @@
     <system:String x:Key="OpenPort_close">关闭</system:String>
     <system:String x:Key="OpenPort_port">串口</system:String>
     <system:String x:Key="ConnectionStatusToggleTip">点击打开或关闭当前串口</system:String>
+    <system:String x:Key="MainSerialClosedStatus">{0} · 关闭</system:String>
+    <system:String x:Key="MainSerialOpenStatus">{0} · 已打开</system:String>
+    <system:String x:Key="MainSerialPendingSwitchStatus">{0} 已打开 → 切换到 {1}</system:String>
+    <system:String x:Key="MainSerialNoPortStatus">未选择串口</system:String>
+    <system:String x:Key="ConnectionStatusOpenTip">点击打开 {0}</system:String>
+    <system:String x:Key="ConnectionStatusCloseTip">点击关闭 {0}</system:String>
+    <system:String x:Key="ConnectionStatusSwitchTip">{0} 仍在连接；点击后关闭 {0} 并打开 {1}</system:String>
+    <system:String x:Key="SerialPortSwitchRequiredBeforeSend">{0} 仍在连接，{1} 尚未打开。请先点击“切换到 {1}”，再发送数据。</system:String>
     <system:String x:Key="SendAndLogOptions">发送与日志选项</system:String>
     <system:String x:Key="SendAndLogOptionsTip">打开发送、串口控制与日志选项</system:String>
     <system:String x:Key="ErrorOpenPort">串口打开失败！</system:String>

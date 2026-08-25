@@ -11,6 +11,15 @@ namespace llcom_plus
             StartupProfiler.Begin();
             StartupProfiler.Mark("Program.Main enter");
 
+            var isFirstInstance = StartupProfiler.Measure(
+                "Program.Main single instance lock",
+                Global.TryAcquireSingleInstance);
+            if (!isFirstInstance)
+            {
+                StartupProfiler.Mark("Program.Main duplicate instance silent exit");
+                return;
+            }
+
             StartupProfiler.Measure(
                 "Program.Main taskbar identity",
                 TaskbarIntegration.InitializeProcessIdentity);
@@ -19,7 +28,6 @@ namespace llcom_plus
             StartupProfiler.Mark("Program.Main App created");
 
             StartupProfiler.Measure("Program.Main App.InitializeComponent", app.InitializeComponent);
-            StartupProfiler.Measure("Program.Main single instance lock", Global.EnsureSingleInstance);
             StartupProfiler.Measure("Program.Main load settings and theme", Global.LoadSetting);
             StartupProfiler.Mark("Program.Main App.Run begin");
             app.Run();

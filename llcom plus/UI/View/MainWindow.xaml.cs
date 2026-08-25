@@ -678,17 +678,18 @@ namespace llcom_plus
 
         private void SetMainSerialControlsEnabled(bool enabled)
         {
+            var pendingSwitch = IsMainSerialPortSwitchPending();
             if (serialPortsListComboBox != null)
-                // 端口下拉框始终保持可选。选中端口只是记录“待使用端口”，
-                // 真正的关闭旧端口/打开新端口由发送或状态按钮触发。
+                // 端口下拉框始终保持可选。选中其他端口只进入待切换状态，
+                // 只有状态按钮会真正关闭旧端口并打开新端口。
                 serialPortsListComboBox.IsEnabled = true;
             if (connectionStatusButton != null)
                 connectionStatusButton.IsEnabled = enabled &&
                     (serialPortsListComboBox.Items.Count > 0 || Tools.Global.uart.IsOpen());
             if (baudRateComboBox != null)
-                baudRateComboBox.IsEnabled = enabled;
+                baudRateComboBox.IsEnabled = enabled && !pendingSwitch;
             if (FlowControlButton != null)
-                FlowControlButton.IsEnabled = enabled;
+                FlowControlButton.IsEnabled = enabled && !pendingSwitch;
         }
 
         private bool ShouldEnableSendTargetSelector(int serialTargetCount)
@@ -955,17 +956,10 @@ namespace llcom_plus
             if (isOpeningPort)
                 return IsSelectedMainSerialPortOpen();
 
-            if (Tools.Global.uart.IsOpen() && !IsSelectedMainSerialPortOpen())
+            if (IsMainSerialPortSwitchPending())
             {
-                try
-                {
-                    CloseMainSerialPortForSwitch();
-                }
-                catch (Exception ex)
-                {
-                    ShowOpenPortFailed(ex.Message);
-                    return false;
-                }
+                ShowSerialPortSwitchRequiredBeforeSend();
+                return false;
             }
 
             ApplySelectedUartProfile();
@@ -1565,7 +1559,7 @@ namespace llcom_plus
                 Tools.Logger.StopSessionLog();
                 serialPortsListComboBox.IsEnabled = true;
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0;
-                statusTextBlock.Text = TryFindResource("OpenPort_close") as string ?? "?!";
+                UpdateMainSerialConnectionStatus();
                 refreshPortList(string.IsNullOrWhiteSpace(portName) ? null : portName);
             }));
         }
@@ -1627,8 +1621,9 @@ namespace llcom_plus
                 return;
             }
 
-            // 这里只更新待使用端口及其配置，不触碰当前已打开的串口。
-            ApplySelectedUartProfile();
+            // 已有串口连接时只记录待切换端口，不提前把新端口配置应用到旧连接。
+            if (!Tools.Global.uart.IsOpen())
+                ApplySelectedUartProfile();
             UpdateMainSerialConnectionStatus();
         }
 
@@ -1645,15 +1640,81 @@ namespace llcom_plus
                 string.Equals(Tools.Global.uart.GetName(), selectedPort, StringComparison.OrdinalIgnoreCase);
         }
 
+        private bool IsMainSerialPortSwitchPending()
+        {
+            if (!Tools.Global.uart.IsOpen())
+                return false;
+
+            var selectedPort = GetSelectedPortName();
+            var openPort = Tools.Global.uart.GetName();
+            return !string.IsNullOrWhiteSpace(selectedPort) &&
+                !string.IsNullOrWhiteSpace(openPort) &&
+                !string.Equals(openPort, selectedPort, StringComparison.OrdinalIgnoreCase);
+        }
+
         private void UpdateMainSerialConnectionStatus()
         {
             if (statusTextBlock == null || IsSerialSplitModeActive())
                 return;
 
-            statusTextBlock.Text = TryFindResource(
-                IsSelectedMainSerialPortOpen() ? "OpenPort_open" : "OpenPort_close") as string ?? "?!";
+            var selectedPort = GetSelectedPortName();
+            var openPort = Tools.Global.uart.IsOpen() ? Tools.Global.uart.GetName() : "";
+            var pendingSwitch = IsMainSerialPortSwitchPending();
+
+            if (pendingSwitch)
+            {
+                statusTextBlock.Text = string.Format(
+                    TryFindResource("MainSerialPendingSwitchStatus") as string ?? "{0} 已打开 → 切换到 {1}",
+                    openPort,
+                    selectedPort);
+                connectionStatusButton.ToolTip = string.Format(
+                    TryFindResource("ConnectionStatusSwitchTip") as string ?? "{0} 仍在连接；点击后关闭 {0} 并打开 {1}",
+                    openPort,
+                    selectedPort);
+                statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppAccentBrush");
+            }
+            else if (Tools.Global.uart.IsOpen())
+            {
+                statusTextBlock.Text = string.Format(
+                    TryFindResource("MainSerialOpenStatus") as string ?? "{0} · 已打开",
+                    openPort);
+                connectionStatusButton.ToolTip = string.Format(
+                    TryFindResource("ConnectionStatusCloseTip") as string ?? "点击关闭 {0}",
+                    openPort);
+                statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppGlassTextBrush");
+            }
+            else if (!string.IsNullOrWhiteSpace(selectedPort))
+            {
+                statusTextBlock.Text = string.Format(
+                    TryFindResource("MainSerialClosedStatus") as string ?? "{0} · 关闭",
+                    selectedPort);
+                connectionStatusButton.ToolTip = string.Format(
+                    TryFindResource("ConnectionStatusOpenTip") as string ?? "点击打开 {0}",
+                    selectedPort);
+                statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppGlassTextBrush");
+            }
+            else
+            {
+                statusTextBlock.Text = TryFindResource("MainSerialNoPortStatus") as string ?? "未选择串口";
+                connectionStatusButton.ToolTip = TryFindResource("ConnectionStatusToggleTip") as string;
+                statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppGlassTextBrush");
+            }
+
             if (connectionStatusButton != null)
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0 || Tools.Global.uart.IsOpen();
+            if (baudRateComboBox != null)
+                baudRateComboBox.IsEnabled = !pendingSwitch;
+            if (FlowControlButton != null)
+                FlowControlButton.IsEnabled = !pendingSwitch;
+        }
+
+        private void ShowSerialPortSwitchRequiredBeforeSend()
+        {
+            var openPort = Tools.Global.uart.GetName();
+            var selectedPort = GetSelectedPortName();
+            var format = TryFindResource("SerialPortSwitchRequiredBeforeSend") as string
+                ?? "{0} 仍在连接，{1} 尚未打开。请先点击“切换到 {1}”，再发送数据。";
+            Tools.MessageBox.Show(string.Format(format, openPort, selectedPort));
         }
 
         private void CloseMainSerialPortForSwitch()
@@ -1667,7 +1728,7 @@ namespace llcom_plus
                 forcusClosePort = true;
                 Tools.Global.uart.Close(waitForDispose: true);
                 Tools.Logger.StopSessionLog();
-                statusTextBlock.Text = TryFindResource("OpenPort_close") as string ?? "?!";
+                UpdateMainSerialConnectionStatus();
                 AddSerialDisconnectedNotification(portName);
             }
             catch (Exception ex)
@@ -1857,7 +1918,8 @@ namespace llcom_plus
                         serialPortsListComboBox.IsEnabled = true;
                         connectionStatusButton.IsEnabled = true;
                         serialPortsListComboBox.SelectedItem = selectedItem;
-                        ApplyUartProfileForPort(ExtractPortName(selectedItem));
+                        if (!Tools.Global.uart.IsOpen())
+                            ApplyUartProfileForPort(ExtractPortName(selectedItem));
                     }
                     else
                     {
@@ -1866,17 +1928,19 @@ namespace llcom_plus
                         connectionStatusButton.IsEnabled = Tools.Global.uart.IsOpen();
                     }
                     refreshLock = false;
+                    UpdateMainSerialConnectionStatus();
 
-                    if (!string.IsNullOrWhiteSpace(preferredPort) &&
-                        selectedItem != null &&
-                        selectedItem.Contains($"({preferredPort})") &&
-                        !forcusClosePort &&
-                        Tools.Global.setting.autoReconnect &&
-                        !isOpeningPort)
+                    if (ShouldAutoReconnectAfterPortRefresh(
+                        preferredPort,
+                        ExtractPortName(selectedItem),
+                        Tools.Global.uart.IsOpen(),
+                        forcusClosePort,
+                        Tools.Global.setting.autoReconnect,
+                        isOpeningPort))
                     {
+                        isOpeningPort = true;
                         Task.Run(() =>
                         {
-                            isOpeningPort = true;
                             try
                             {
                                 Tools.Global.uart.Open();
@@ -1885,7 +1949,7 @@ namespace llcom_plus
                                 {
                                     serialPortsListComboBox.IsEnabled = true;
                                     connectionStatusButton.IsEnabled = true;
-                                    statusTextBlock.Text = (TryFindResource("OpenPort_open") as string ?? "?!");
+                                    UpdateMainSerialConnectionStatus();
                                     AddSerialConnectionNotification(Tools.Global.uart.GetName(), reconnected: true);
                                 }));
                             }
@@ -1894,12 +1958,31 @@ namespace llcom_plus
                                 Tools.Logger.AddUartLogDebug($"[autoReconnect]open error:{ex}");
                                 ShowOpenPortFailed(ex.Message);
                             }
-                            isOpeningPort = false;
+                            finally
+                            {
+                                isOpeningPort = false;
+                            }
                         });
                     }
                 })));
                 StartupProfiler.Mark($"refreshPortList worker exit, ports={strs.Count}");
             });
+        }
+
+        private static bool ShouldAutoReconnectAfterPortRefresh(
+            string preferredPort,
+            string selectedPort,
+            bool serialPortIsOpen,
+            bool forceClosePort,
+            bool autoReconnect,
+            bool openingPort)
+        {
+            return !serialPortIsOpen &&
+                !forceClosePort &&
+                autoReconnect &&
+                !openingPort &&
+                !string.IsNullOrWhiteSpace(preferredPort) &&
+                string.Equals(preferredPort, selectedPort, StringComparison.OrdinalIgnoreCase);
         }
 
         private void RefreshScriptList()
@@ -1974,7 +2057,7 @@ namespace llcom_plus
             {
                 serialPortsListComboBox.IsEnabled = true;
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0;
-                statusTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
+                UpdateMainSerialConnectionStatus();
                 refreshPortList();
             }
         }
@@ -2118,7 +2201,7 @@ namespace llcom_plus
             {
                 serialPortsListComboBox.IsEnabled = true;
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0;
-                statusTextBlock.Text = TryFindResource("OpenPort_close") as string ?? "?!";
+                UpdateMainSerialConnectionStatus();
                 Tools.MessageBox.Show(message);
             };
 
@@ -2169,34 +2252,14 @@ namespace llcom_plus
                 Tools.Logger.AddUartLogDebug("[openPort]skip opening");
                 return;
             }
-            ApplySelectedUartProfile();
-            if (serialPortsListComboBox.SelectedItem == null)
+            var selectedPort = GetSelectedPortName();
+            if (string.IsNullOrWhiteSpace(selectedPort))
             {
                 Tools.Logger.AddUartLogDebug("[openPort]no selected port");
                 ShowOpenPortFailed("未选择串口。");
                 return;
             }
 
-            if (Tools.Global.uart.IsOpen())
-            {
-                if (IsSelectedMainSerialPortOpen())
-                {
-                    UpdateMainSerialConnectionStatus();
-                    return;
-                }
-
-                try
-                {
-                    CloseMainSerialPortForSwitch();
-                }
-                catch (Exception ex)
-                {
-                    ShowOpenPortFailed(ex.Message);
-                    return;
-                }
-            }
-
-            isOpeningPort = true;
             string[] ports;//获取所有串口列表
             try
             {
@@ -2219,7 +2282,7 @@ namespace llcom_plus
                 var pp = p;
                 if (p.IndexOf("\0") > 0)
                     pp = p.Substring(0, p.IndexOf("\0"));
-                if ((serialPortsListComboBox.SelectedItem as string).Contains($"({pp})"))//如果和选中项目匹配
+                if (string.Equals(pp, selectedPort, StringComparison.OrdinalIgnoreCase))
                 {
                     port = pp;
                     break;
@@ -2228,10 +2291,33 @@ namespace llcom_plus
             Tools.Logger.AddUartLogDebug($"[openPort]PortName:{port},isOpeningPort:{isOpeningPort}");
             if (port == "")
             {
-                isOpeningPort = false;
                 ShowOpenPortFailed("当前选择的串口不在系统串口列表中，请刷新串口后重试。");
                 return;
             }
+
+            if (IsSelectedMainSerialPortOpen())
+            {
+                UpdateMainSerialConnectionStatus();
+                return;
+            }
+
+            isOpeningPort = true;
+            if (Tools.Global.uart.IsOpen())
+            {
+                try
+                {
+                    CloseMainSerialPortForSwitch();
+                }
+                catch (Exception ex)
+                {
+                    isOpeningPort = false;
+                    ShowOpenPortFailed(ex.Message);
+                    return;
+                }
+            }
+
+            // 目标端口已经确认存在，旧端口也已关闭，现在才加载目标端口配置。
+            ApplySelectedUartProfile();
 
             Task.Run(() =>
             {
@@ -2336,7 +2422,7 @@ namespace llcom_plus
                 connectionStatusButton.IsEnabled = serialPortsListComboBox.Items.Count > 0;
                 if (closed)
                 {
-                    statusTextBlock.Text = (TryFindResource("OpenPort_close") as string ?? "?!");
+                    UpdateMainSerialConnectionStatus();
                     AddSerialDisconnectedNotification(lastPort);
                 }
                 else
@@ -2534,6 +2620,12 @@ namespace llcom_plus
                     return;
 
                 _ = SendToSelectedSplitSlotAsync(splitData, displayAsHex);
+                return;
+            }
+
+            if (IsMainSerialPortSwitchPending())
+            {
+                ShowSerialPortSwitchRequiredBeforeSend();
                 return;
             }
 

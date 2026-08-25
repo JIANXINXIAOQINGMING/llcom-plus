@@ -523,8 +523,6 @@ namespace llcom_plus.Tools
                 }
             });
 
-            StartupProfiler.Measure("Global.Initial single instance lock", EnsureSingleInstance);
-
             StartupProfiler.Measure("Global.Initial uart config", () =>
             {
                 uart.serial.BaudRate = setting.baudRate;
@@ -539,27 +537,37 @@ namespace llcom_plus.Tools
             StartupProfiler.Mark("Global.Initial exit");
         }
 
-        internal static void EnsureSingleInstance()
+        internal static bool TryAcquireSingleInstance()
         {
             if (singleInstanceMutexOwned && singleInstanceMutex != null)
-                return;
+                return true;
 
+            return TryAcquireSingleInstance(BuildSingleInstanceMutexName(AppPath));
+        }
+
+        private static string BuildSingleInstanceMutexName(string appPath)
+        {
             var normalizedPath = Regex.Replace(
-                (AppPath ?? "").TrimEnd('\\').ToUpperInvariant(),
+                (appPath ?? "").TrimEnd('\\').ToUpperInvariant(),
                 @"[^A-Z0-9]+",
                 "_");
             if (normalizedPath.Length > 180)
                 normalizedPath = normalizedPath.Substring(normalizedPath.Length - 180);
 
-            var mutexName = @"Local\llcom_plus_single_instance_" + normalizedPath;
+            return @"Local\llcom_plus_single_instance_" + normalizedPath;
+        }
+
+        private static bool TryAcquireSingleInstance(string mutexName)
+        {
             bool createdNew;
             singleInstanceMutex = new Mutex(true, mutexName, out createdNew);
             singleInstanceMutexOwned = createdNew;
             if (createdNew)
-                return;
+                return true;
 
-            Tools.MessageBox.Show("当前目录下已运行 llcom plus。\r\n请使用小工具里的“四串口分屏”同时操作多个串口。");
-            Environment.Exit(1);
+            singleInstanceMutex.Dispose();
+            singleInstanceMutex = null;
+            return false;
         }
 
         private static void ReleaseSingleInstanceMutex()
