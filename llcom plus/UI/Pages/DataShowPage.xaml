@@ -17,49 +17,6 @@
     <Page.Resources>
         <local:boolVisibe x:Key="boolVisibeConverter" />
         <local:boolNotVisibe x:Key="boolNotVisibeConverter" />
-        <Style x:Key="DataShowStyle" TargetType="{x:Type ListBoxItem}">
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
-                        <RichTextBox
-                            Name="ItemGrid"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            FontFamily="Consolas,Microsoft YaHei,微软雅黑"
-                            FontSize="12"
-                            IsReadOnly="True">
-                            <FlowDocument>
-                                <Paragraph Margin="0">
-                                    <Run Foreground="{DynamicResource AppGlassMutedBrush}" Text="{Binding TimeText}" />
-                                    <Run Foreground="{DynamicResource AppGlassMutedBrush}" Text="{Binding ArrowText}" />
-                                    <Run
-                                        FontSize="15"
-                                        Foreground="{Binding DataTextColor}"
-                                        Text="{Binding DataText}" />
-                                    <Run
-                                        FontWeight="Bold"
-                                        Foreground="{DynamicResource AppGlassTextBrush}"
-                                        Text="{Binding RawTitle}" />
-                                    <Run
-                                        FontSize="15"
-                                        Foreground="{Binding RawTextColor}"
-                                        Text="{Binding RawText}" />
-                                    <Run Foreground="{Binding HexTextColor}" Text="{Binding HexText}" />
-                                </Paragraph>
-                            </FlowDocument>
-                        </RichTextBox>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="true">
-                                <Setter TargetName="ItemGrid" Property="Background" Value="Transparent" />
-                            </Trigger>
-                            <Trigger Property="Selector.IsSelected" Value="true">
-                                <Setter TargetName="ItemGrid" Property="Background" Value="Transparent" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
         <Style x:Key="LogOptionCheckBoxStyle" BasedOn="{StaticResource {x:Type CheckBox}}" TargetType="{x:Type CheckBox}">
             <Setter Property="Height" Value="32" />
             <Setter Property="Margin" Value="4,0,8,0" />
@@ -107,63 +64,53 @@
         </Style>
     </Page.Resources>
     <Grid x:Name="mainGrid" Background="Transparent">
-        <TextBox
+        <RichTextBox
             Name="MainTextBox"
-            VerticalContentAlignment="Top"
             Background="Transparent"
             BorderThickness="0"
             FontFamily="Consolas,Microsoft YaHei,微软雅黑"
             FontSize="15"
-            Foreground="{DynamicResource AppDataReceivedBrush}"
             IsReadOnly="True"
+            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
             ScrollViewer.VerticalScrollBarVisibility="Auto"
-            TextWrapping="Wrap" />
-        <ScrollViewer Name="MainListScrollViewer" VerticalScrollBarVisibility="Auto">
-            <ItemsControl
-                Name="MainList"
-                Background="Transparent"
-                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                ScrollViewer.VerticalScrollBarVisibility="Auto"
-                VirtualizingStackPanel.CacheLength="2,2"
-                VirtualizingStackPanel.IsVirtualizing="True"
-                VirtualizingStackPanel.VirtualizationMode="Recycling">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <RichTextBox
-                            Background="Transparent"
-                            BorderThickness="0"
-                            FontFamily="Consolas,Microsoft YaHei,微软雅黑"
-                            FontSize="12"
-                            IsReadOnly="True">
-                            <FlowDocument>
-                                <Paragraph Margin="0">
-                                    <Run Foreground="{DynamicResource AppGlassMutedBrush}" Text="{Binding TimeText}" />
-                                    <Run Foreground="{DynamicResource AppGlassMutedBrush}" Text="{Binding ArrowText}" />
-                                    <Run
-                                        FontSize="15"
-                                        Foreground="{Binding DataTextColor}"
-                                        Text="{Binding DataText}" />
-                                    <Run
-                                        FontWeight="Bold"
-                                        Foreground="{DynamicResource AppGlassTextBrush}"
-                                        Text="{Binding RawTitle}" />
-                                    <Run
-                                        FontSize="15"
-                                        Foreground="{Binding RawTextColor}"
-                                        Text="{Binding RawText}" />
-                                    <Run Foreground="{Binding HexTextColor}" Text="{Binding HexText}" />
-                                </Paragraph>
-                            </FlowDocument>
-                        </RichTextBox>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+            Visibility="Collapsed">
+            <FlowDocument PagePadding="0" />
+            <RichTextBox.ContextMenu>
+                <ContextMenu>
+                    <MenuItem
+                        Command="ApplicationCommands.Copy"
+                        CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                        Header="{DynamicResource LogCopySelection}" />
+                    <MenuItem
+                        Command="ApplicationCommands.SelectAll"
+                        CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                        Header="{DynamicResource LogSelectAll}" />
+                </ContextMenu>
+            </RichTextBox.ContextMenu>
+        </RichTextBox>
+        <RichTextBox
+            Name="MainPackedTextBox"
+            Background="Transparent"
+            BorderThickness="0"
+            FontFamily="Consolas,Microsoft YaHei,微软雅黑"
+            FontSize="12"
+            IsReadOnly="True"
+            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+            ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <FlowDocument PagePadding="0" />
+            <RichTextBox.ContextMenu>
+                <ContextMenu>
+                    <MenuItem
+                        Command="ApplicationCommands.Copy"
+                        CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                        Header="{DynamicResource LogCopySelection}" />
+                    <MenuItem
+                        Command="ApplicationCommands.SelectAll"
+                        CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                        Header="{DynamicResource LogSelectAll}" />
+                </ContextMenu>
+            </RichTextBox.ContextMenu>
+        </RichTextBox>
         <ToggleButton
             Name="LogOptionsButton"
             Margin="0,0,18,3"
@@ -191,14 +138,6 @@
                 BorderThickness="1"
                 CornerRadius="13"
                 DataContext="{Binding DataContext, ElementName=LogOptionsButton}">
-                <Border.Effect>
-                    <DropShadowEffect
-                        BlurRadius="22"
-                        Direction="270"
-                        Opacity="0.34"
-                        ShadowDepth="8"
-                        Color="{DynamicResource AppShadowColor}" />
-                </Border.Effect>
                 <StackPanel>
                     <TextBlock
                         Margin="4,0,4,8"
@@ -252,10 +191,12 @@
                             Style="{StaticResource LogOptionCheckBoxStyle}" />
                         <CheckBox
                             Name="SessionLogCheckBox"
+                            Checked="SessionLogCheckBox_Changed"
                             Content="{DynamicResource SessionLog}"
                             IsChecked="{Binding sessionLogEnabled}"
                             Style="{StaticResource LogOptionCheckBoxStyle}"
-                            ToolTip="{DynamicResource SessionLogTip}" />
+                            ToolTip="{DynamicResource SessionLogTip}"
+                            Unchecked="SessionLogCheckBox_Changed" />
                     </WrapPanel>
                     <Border
                         Height="1"

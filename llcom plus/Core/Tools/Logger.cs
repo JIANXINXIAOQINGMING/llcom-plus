@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
@@ -33,25 +34,10 @@ namespace llcom_plus.Tools
                 send = send,
                 receiveScriptContext = receiveScriptContext
             };
-            WriteSessionLog(showData.time, send ? "send" : "recv", null, data, sessionStringText);
+            WriteSessionLog(showData.time, send ? "send" : "recv", data, sessionStringText);
             DataShowTask?.Invoke(null, showData);
         }
 
-        public static void ShowRawData(string title, byte[] data, bool send)
-        {
-            //不刷新日志
-            if (Tools.Global.setting.DisableLog)
-                return;
-            var showData = new DataShowRaw
-            {
-                title = title,
-                data = data,
-                color = send
-                    ? GetThemeBrush("AppDataSentBrush", Brushes.IndianRed)
-                    : GetThemeBrush("AppDataReceivedBrush", Brushes.SeaGreen)
-            };
-            DataShowTask?.Invoke(null, showData);
-        }
         //显示日志数据
         public static void ShowDataRaw(DataShowRaw s)
         {
@@ -158,7 +144,7 @@ namespace llcom_plus.Tools
                 {
                     sessionStringLogWriter = CreateSessionLogWriter(SessionStringLogFilePath);
                     sessionHexLogWriter = CreateSessionLogWriter(SessionHexLogFilePath);
-                    var startLine = $"[START] {DateTime.Now:yyyy/MM/dd HH:mm:ss.fff} {portName}";
+                    var startLine = $"[START] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  PORT={portName}";
                     sessionStringLogWriter.WriteLine(startLine);
                     sessionHexLogWriter.WriteLine(startLine);
                 }
@@ -180,7 +166,7 @@ namespace llcom_plus.Tools
                     return;
                 try
                 {
-                    var endLine = $"[END] {DateTime.Now:yyyy/MM/dd HH:mm:ss.fff}";
+                    var endLine = $"[END] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}";
                     sessionStringLogWriter?.WriteLine(endLine);
                     sessionHexLogWriter?.WriteLine(endLine);
                 }
@@ -214,7 +200,7 @@ namespace llcom_plus.Tools
             return value;
         }
 
-        private static string Byte2SessionString(byte[] data)
+        internal static string Byte2SessionString(byte[] data)
         {
             var text = new StringBuilder();
             var plainBytes = new List<byte>();
@@ -252,7 +238,7 @@ namespace llcom_plus.Tools
                 case 0x09:
                     return "\\t";
                 case 0x0a:
-                    return "\\n";
+                    return "\\n" + Environment.NewLine;
                 case 0x0b:
                     return "\\v";
                 case 0x0c:
@@ -266,18 +252,106 @@ namespace llcom_plus.Tools
             }
         }
 
-        private static string EscapeSessionString(string text)
+        internal static string EscapeSessionString(string text)
         {
             if (text == null)
                 return null;
             return text
                 .Replace("\\", "\\\\")
                 .Replace("\r", "\\r")
-                .Replace("\n", "\\n")
+                .Replace("\n", "\\n" + Environment.NewLine)
                 .Replace("\t", "\\t");
         }
 
-        private static void WriteSessionLog(DateTime time, string direction, string title, byte[] data, string stringText = null)
+        private static readonly Regex CommonSerialErrorRegex = new Regex(
+            @"^(?:ERROR|\+CME\s+ERROR\b.*|\+CMS\s+ERROR\b.*|NO\s+CARRIER|NO\s+DIALTONE|BUSY|NO\s+ANSWER|FAIL(?:ED)?|ABORT(?:ED)?|COMMAND\s+NOT\s+SUPPORT(?:ED)?)(?:\s*:.*)?$",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        internal static SolidColorBrush GetLogDataBrush(bool sent)
+        {
+            var configured = sent
+                ? Tools.Global.setting?.logSentColor
+                : Tools.Global.setting?.logReceivedColor;
+            var fallback = sent ? Brushes.IndianRed : Brushes.SeaGreen;
+            var resourceKey = sent ? "AppDataSentBrush" : "AppDataReceivedBrush";
+            return ParseConfiguredBrush(configured) ?? GetThemeBrush(resourceKey, fallback);
+        }
+
+        internal static SolidColorBrush GetLogErrorBrush()
+        {
+            return ParseConfiguredBrush(Tools.Global.setting?.logErrorColor) ??
+                GetThemeBrush("AppDangerBrush", Brushes.OrangeRed);
+        }
+
+        internal static bool IsCommonSerialErrorLine(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                return false;
+
+            var normalized = Regex.Replace(
+                line.Trim(),
+                @"(?:\\[rntvfab0])+$",
+                "",
+                RegexOptions.IgnoreCase).Trim();
+            return CommonSerialErrorRegex.IsMatch(normalized);
+        }
+
+        private static SolidColorBrush ParseConfiguredBrush(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+            try
+            {
+                var color = (Color)ColorConverter.ConvertFromString(value.Trim());
+                return new SolidColorBrush(color);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        internal static void WriteSessionStringLine(StreamWriter writer, string prefix, string readable)
+        {
+            if (writer == null)
+                return;
+
+            var lines = (readable ?? string.Empty).Split(
+                new[] { Environment.NewLine },
+                StringSplitOptions.None);
+            var lineCount = lines.Length;
+            if (lineCount > 1 && lines[lineCount - 1].Length == 0)
+                lineCount--;
+            if (lineCount == 0)
+            {
+                writer.WriteLine($"{prefix} │");
+                return;
+            }
+
+            var continuationPrefix = new string(' ', prefix.Length);
+            for (var i = 0; i < lineCount; i++)
+                writer.WriteLine($"{(i == 0 ? prefix : continuationPrefix)} │ {lines[i]}");
+        }
+
+        internal static string BuildSessionLogPrefix(DateTime time, string direction)
+        {
+            string label;
+            switch (direction)
+            {
+                case "send":
+                    label = "TX";
+                    break;
+                case "recv":
+                    label = "RX";
+                    break;
+                default:
+                    label = (direction ?? "--").ToUpperInvariant();
+                    break;
+            }
+            return $"{time:yyyy-MM-dd HH:mm:ss.fff}  {label}";
+        }
+
+        private static void WriteSessionLog(DateTime time, string direction, byte[] data, string stringText = null)
         {
             if (data == null || data.Length == 0)
                 return;
@@ -288,14 +362,11 @@ namespace llcom_plus.Tools
                     return;
                 try
                 {
-                    var prefix = $"[{time:yyyy/MM/dd HH:mm:ss.fff}] [{direction}]";
-                    if (!string.IsNullOrWhiteSpace(title))
-                        prefix += $" [{title}]";
-
+                    var prefix = BuildSessionLogPrefix(time, direction);
                     var readable = stringText == null ? Byte2SessionString(data) : EscapeSessionString(stringText);
                     var hex = Tools.Global.Byte2Hex(data, " ", data.Length);
-                    sessionStringLogWriter?.WriteLine($"{prefix} {readable}");
-                    sessionHexLogWriter?.WriteLine($"{prefix} {hex}");
+                    WriteSessionStringLine(sessionStringLogWriter, prefix, readable);
+                    sessionHexLogWriter?.WriteLine($"{prefix} │ {hex}");
                 }
                 catch (Exception ex)
                 {

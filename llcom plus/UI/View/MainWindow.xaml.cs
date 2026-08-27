@@ -220,7 +220,6 @@ namespace llcom_plus
                         //接收到、发送数据成功回调
                         Tools.Global.uart.UartDataRecived += Uart_UartDataRecived;
                         Tools.Global.uart.UartDataSent += Uart_UartDataSent;
-                        Tools.Global.uart.UartDataRawSent += Uart_UartDataRawSent;
                         Tools.Global.SendRawDataRequest += Global_SendRawDataRequest;
                         Tools.Global.SendDataRequest += Global_SendDataRequest;
                         Tools.Global.MainSendTargetChangedEvent += Global_MainSendTargetChangedEvent;
@@ -499,7 +498,7 @@ namespace llcom_plus
         private static Pages.DataShowPage CreateSingleSerialLogPage(Pages.MultiPortPage splitPage)
         {
             var page = new Pages.DataShowPage();
-            page.SetLogTextSnapshot(splitPage?.GetSlotLogTextSnapshot(1) ?? string.Empty);
+            page.SetLogSnapshot(splitPage?.GetSlotLogSnapshot(1));
             return page;
         }
 
@@ -605,9 +604,8 @@ namespace llcom_plus
             var initialFirstPortName = mainSplitPortPage?.GetSlotPortName(1);
             if (string.IsNullOrWhiteSpace(initialFirstPortName))
                 initialFirstPortName = GetSelectedPortName();
-            var initialFirstLogText =
-                (dataShowFrame.Content as Pages.DataShowPage)?.GetLogTextSnapshot() ??
-                string.Empty;
+            var initialFirstLogSnapshot =
+                (dataShowFrame.Content as Pages.DataShowPage)?.GetLogSnapshot();
 
             // 分屏串口全部使用独立 SerialPort。进入分屏前必须释放主大屏的
             // Global.uart，否则它仍会占用旧端口并把收发事件错误投到窗口 1。
@@ -621,7 +619,7 @@ namespace llcom_plus
                     count,
                     false,
                     initialFirstPortName,
-                    initialFirstLogText);
+                    initialFirstLogSnapshot);
                 mainSplitPortPage.ActiveSlotChanged += MainSplitPortPage_ActiveSlotChanged;
                 mainSplitPortPage.SlotCountChanged += MainSplitPortPage_SlotCountChanged;
                 ShowSerialLogPage(mainSplitPortPage);
@@ -1011,19 +1009,16 @@ namespace llcom_plus
                         var allSent = true;
                         for (var broadcastSlot = 1; broadcastSlot <= mainSplitPortPage.SlotCount; broadcastSlot++)
                         {
-                            var broadcastDisplayAsHex = mainSplitPortPage.IsSlotHexMode(broadcastSlot);
                             allSent = mainSplitPortPage.SendBytesBlocking(
                                 broadcastSlot,
                                 data,
-                                broadcastDisplayAsHex,
                                 token) && allSent;
                         }
                         return allSent;
                     }
 
                     var slot = GetSelectedSerialSplitSlot();
-                    var displayAsHex = mainSplitPortPage?.IsSlotHexMode(slot) ?? Tools.Global.setting.hexSend;
-                    return mainSplitPortPage?.SendBytesBlocking(slot, data, displayAsHex, token) == true;
+                    return mainSplitPortPage?.SendBytesBlocking(slot, data, token) == true;
                 }
 
                 if (!IsSelectedMainSerialPortOpen())
@@ -1036,21 +1031,19 @@ namespace llcom_plus
             Pages.MultiPortPage page = null;
             var targetSlot = 1;
             var splitMode = false;
-            var splitDisplayAsHex = false;
             var allSerialTargets = false;
-            var allSplitTargets = new List<Tuple<int, bool>>();
+            var allSplitTargets = new List<int>();
             var mainReady = false;
             Dispatcher.Invoke(new Action(() =>
             {
                 splitMode = IsSerialSplitModeActive();
                 page = mainSplitPortPage;
                 targetSlot = GetSelectedSerialSplitSlot();
-                splitDisplayAsHex = page?.IsSlotHexMode(targetSlot) ?? Tools.Global.setting.hexSend;
                 allSerialTargets = IsAllSerialTargetsSelected();
                 if (splitMode && allSerialTargets && page != null)
                 {
                     for (var slot = 1; slot <= page.SlotCount; slot++)
-                        allSplitTargets.Add(Tuple.Create(slot, page.IsSlotHexMode(slot)));
+                        allSplitTargets.Add(slot);
                 }
                 mainReady = IsSelectedMainSerialPortOpen();
             }));
@@ -1061,10 +1054,10 @@ namespace llcom_plus
                 {
                     var allSent = true;
                     foreach (var target in allSplitTargets)
-                        allSent = page?.SendBytesBlocking(target.Item1, data, target.Item2, token) == true && allSent;
+                        allSent = page?.SendBytesBlocking(target, data, token) == true && allSent;
                     return allSent;
                 }
-                return page?.SendBytesBlocking(targetSlot, data, splitDisplayAsHex, token) == true;
+                return page?.SendBytesBlocking(targetSlot, data, token) == true;
             }
 
             if (!mainReady)
@@ -1437,14 +1430,6 @@ namespace llcom_plus
         private void Uart_UartDataSent(object sender, EventArgs e)
         {
             Tools.Logger.ShowData(sender as byte[], true, DequeueSessionSendStringOverride());
-        }
-
-        private string RawSentTitle = null;
-        private void Uart_UartDataRawSent(object sender, EventArgs e)
-        {
-            if(RawSentTitle is null)
-                RawSentTitle = TryFindResource("RawDataSentTitle") as string ?? "?!";
-            Tools.Logger.ShowRawData(RawSentTitle, sender as byte[], true);
         }
 
         private void Uart_UartDataRecived(object sender, EventArgs e)
@@ -2614,12 +2599,12 @@ namespace llcom_plus
 
                 var targetSlot = GetSelectedSerialSplitSlot();
                 var targetHexMode = mainSplitPortPage?.IsSlotHexMode(targetSlot) ?? Tools.Global.setting.hexSend;
-                var displayAsHex = is_hex ?? targetHexMode;
                 var splitData = PrepareUartSendData(data, is_hex, applySendProcessing, targetHexMode, extraEnterOverride);
                 if (splitData == null || splitData.Length == 0)
                     return;
 
-                _ = SendToSelectedSplitSlotAsync(splitData, displayAsHex);
+                _ = SendToSelectedSplitSlotAsync(
+                    splitData);
                 return;
             }
 
@@ -2713,12 +2698,11 @@ namespace llcom_plus
                 if (page == null)
                     return;
 
-                var preparedTargets = new List<Tuple<int, byte[], bool>>();
+                var preparedTargets = new List<Tuple<int, byte[]>>();
                 var failures = new List<string>();
                 for (var slot = 1; slot <= page.SlotCount; slot++)
                 {
                     var targetHexMode = page.IsSlotHexMode(slot);
-                    var displayAsHex = isHex ?? targetHexMode;
                     var data = PrepareUartSendData(
                         sourceData,
                         isHex,
@@ -2734,13 +2718,13 @@ namespace llcom_plus
                         continue;
                     }
 
-                    preparedTargets.Add(Tuple.Create(slot, data, displayAsHex));
+                    preparedTargets.Add(Tuple.Create(slot, data));
                 }
 
                 var pendingSends = preparedTargets
                     .Select(target => Tuple.Create(
                         target.Item1,
-                        page.SendBytesAsync(target.Item1, target.Item2, target.Item3)))
+                        page.SendBytesAsync(target.Item1, target.Item2)))
                     .ToList();
                 if (pendingSends.Count > 0)
                 {
@@ -2781,7 +2765,7 @@ namespace llcom_plus
             Tools.MessageBox.Show(title + "\r\n" + string.Join("\r\n", failures));
         }
 
-        private async Task SendToSelectedSplitSlotAsync(byte[] data, bool displayAsHex, bool autoOpen = true)
+        private async Task SendToSelectedSplitSlotAsync(byte[] data, bool autoOpen = true)
         {
             try
             {
@@ -2812,7 +2796,7 @@ namespace llcom_plus
                     return;
                 }
 
-                await mainSplitPortPage.SendBytesAsync(slot, data, displayAsHex);
+                await mainSplitPortPage.SendBytesAsync(slot, data);
             }
             catch (Exception ex)
             {
@@ -2822,12 +2806,11 @@ namespace llcom_plus
 
         private async Task SendPreparedDataToSplitTargetsAsync(
             byte[] data,
-            bool displayAsHex,
             bool autoOpen)
         {
             if (!IsAllSerialTargetsSelected())
             {
-                await SendToSelectedSplitSlotAsync(data, displayAsHex, autoOpen);
+                await SendToSelectedSplitSlotAsync(data, autoOpen: autoOpen);
                 return;
             }
 
@@ -2854,7 +2837,7 @@ namespace llcom_plus
             }
 
             var sends = readySlots
-                .Select(slot => page.SendBytesAsync(slot, data, displayAsHex))
+                .Select(slot => page.SendBytesAsync(slot, data))
                 .ToList();
             if (sends.Count > 0)
                 await Task.WhenAll(sends);
@@ -4764,7 +4747,6 @@ namespace llcom_plus
             {
                 _ = SendPreparedDataToSplitTargetsAsync(
                     Encoding.ASCII.GetBytes(e.TextComposition.Text),
-                    false,
                     autoOpen: false);
                 e.Handled = true;
                 return;
@@ -4797,7 +4779,6 @@ namespace llcom_plus
                 {
                     _ = SendPreparedDataToSplitTargetsAsync(
                         new byte[] { (byte)((int)e.Key - (int)Key.A + 1) },
-                        false,
                         autoOpen: false);
                     e.Handled = true;
                     return;

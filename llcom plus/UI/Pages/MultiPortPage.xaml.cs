@@ -37,7 +37,7 @@ namespace llcom_plus.Pages
         private int activeSlotNumber = 1;
         private Window ownerWindow;
         private string initialFirstPortName;
-        private string initialFirstLogText;
+        private DataShowPage.LogSnapshot initialFirstLogSnapshot;
 
         public event Action<int> ActiveSlotChanged;
         public event Action<int> SlotCountChanged;
@@ -52,16 +52,16 @@ namespace llcom_plus.Pages
         {
         }
 
-        public MultiPortPage(
+        internal MultiPortPage(
             int slotCount,
             bool showSlotSendPanel,
             string initialFirstPortName,
-            string initialFirstLogText)
+            DataShowPage.LogSnapshot initialFirstLogSnapshot)
         {
             this.slotCount = Math.Max(1, Math.Min(MaxSlotCount, slotCount));
             this.showSlotSendPanel = showSlotSendPanel;
             this.initialFirstPortName = NormalizePortName(initialFirstPortName);
-            this.initialFirstLogText = initialFirstLogText ?? string.Empty;
+            this.initialFirstLogSnapshot = initialFirstLogSnapshot;
             InitializeComponent();
             ToolbarPanel.Visibility = showSlotSendPanel ? Visibility.Visible : Visibility.Collapsed;
             ExternalOptionsButton.Visibility = Visibility.Collapsed;
@@ -85,6 +85,7 @@ namespace llcom_plus.Pages
             if (!subscribedProgramClosed)
             {
                 Global.ProgramClosedEvent += Global_ProgramClosedEvent;
+                Global.LogColorsChanged += Global_LogColorsChanged;
                 subscribedProgramClosed = true;
             }
 
@@ -112,11 +113,11 @@ namespace llcom_plus.Pages
                 ApplyPortProfile(slot);
             }
 
-            if (slot != null && !string.IsNullOrEmpty(initialFirstLogText))
-                slot.SetLogTextSnapshot(initialFirstLogText);
+            if (slot != null && initialFirstLogSnapshot != null)
+                slot.SetLogSnapshot(initialFirstLogSnapshot);
 
             initialFirstPortName = string.Empty;
-            initialFirstLogText = string.Empty;
+            initialFirstLogSnapshot = null;
         }
 
         public bool AddSlot()
@@ -327,8 +328,18 @@ namespace llcom_plus.Pages
             if (subscribedProgramClosed)
             {
                 Global.ProgramClosedEvent -= Global_ProgramClosedEvent;
+                Global.LogColorsChanged -= Global_LogColorsChanged;
                 subscribedProgramClosed = false;
             }
+        }
+
+        private void Global_LogColorsChanged(object sender, EventArgs e)
+        {
+            RunOnUi(() =>
+            {
+                foreach (var slot in slots)
+                    slot.RefreshLogColors();
+            });
         }
 
         private void OwnerWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -497,9 +508,9 @@ namespace llcom_plus.Pages
             return slot?.SelectedPortName ?? "";
         }
 
-        public string GetSlotLogTextSnapshot(int slotNumber)
+        internal DataShowPage.LogSnapshot GetSlotLogSnapshot(int slotNumber)
         {
-            return GetSlot(slotNumber)?.GetLogText() ?? string.Empty;
+            return GetSlot(slotNumber)?.GetLogSnapshot();
         }
 
         public void SetSlotPortName(int slotNumber, string portName)
@@ -555,7 +566,7 @@ namespace llcom_plus.Pages
             return opened;
         }
 
-        public Task<bool> SendBytesAsync(int slotNumber, byte[] data, bool displayAsHex)
+        public Task<bool> SendBytesAsync(int slotNumber, byte[] data)
         {
             if (data == null || data.Length == 0)
                 return Task.FromResult(false);
@@ -564,7 +575,7 @@ namespace llcom_plus.Pages
             if (index < 0 || index >= slots.Count)
                 return Task.FromResult(false);
 
-            return slots[index].SendBytesAsync(data, displayAsHex);
+            return slots[index].SendBytesAsync(data);
         }
 
         public bool IsSlotHexMode(int slotNumber)
@@ -590,13 +601,13 @@ namespace llcom_plus.Pages
             return GetSlot(slotNumber)?.LastErrorMessage ?? string.Empty;
         }
 
-        public bool SendBytesBlocking(int slotNumber, byte[] data, bool displayAsHex, CancellationToken token)
+        public bool SendBytesBlocking(int slotNumber, byte[] data, CancellationToken token)
         {
             if (data == null || data.Length == 0)
                 return false;
 
             var index = Math.Max(1, Math.Min(slotCount, slotNumber)) - 1;
-            return index >= 0 && index < slots.Count && slots[index].SendBytesBlocking(data, displayAsHex, token);
+            return index >= 0 && index < slots.Count && slots[index].SendBytesBlocking(data, token);
         }
 
         private PortSlot GetSlot(int slotNumber)
@@ -848,12 +859,19 @@ namespace llcom_plus.Pages
             private readonly TextBox sendTextBox = new TextBox();
             private readonly TextBlock titleTextBlock = new TextBlock();
             private readonly object serialLock = new object();
+            private readonly object receiveBufferLock = new object();
             private readonly object sessionLogLock = new object();
+            private readonly List<byte> pendingReceiveData = new List<byte>();
+            private readonly Dictionary<Block, DataShowPage.DataShow> packedLogItems = new Dictionary<Block, DataShowPage.DataShow>();
             private SerialPinMonitor pinMonitor;
+            private Timer receiveFlushTimer;
+            private bool receiveFlushScheduled;
             private string selectedPortName = "";
             private StreamWriter sessionStringLogWriter;
             private StreamWriter sessionHexLogWriter;
             private int logCharCount;
+            private bool lastPackedLogMode;
+            private Paragraph plainDataParagraph;
 
             public PortSlot(MultiPortPage owner, int index, bool useMainUart)
             {
@@ -865,13 +883,13 @@ namespace llcom_plus.Pages
                 {
                     Global.uart.UartDataRecived += MainUart_UartDataRecived;
                     Global.uart.UartDataSent += MainUart_UartDataSent;
-                    Global.uart.UartDataRawSent += MainUart_UartDataRawSent;
                 }
                 else
                 {
                     serial.DataReceived += Serial_DataReceived;
                     serial.WriteTimeout = 5000;
                     serial.ReadTimeout = 500;
+                    receiveFlushTimer = new Timer(FlushReceivedData, null, Timeout.Infinite, Timeout.Infinite);
                     pinMonitor = new SerialPinMonitor(serial, Global.NotifySerialPinStatusChanged);
                 }
             }
@@ -1074,6 +1092,7 @@ namespace llcom_plus.Pages
                     }
                 }
 
+                FlushReceivedData(null);
                 CloseSessionLog();
 
                 owner.RunOnUi(() =>
@@ -1093,7 +1112,6 @@ namespace llcom_plus.Pages
 
                 Global.uart.UartDataRecived -= MainUart_UartDataRecived;
                 Global.uart.UartDataSent -= MainUart_UartDataSent;
-                Global.uart.UartDataRawSent -= MainUart_UartDataRawSent;
             }
 
             public void DisposeOwnedPort()
@@ -1112,6 +1130,14 @@ namespace llcom_plus.Pages
                     catch { }
                     try { serial.Dispose(); }
                     catch { }
+                }
+                lock (receiveBufferLock)
+                {
+                    pendingReceiveData.Clear();
+                    receiveFlushScheduled = false;
+                    try { receiveFlushTimer?.Dispose(); }
+                    catch { }
+                    receiveFlushTimer = null;
                 }
             }
 
@@ -1213,13 +1239,28 @@ namespace llcom_plus.Pages
                 logTextBox.IsReadOnly = true;
                 logTextBox.Document = new FlowDocument { PagePadding = new Thickness(0) };
                 logTextBox.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-                logTextBox.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
-                logTextBox.FontFamily = new FontFamily("Consolas");
-                logTextBox.FontSize = 13;
+                logTextBox.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+                logTextBox.FontFamily = new FontFamily("Consolas,Microsoft YaHei,微软雅黑");
+                logTextBox.FontSize = 12;
                 logTextBox.Background = Brushes.Transparent;
                 logTextBox.BorderBrush = Brushes.Transparent;
                 logTextBox.BorderThickness = new Thickness(0);
                 logTextBox.FocusVisualStyle = null;
+                var logContextMenu = new ContextMenu();
+                logContextMenu.Items.Add(new MenuItem
+                {
+                    Header = owner.FindText("LogCopySelection", "复制选中内容"),
+                    Command = ApplicationCommands.Copy,
+                    CommandTarget = logTextBox
+                });
+                logContextMenu.Items.Add(new MenuItem
+                {
+                    Header = owner.FindText("LogSelectAll", "全选日志"),
+                    Command = ApplicationCommands.SelectAll,
+                    CommandTarget = logTextBox
+                });
+                logTextBox.ContextMenu = logContextMenu;
+                lastPackedLogMode = Global.setting?.timeout >= 0;
                 Grid.SetRow(logTextBox, 2);
                 grid.Children.Add(logTextBox);
 
@@ -1363,6 +1404,7 @@ namespace llcom_plus.Pages
                     }
                     else
                     {
+                        ResetReceiveBuffer();
                         serial.PortName = portName;
                         serial.BaudRate = baudRate;
                         serial.DataBits = Global.setting?.dataBits ?? 8;
@@ -1435,12 +1477,70 @@ namespace llcom_plus.Pages
             public void ClearLog()
             {
                 logTextBox.Document.Blocks.Clear();
+                packedLogItems.Clear();
                 logCharCount = 0;
+                plainDataParagraph = null;
             }
 
             public string GetLogText()
             {
                 return new TextRange(logTextBox.Document.ContentStart, logTextBox.Document.ContentEnd).Text;
+            }
+
+            public DataShowPage.LogSnapshot GetLogSnapshot()
+            {
+                if (!lastPackedLogMode)
+                {
+                    return new DataShowPage.LogSnapshot
+                    {
+                        PackedMode = false,
+                        PlainText = GetLogText()
+                    };
+                }
+
+                var items = new List<DataShowPage.DataShow>();
+                foreach (var block in logTextBox.Document.Blocks.ToList())
+                {
+                    if (packedLogItems.TryGetValue(block, out var item))
+                    {
+                        items.Add(item.Clone());
+                        continue;
+                    }
+
+                    var text = new TextRange(block.ContentStart, block.ContentEnd).Text;
+                    if (!string.IsNullOrEmpty(text))
+                        items.Add(new DataShowPage.DataShow(text));
+                }
+
+                return new DataShowPage.LogSnapshot
+                {
+                    PackedMode = true,
+                    Items = items
+                };
+            }
+
+            public void SetLogSnapshot(DataShowPage.LogSnapshot snapshot)
+            {
+                if (snapshot == null)
+                {
+                    ClearLog();
+                    return;
+                }
+
+                var packedMode = Global.setting?.timeout >= 0;
+                lastPackedLogMode = packedMode;
+                if (!packedMode || !snapshot.PackedMode)
+                {
+                    SetLogTextSnapshot(snapshot.ToPlainText());
+                    return;
+                }
+
+                ClearLog();
+                foreach (var item in snapshot.Items ?? new List<DataShowPage.DataShow>())
+                {
+                    if (item?.IsVisible == true)
+                        AppendDataLog(item.Clone());
+                }
             }
 
             public void SetLogTextSnapshot(string text)
@@ -1450,21 +1550,35 @@ namespace llcom_plus.Pages
                     snapshot = snapshot.Substring(snapshot.Length - MaxLogCharsPerSlot);
 
                 logTextBox.Document.Blocks.Clear();
+                packedLogItems.Clear();
                 logCharCount = snapshot.Length;
+                plainDataParagraph = null;
+                lastPackedLogMode = Global.setting?.timeout >= 0;
                 if (snapshot.Length == 0)
                     return;
+
+                if (lastPackedLogMode)
+                {
+                    logCharCount = 0;
+                    AppendDataLog(new DataShowPage.DataShow(snapshot));
+                    return;
+                }
 
                 var paragraph = new Paragraph
                 {
                     Margin = new Thickness(0),
-                    FontFamily = new FontFamily("Consolas"),
-                    FontSize = 13
+                    FontFamily = new FontFamily("Consolas,Microsoft YaHei,微软雅黑"),
+                    FontSize = lastPackedLogMode ? 12 : 15
                 };
-                paragraph.Inlines.Add(new Run(snapshot)
-                {
-                    Foreground = ResourceBrush("AppGlassTextBrush", Brushes.Black)
-                });
+                DataShowPage.AppendLogTextRuns(
+                    paragraph,
+                    snapshot,
+                    Logger.GetLogDataBrush(false),
+                    true,
+                    15,
+                    DataShowPage.ReceivedColorRole);
                 logTextBox.Document.Blocks.Add(paragraph);
+                plainDataParagraph = paragraph;
                 logTextBox.ScrollToEnd();
             }
 
@@ -1499,10 +1613,10 @@ namespace llcom_plus.Pages
                 if (data.Length == 0)
                     return;
 
-                await SendBytesAsync(data, sendAsHex);
+                await SendBytesAsync(data);
             }
 
-            public async Task<bool> SendBytesAsync(byte[] data, bool displayAsHex)
+            public async Task<bool> SendBytesAsync(byte[] data)
             {
                 if (!IsSelectedPortOpen)
                 {
@@ -1527,7 +1641,9 @@ namespace llcom_plus.Pages
                         }
                     });
                     if (!useMainUart)
-                        WriteDataLog("TX", data, displayAsHex, true);
+                    {
+                        WriteDataLog(data, true);
+                    }
                     return true;
                 }
                 catch (Exception ex)
@@ -1541,7 +1657,7 @@ namespace llcom_plus.Pages
                 }
             }
 
-            public bool SendBytesBlocking(byte[] data, bool displayAsHex, CancellationToken token)
+            public bool SendBytesBlocking(byte[] data, CancellationToken token)
             {
                 token.ThrowIfCancellationRequested();
                 try
@@ -1561,7 +1677,7 @@ namespace llcom_plus.Pages
                             WriteDirectSerial(data, token);
                     }
 
-                    owner.RunOnUi(() => WriteDataLog("TX", data, displayAsHex, true, updateCounters: !useMainUart));
+                    owner.RunOnUi(() => WriteDataLog(data, true, updateCounters: !useMainUart));
                     return true;
                 }
                 catch (OperationCanceledException)
@@ -1678,12 +1794,7 @@ namespace llcom_plus.Pages
 
                     if (data.Length == 0)
                         return;
-                    owner.RunOnUi(() =>
-                    {
-                        WriteDataLog("RX", data, HexMode, false);
-                        if (Index == owner.activeSlotNumber)
-                            Global.NotifyActiveSerialTargetReceived(data);
-                    });
+                    QueueReceivedData(data);
                 }
                 catch (Exception ex) when (IsClosedSerialException(ex))
                 {
@@ -1691,6 +1802,68 @@ namespace llcom_plus.Pages
                 catch (Exception ex)
                 {
                     owner.RunOnUi(() => AppendLog("ERR", ex.Message));
+                }
+            }
+
+            private void QueueReceivedData(byte[] data)
+            {
+                if (data == null || data.Length == 0)
+                    return;
+
+                var flushImmediately = false;
+                lock (receiveBufferLock)
+                {
+                    pendingReceiveData.AddRange(data);
+                    var maxLength = Math.Max(1L, Global.setting?.maxLength ?? 10240);
+                    if (pendingReceiveData.Count > maxLength)
+                    {
+                        receiveFlushTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                        receiveFlushScheduled = false;
+                        flushImmediately = true;
+                    }
+                    else
+                    {
+                        var timeout = Global.setting?.timeout ?? 50;
+                        var delay = timeout > 0 ? timeout : 10;
+                        var resetOnEveryReceive = timeout < 0 || Global.setting?.bitDelay != false;
+                        if (!receiveFlushScheduled || resetOnEveryReceive)
+                            receiveFlushTimer?.Change(delay, Timeout.Infinite);
+                        receiveFlushScheduled = true;
+                    }
+                }
+
+                if (flushImmediately)
+                    FlushReceivedData(null);
+            }
+
+            private void FlushReceivedData(object state)
+            {
+                byte[] data;
+                lock (receiveBufferLock)
+                {
+                    receiveFlushScheduled = false;
+                    if (pendingReceiveData.Count == 0)
+                        return;
+
+                    data = pendingReceiveData.ToArray();
+                    pendingReceiveData.Clear();
+                }
+
+                owner.RunOnUi(() =>
+                {
+                    WriteDataLog(data, false);
+                    if (Index == owner.activeSlotNumber)
+                        Global.NotifyActiveSerialTargetReceived(data);
+                });
+            }
+
+            private void ResetReceiveBuffer()
+            {
+                lock (receiveBufferLock)
+                {
+                    receiveFlushTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                    receiveFlushScheduled = false;
+                    pendingReceiveData.Clear();
                 }
             }
 
@@ -1724,17 +1897,7 @@ namespace llcom_plus.Pages
                     return;
 
                 owner.RunOnUi(() =>
-                    WriteDataLog("TX", data, HexMode, true, updateCounters: false, writeSessionLog: false));
-            }
-
-            private void MainUart_UartDataRawSent(object sender, EventArgs e)
-            {
-                var data = sender as byte[];
-                if (data == null || data.Length == 0)
-                    return;
-
-                owner.RunOnUi(() =>
-                    WriteDataLog("TX", data, true, true, updateCounters: false, writeSessionLog: false));
+                    WriteDataLog(data, true, updateCounters: false, writeSessionLog: false));
             }
 
             private void MainUart_UartDataRecived(object sender, EventArgs e)
@@ -1744,24 +1907,12 @@ namespace llcom_plus.Pages
                     return;
 
                 owner.RunOnUi(() =>
-                    WriteDataLog("RX", data, HexMode, false, updateCounters: false, writeSessionLog: false));
+                    WriteDataLog(data, false, updateCounters: false, writeSessionLog: false));
             }
 
-            private string FormatData(byte[] data)
+            private void WriteDataLog(byte[] data, bool sent, bool updateCounters = true, bool writeSessionLog = true)
             {
-                return FormatData(data, hexCheckBox.IsChecked == true);
-            }
-
-            private string FormatData(byte[] data, bool hex)
-            {
-                return hex
-                    ? Global.Byte2Hex(data, " ", data.Length)
-                    : Global.Byte2Readable(data, data.Length);
-            }
-
-            private void WriteDataLog(string direction, byte[] data, bool hex, bool sent, bool updateCounters = true, bool writeSessionLog = true)
-            {
-                if (Global.setting.DisableLog)
+                if (data == null || data.Length == 0 || Global.setting == null || Global.setting.DisableLog)
                     return;
 
                 if (updateCounters)
@@ -1774,7 +1925,110 @@ namespace llcom_plus.Pages
 
                 if (writeSessionLog)
                     WriteSessionLog(sent ? "send" : "recv", data);
-                AppendLog(direction, FormatData(data, hex), sent ? ResourceBrush("AppDataSentBrush", Brushes.IndianRed) : ResourceBrush("AppDataReceivedBrush", Brushes.SeaGreen));
+
+                // 与普通模式一致：关闭“显示实际发出的数据”时，不显示分屏发送回显。
+                if (sent && !Global.setting.showSend)
+                    return;
+
+                var displayItem = new DataShowPage.DataShow(new DataShowPara
+                {
+                    data = data,
+                    send = sent
+                });
+                if (!displayItem.IsVisible)
+                    return;
+
+                var packedLogMode = Global.setting.timeout >= 0;
+                if (lastPackedLogMode != packedLogMode)
+                {
+                    lastPackedLogMode = packedLogMode;
+                    ClearLog();
+                }
+
+                if (!packedLogMode)
+                {
+                    var text = displayItem.DataText ?? string.Empty;
+                    if (Global.setting.showHexFormat == 2 && text.Length > 0)
+                        text += " ";
+                    AppendPlainData(text, sent);
+                    return;
+                }
+
+                AppendDataLog(displayItem);
+            }
+
+            private void AppendPlainData(string text, bool sent)
+            {
+                if (string.IsNullOrEmpty(text))
+                    return;
+
+                if (plainDataParagraph == null)
+                {
+                    plainDataParagraph = new Paragraph
+                    {
+                        Margin = new Thickness(0),
+                        FontFamily = new FontFamily("Consolas,Microsoft YaHei,微软雅黑"),
+                        FontSize = 15
+                    };
+                    logTextBox.Document.Blocks.Add(plainDataParagraph);
+                }
+
+                DataShowPage.AppendLogTextRuns(
+                    plainDataParagraph,
+                    text,
+                    Logger.GetLogDataBrush(sent),
+                    !sent,
+                    15,
+                    sent ? DataShowPage.SentColorRole : DataShowPage.ReceivedColorRole);
+                logCharCount += text.Length;
+                TrimPlainData();
+                TrimLog();
+                if (!owner.lockLogs)
+                    logTextBox.ScrollToEnd();
+            }
+
+            private void TrimPlainData()
+            {
+                if (plainDataParagraph == null || logCharCount <= MaxLogCharsPerSlot)
+                    return;
+
+                var currentText = new TextRange(
+                    plainDataParagraph.ContentStart,
+                    plainDataParagraph.ContentEnd).Text;
+                if (currentText.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+                    currentText = currentText.Substring(0, currentText.Length - Environment.NewLine.Length);
+                var retainedLength = Math.Max(0, MaxLogCharsPerSlot - LogTrimChars);
+                if (currentText.Length <= retainedLength)
+                    return;
+
+                var retainedText = currentText.Substring(currentText.Length - retainedLength);
+                plainDataParagraph.Inlines.Clear();
+                DataShowPage.AppendLogTextRuns(
+                    plainDataParagraph,
+                    retainedText,
+                    Logger.GetLogDataBrush(false),
+                    true,
+                    15,
+                    DataShowPage.ReceivedColorRole);
+                logCharCount -= currentText.Length - retainedText.Length;
+            }
+
+            private void AppendDataLog(DataShowPage.DataShow item)
+            {
+                plainDataParagraph = null;
+                var paragraph = DataShowPage.CreateLogParagraph(item);
+                logTextBox.Document.Blocks.Add(paragraph);
+                packedLogItems[paragraph] = item.Clone();
+                logCharCount +=
+                    (item.TimeText?.Length ?? 0) +
+                    (item.ArrowText?.Length ?? 0) +
+                    (item.DataText?.Length ?? 0) +
+                    (item.RawTitle?.Length ?? 0) +
+                    (item.RawText?.Length ?? 0) +
+                    (item.HexText?.Length ?? 0) + 2;
+                TrimLog();
+                if (!owner.lockLogs)
+                    logTextBox.ScrollToEnd();
             }
 
             private void AppendLog(string direction, string text)
@@ -1784,10 +2038,38 @@ namespace llcom_plus.Pages
 
             private void AppendLog(string direction, string text, Brush dataBrush)
             {
+                var packedLogMode = Global.setting?.timeout >= 0;
+                if (lastPackedLogMode != packedLogMode)
+                {
+                    lastPackedLogMode = packedLogMode;
+                    ClearLog();
+                }
+
+                if (packedLogMode)
+                {
+                    AppendDataLog(DataShowPage.DataShow.CreateStatus(
+                        $"[{DateTime.Now:HH:mm:ss.fff}] ",
+                        direction + " ",
+                        text,
+                        dataBrush as SolidColorBrush ?? ResourceBrush("AppGlassTextBrush", SystemColors.ControlTextBrush)));
+                    return;
+                }
+
+                plainDataParagraph = null;
                 var linePrefix = $"[{DateTime.Now:HH:mm:ss.fff}] {direction} ";
                 var paragraph = new Paragraph { Margin = new Thickness(0) };
                 paragraph.Inlines.Add(new Run(linePrefix) { Foreground = ResourceBrush("AppGlassMutedBrush", SystemColors.GrayTextBrush) });
-                paragraph.Inlines.Add(new Run(text ?? "") { Foreground = dataBrush });
+                paragraph.Inlines.Add(new Run(text ?? "")
+                {
+                    Foreground = dataBrush,
+                    Tag = direction == "TX"
+                        ? DataShowPage.SentColorRole
+                        : direction == "RX"
+                            ? DataShowPage.ReceivedColorRole
+                            : direction == "ERR"
+                                ? DataShowPage.ErrorColorRole
+                                : null
+                });
                 logTextBox.Document.Blocks.Add(paragraph);
                 logCharCount += linePrefix.Length + (text?.Length ?? 0) + 2;
                 TrimLog();
@@ -1804,6 +2086,9 @@ namespace llcom_plus.Pages
                 {
                     var first = logTextBox.Document.Blocks.FirstBlock;
                     logCharCount -= new TextRange(first.ContentStart, first.ContentEnd).Text.Length;
+                    if (ReferenceEquals(first, plainDataParagraph))
+                        plainDataParagraph = null;
+                    packedLogItems.Remove(first);
                     logTextBox.Document.Blocks.Remove(first);
                 }
             }
@@ -1813,11 +2098,11 @@ namespace llcom_plus.Pages
                 switch (direction)
                 {
                     case "TX":
-                        return ResourceBrush("AppDataSentBrush", Brushes.IndianRed);
+                        return Logger.GetLogDataBrush(true);
                     case "RX":
-                        return ResourceBrush("AppDataReceivedBrush", Brushes.SeaGreen);
+                        return Logger.GetLogDataBrush(false);
                     case "ERR":
-                        return ResourceBrush("AppDangerBrush", Brushes.OrangeRed);
+                        return Logger.GetLogErrorBrush();
                     default:
                         return ResourceBrush("AppGlassTextBrush", SystemColors.ControlTextBrush);
                 }
@@ -1826,6 +2111,35 @@ namespace llcom_plus.Pages
             private static SolidColorBrush ResourceBrush(string key, SolidColorBrush fallback)
             {
                 return Tools.Logger.GetThemeBrush(key, fallback);
+            }
+
+            public void RefreshLogColors()
+            {
+                if (!lastPackedLogMode)
+                {
+                    foreach (var paragraph in logTextBox.Document.Blocks.OfType<Paragraph>())
+                    {
+                        foreach (var run in paragraph.Inlines.OfType<Run>())
+                        {
+                            switch (run.Tag as string)
+                            {
+                                case DataShowPage.SentColorRole:
+                                    run.Foreground = Logger.GetLogDataBrush(true);
+                                    break;
+                                case DataShowPage.ReceivedColorRole:
+                                    run.Foreground = Logger.GetLogDataBrush(false);
+                                    break;
+                                case DataShowPage.ErrorColorRole:
+                                    run.Foreground = Logger.GetLogErrorBrush();
+                                    break;
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                var snapshot = GetLogSnapshot();
+                SetLogSnapshot(snapshot);
             }
 
             private void EnsureSessionLogOpen()
@@ -1857,7 +2171,7 @@ namespace llcom_plus.Pages
                         var fileName = $"{DateTime.Now:yyyyMMdd_HHmmss}_slot{Index}.log";
                         sessionStringLogWriter = CreateSessionLogWriter(Path.Combine(stringFolder, fileName));
                         sessionHexLogWriter = CreateSessionLogWriter(Path.Combine(hexFolder, fileName));
-                        var startLine = $"[START] {DateTime.Now:yyyy/MM/dd HH:mm:ss.fff} {PortName} slot {Index}";
+                        var startLine = $"[START] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  PORT={PortName}  SLOT={Index}";
                         sessionStringLogWriter.WriteLine(startLine);
                         sessionHexLogWriter.WriteLine(startLine);
                     }
@@ -1875,7 +2189,7 @@ namespace llcom_plus.Pages
                 {
                     try
                     {
-                        var endLine = $"[END] {DateTime.Now:yyyy/MM/dd HH:mm:ss.fff}";
+                        var endLine = $"[END] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}";
                         sessionStringLogWriter?.WriteLine(endLine);
                         sessionHexLogWriter?.WriteLine(endLine);
                     }
@@ -1911,9 +2225,12 @@ namespace llcom_plus.Pages
 
                     try
                     {
-                        var prefix = $"[{DateTime.Now:yyyy/MM/dd HH:mm:ss.fff}] [{direction}]";
-                        sessionStringLogWriter?.WriteLine($"{prefix} {Byte2SessionString(data)}");
-                        sessionHexLogWriter?.WriteLine($"{prefix} {Global.Byte2Hex(data, " ", data.Length)}");
+                        var prefix = Logger.BuildSessionLogPrefix(DateTime.Now, direction);
+                        Logger.WriteSessionStringLine(
+                            sessionStringLogWriter,
+                            prefix,
+                            Logger.Byte2SessionString(data));
+                        sessionHexLogWriter?.WriteLine($"{prefix} │ {Global.Byte2Hex(data, " ", data.Length)}");
                     }
                     catch (Exception ex)
                     {
@@ -1937,22 +2254,6 @@ namespace llcom_plus.Pages
                 foreach (var c in Path.GetInvalidFileNameChars())
                     value = value.Replace(c, '_');
                 return value;
-            }
-
-            private static string Byte2SessionString(byte[] data)
-            {
-                return EscapeSessionString(Global.Byte2Readable(data, data.Length));
-            }
-
-            private static string EscapeSessionString(string text)
-            {
-                if (text == null)
-                    return "";
-                return text
-                    .Replace("\\", "\\\\")
-                    .Replace("\r", "\\r")
-                    .Replace("\n", "\\n")
-                    .Replace("\t", "\\t");
             }
 
             private static Encoding GetEncoding()

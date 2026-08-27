@@ -79,6 +79,9 @@ namespace llcom_plus.Model
         private bool _showSerialByteCounts = true;
         private bool _sessionLogEnabled = false;
         private string _sessionLogFolder = "";
+        private string _logSentColor = "";
+        private string _logReceivedColor = "";
+        private string _logErrorColor = "";
         private bool _darkMode = false;
         public Dictionary<string, UartPortProfile> uartProfiles = new Dictionary<string, UartPortProfile>(StringComparer.OrdinalIgnoreCase);
         public int uartProfileSchemaVersion { get; set; } = 0;
@@ -813,6 +816,36 @@ namespace llcom_plus.Model
             set
             {
                 _showSend = value;
+                Save();
+            }
+        }
+
+        public string logSentColor
+        {
+            get { return _logSentColor; }
+            set
+            {
+                _logSentColor = value ?? "";
+                Save();
+            }
+        }
+
+        public string logReceivedColor
+        {
+            get { return _logReceivedColor; }
+            set
+            {
+                _logReceivedColor = value ?? "";
+                Save();
+            }
+        }
+
+        public string logErrorColor
+        {
+            get { return _logErrorColor; }
+            set
+            {
+                _logErrorColor = value ?? "";
                 Save();
             }
         }

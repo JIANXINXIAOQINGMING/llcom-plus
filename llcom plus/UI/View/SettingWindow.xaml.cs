@@ -177,6 +177,7 @@ namespace llcom_plus
             Tools.EditorTheme.Apply(textEditor);
             Tools.EditorTheme.Apply(textEditorRev);
             Tools.Global.ThemeChanged += Global_ThemeChanged;
+            RefreshLogColorSwatches();
             //加载上次打开的文件
             loadScriptFile(Tools.Global.setting.sendScript);
             if(!string.IsNullOrEmpty(MainWindow.recvScriptBackup)) loadScriptFileRev(MainWindow.recvScriptBackup);
@@ -210,7 +211,73 @@ namespace llcom_plus
             {
                 Tools.EditorTheme.Apply(textEditor);
                 Tools.EditorTheme.Apply(textEditorRev);
+                RefreshLogColorSwatches();
             }));
+        }
+
+        private void LogColorButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!(sender is Button button) || Tools.Global.setting == null)
+                return;
+
+            var kind = button.Tag as string ?? "";
+            var brush = kind == "sent"
+                ? Tools.Logger.GetLogDataBrush(true)
+                : kind == "received"
+                    ? Tools.Logger.GetLogDataBrush(false)
+                    : Tools.Logger.GetLogErrorBrush();
+
+            using (var dialog = new System.Windows.Forms.ColorDialog())
+            {
+                dialog.FullOpen = true;
+                dialog.Color = System.Drawing.Color.FromArgb(
+                    brush.Color.A,
+                    brush.Color.R,
+                    brush.Color.G,
+                    brush.Color.B);
+                if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                    return;
+
+                var selected = dialog.Color;
+                var value = $"#{selected.A:X2}{selected.R:X2}{selected.G:X2}{selected.B:X2}";
+                switch (kind)
+                {
+                    case "sent":
+                        Tools.Global.setting.logSentColor = value;
+                        break;
+                    case "received":
+                        Tools.Global.setting.logReceivedColor = value;
+                        break;
+                    default:
+                        Tools.Global.setting.logErrorColor = value;
+                        break;
+                }
+            }
+
+            RefreshLogColorSwatches();
+            Tools.Global.NotifyLogColorsChanged();
+        }
+
+        private void ResetLogColorsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (Tools.Global.setting == null)
+                return;
+
+            Tools.Global.setting.logSentColor = "";
+            Tools.Global.setting.logReceivedColor = "";
+            Tools.Global.setting.logErrorColor = "";
+            RefreshLogColorSwatches();
+            Tools.Global.NotifyLogColorsChanged();
+        }
+
+        private void RefreshLogColorSwatches()
+        {
+            if (SentColorSwatch == null || ReceivedColorSwatch == null || ErrorColorSwatch == null)
+                return;
+
+            SentColorSwatch.Background = Tools.Logger.GetLogDataBrush(true);
+            ReceivedColorSwatch.Background = Tools.Logger.GetLogDataBrush(false);
+            ErrorColorSwatch.Background = Tools.Logger.GetLogErrorBrush();
         }
 
         private void RefreshUartSettingControls()

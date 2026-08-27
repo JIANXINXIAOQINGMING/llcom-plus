@@ -226,14 +226,6 @@
                 BorderThickness="1"
                 CornerRadius="13"
                 DataContext="{Binding DataContext, ElementName=ExternalOptionsButton}">
-                <Border.Effect>
-                    <DropShadowEffect
-                        BlurRadius="22"
-                        Direction="270"
-                        Opacity="0.34"
-                        ShadowDepth="8"
-                        Color="{DynamicResource AppShadowColor}" />
-                </Border.Effect>
                 <StackPanel>
                     <TextBlock
                         x:Name="ExternalOptionsTitle"

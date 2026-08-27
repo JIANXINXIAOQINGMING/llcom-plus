@@ -61,6 +61,7 @@ namespace llcom_plus.Tools
     {
         public static event EventHandler ProgramClosedEvent;
         public static event EventHandler ThemeChanged;
+        public static event EventHandler LogColorsChanged;
         public static bool IsDarkTheme { get; private set; }
         //api接口文档
         public static string apiDocumentUrl = "JavaScriptApi.md";
@@ -1082,6 +1083,7 @@ namespace llcom_plus.Tools
             }
 
             RaiseThemeChanged();
+            NotifyLogColorsChanged();
         }
 
         private static void ReplaceMergedDictionary(
@@ -1123,6 +1125,25 @@ namespace llcom_plus.Tools
                 catch
                 {
                     // 单个工具页的主题适配失败不应阻断全局主题切换。
+                }
+            }
+        }
+
+        public static void NotifyLogColorsChanged()
+        {
+            var handlers = LogColorsChanged;
+            if (handlers == null)
+                return;
+
+            foreach (EventHandler handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(null, EventArgs.Empty);
+                }
+                catch
+                {
+                    // 单个页面刷新失败不应阻断设置保存和其它页面更新。
                 }
             }
         }

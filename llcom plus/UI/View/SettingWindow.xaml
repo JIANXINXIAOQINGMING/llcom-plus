@@ -37,7 +37,8 @@
                             Name="OpenLogButton"
                             Margin="5"
                             Click="OpenLogButton_Click"
-                            Content="{DynamicResource SettingOpenLogFolder}" />
+                            Content="{DynamicResource SettingOpenLogFolder}"
+                            ToolTip="{DynamicResource SettingOpenLogFolderTip}" />
                         <WrapPanel Margin="5">
                             <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingShowFormat}" />
                             <ComboBox
@@ -53,10 +54,59 @@
                             Margin="5"
                             Content="{DynamicResource SettingShowSend}"
                             IsChecked="{Binding showSend}" />
-                        <CheckBox
-                            Margin="5"
-                            Content="{DynamicResource SettingShowSendRaw}"
-                            IsChecked="{Binding showSendRaw}" />
+                        <GroupBox Margin="5" Header="{DynamicResource SettingLogColors}">
+                            <StackPanel Margin="6">
+                                <UniformGrid Columns="3">
+                                    <Button
+                                        Margin="3"
+                                        Click="LogColorButton_Click"
+                                        Tag="sent">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <Border
+                                                Name="SentColorSwatch"
+                                                Width="34"
+                                                Height="8"
+                                                Margin="0,1,0,5"
+                                                CornerRadius="4" />
+                                            <TextBlock Text="{DynamicResource SettingLogSentColor}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button
+                                        Margin="3"
+                                        Click="LogColorButton_Click"
+                                        Tag="received">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <Border
+                                                Name="ReceivedColorSwatch"
+                                                Width="34"
+                                                Height="8"
+                                                Margin="0,1,0,5"
+                                                CornerRadius="4" />
+                                            <TextBlock Text="{DynamicResource SettingLogReceivedColor}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button
+                                        Margin="3"
+                                        Click="LogColorButton_Click"
+                                        Tag="error"
+                                        ToolTip="{DynamicResource SettingLogErrorColorTip}">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <Border
+                                                Name="ErrorColorSwatch"
+                                                Width="34"
+                                                Height="8"
+                                                Margin="0,1,0,5"
+                                                CornerRadius="4" />
+                                            <TextBlock Text="{DynamicResource SettingLogErrorColor}" />
+                                        </StackPanel>
+                                    </Button>
+                                </UniformGrid>
+                                <Button
+                                    Margin="3"
+                                    Click="ResetLogColorsButton_Click"
+                                    Content="{DynamicResource SettingLogColorReset}" />
+                            </StackPanel>
+                        </GroupBox>
                         <CheckBox
                             Margin="5"
                             Content="{DynamicResource SettingKeepTop}"

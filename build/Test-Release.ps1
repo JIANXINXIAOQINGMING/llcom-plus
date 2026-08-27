@@ -514,10 +514,20 @@ try {
         Test-Condition ($null -ne $addSplitPaneButton) 'The main status bar exposes an add-split-pane button'
 
         $multiPortPageType = $assembly.GetType('llcom_plus.Pages.MultiPortPage', $true)
+        $logSnapshotType = $assembly.GetType('llcom_plus.Pages.DataShowPage+LogSnapshot', $true)
+        $initialLogSnapshot = [Activator]::CreateInstance($logSnapshotType, $true)
+        $logSnapshotType.GetProperty('PackedMode').SetValue($initialLogSnapshot, $false, $null)
+        $logSnapshotType.GetProperty('PlainText').SetValue(
+            $initialLogSnapshot,
+            'preserved single-pane log',
+            $null)
         $multiPortConstructor = $multiPortPageType.GetConstructor(
-            [Type[]]@([int], [bool], [string], [string]))
+            [Reflection.BindingFlags]'NonPublic,Instance',
+            $null,
+            [Type[]]@([int], [bool], [string], $logSnapshotType),
+            $null)
         $multiPortPage = $multiPortConstructor.Invoke(
-            [object[]]@(2, $false, $null, "preserved single-pane log"))
+            [object[]]@(2, $false, $null, $initialLogSnapshot))
         $multiPortLoaded = $multiPortPageType.GetMethod(
             'Page_Loaded',
             [Reflection.BindingFlags]'NonPublic,Instance')
@@ -541,10 +551,15 @@ try {
             $initialLogPreserved = $getSlotLogText.Invoke(
                 $firstSlot,
                 $null).Contains('preserved single-pane log')
-            $getSlotLogTextSnapshot = $multiPortPageType.GetMethod('GetSlotLogTextSnapshot')
-            $publicSlotLogSnapshotPreserved = $getSlotLogTextSnapshot.Invoke(
+            $getSlotLogSnapshot = $multiPortPageType.GetMethod(
+                'GetSlotLogSnapshot',
+                [Reflection.BindingFlags]'NonPublic,Instance')
+            $slotLogSnapshot = $getSlotLogSnapshot.Invoke(
                 $multiPortPage,
-                [object[]]@(1)).Contains('preserved single-pane log')
+                [object[]]@(1))
+            $publicSlotLogSnapshotPreserved = $logSnapshotType.GetMethod('ToPlainText').Invoke(
+                $slotLogSnapshot,
+                $null).Contains('preserved single-pane log')
 
             $addSplitSlot = $multiPortPageType.GetMethod('AddSlot')
             $removeSplitSlot = $multiPortPageType.GetMethod('RemoveSlot')
