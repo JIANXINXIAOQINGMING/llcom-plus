@@ -47,6 +47,7 @@ namespace llcom_plus.Tools
         public string Message { get; set; }
         public AppNotificationLevel Level { get; set; }
         public AppNotificationCategory Category { get; set; }
+        public string PortName { get; set; }
     }
 
     class UartSendRequest
@@ -242,7 +243,8 @@ namespace llcom_plus.Tools
             string message = "",
             AppNotificationLevel level = AppNotificationLevel.Info,
             DateTime? timestamp = null,
-            AppNotificationCategory category = AppNotificationCategory.General)
+            AppNotificationCategory category = AppNotificationCategory.General,
+            string portName = "")
         {
             if (isMainWindowsClosed || string.IsNullOrWhiteSpace(title))
                 return;
@@ -253,7 +255,8 @@ namespace llcom_plus.Tools
                 Title = title.Trim(),
                 Message = message ?? string.Empty,
                 Level = level,
-                Category = category
+                Category = category,
+                PortName = portName ?? string.Empty
             };
             var handlers = AppNotificationEvent;
             if (handlers == null)

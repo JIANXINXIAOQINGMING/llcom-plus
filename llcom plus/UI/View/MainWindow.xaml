@@ -71,6 +71,58 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="8,4" />
         </Style>
+        <Style x:Key="NotificationCloseButtonStyle" TargetType="{x:Type Button}">
+            <Setter Property="Width" Value="20" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="{DynamicResource AppDangerBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border
+                            x:Name="Chrome"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="10">
+                            <ContentPresenter
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.82" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FloatingNotificationWindowStyle" TargetType="{x:Type Window}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Window}">
+                        <Border Background="{TemplateBinding Background}">
+                            <AdornerDecorator>
+                                <ContentPresenter
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}" />
+                            </AdornerDecorator>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="GlassTextBoxStyle" BasedOn="{StaticResource {x:Type TextBox}}" TargetType="{x:Type TextBox}">
             <Setter Property="Background" Value="{DynamicResource AppGlassInputBackground}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
@@ -1503,7 +1555,12 @@
             PlacementTarget="{Binding ElementName=NotificationCenterButton}"
             StaysOpen="True"
             VerticalOffset="7">
-            <Grid Name="NotificationPopupRoot" Width="470" MaxHeight="510">
+            <Grid
+                Name="NotificationPopupRoot"
+                Width="470"
+                MaxHeight="510"
+                Background="Transparent"
+                PreviewMouseLeftButtonDown="NotificationDragHandle_MouseLeftButtonDown">
                 <Border
                     Name="NotificationPopupSurface"
                     Margin="20"
@@ -1527,13 +1584,16 @@
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Grid Margin="2,0,2,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal">
+                        <Grid
+                            Name="NotificationHeader"
+                            Margin="2,0,2,10">
+                             <Grid.ColumnDefinitions>
+                                 <ColumnDefinition Width="*" />
+                                 <ColumnDefinition Width="Auto" />
+                                 <ColumnDefinition Width="Auto" />
+                                 <ColumnDefinition Width="Auto" />
+                             </Grid.ColumnDefinitions>
+                             <StackPanel Orientation="Horizontal">
                                 <fa:FontAwesome
                                     Margin="0,0,8,0"
                                     VerticalAlignment="Center"
@@ -1570,15 +1630,39 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
-                            <Button
-                                Name="NotificationClearButton"
+                             <Button
+                                 Name="NotificationClearButton"
                                 Grid.Column="2"
                                 MinWidth="58"
                                 Padding="9,4"
                                 Click="NotificationClearButton_Click"
-                                Content="{DynamicResource NotificationClear}"
-                                Style="{StaticResource GlassButtonStyle}" />
-                        </Grid>
+                                 Content="{DynamicResource NotificationClear}"
+                                 Style="{StaticResource GlassButtonStyle}" />
+                             <Button
+                                 Name="NotificationDetachButton"
+                                 Grid.Column="3"
+                                 Width="30"
+                                 Height="30"
+                                 Margin="0,0,6,0"
+                                 Padding="0"
+                                 Click="NotificationDetachButton_Click"
+                                 Style="{StaticResource GlassButtonStyle}"
+                                 ToolTip="{DynamicResource NotificationDetachTip}">
+                                 <fa:FontAwesome FontSize="13" Icon="ThumbTack" />
+                             </Button>
+                         </Grid>
+                        <Button
+                            Name="NotificationDetachedCloseButton"
+                            Grid.RowSpan="3"
+                            Margin="0,-20,-20,0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Panel.ZIndex="40"
+                            Click="NotificationDetachedCloseButton_Click"
+                            Content="×"
+                            Style="{StaticResource NotificationCloseButtonStyle}"
+                            ToolTip="{DynamicResource NotificationDetachedCloseTip}"
+                            Visibility="Collapsed" />
                         <Border
                             Grid.Row="1"
                             MinHeight="130"

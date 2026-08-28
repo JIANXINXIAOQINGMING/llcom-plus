@@ -504,6 +504,8 @@
     <system:String x:Key="NotificationFilterWarning">警告</system:String>
     <system:String x:Key="NotificationFilterError">错误</system:String>
     <system:String x:Key="NotificationSessionOnly">消息仅保留在本次运行中，最多显示最近 200 条。</system:String>
+    <system:String x:Key="NotificationDetachTip">本次悬浮并置顶消息中心</system:String>
+    <system:String x:Key="NotificationDetachedCloseTip">关闭悬浮消息中心</system:String>
     <system:String x:Key="NotificationConnectedTitleFormat">{0} 已连接</system:String>
     <system:String x:Key="NotificationDisconnectedTitleFormat">{0} 已断开</system:String>
     <system:String x:Key="NotificationConnectionLostTitleFormat">{0} 连接中断</system:String>

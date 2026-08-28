@@ -504,6 +504,8 @@
     <system:String x:Key="NotificationFilterWarning">Warnings</system:String>
     <system:String x:Key="NotificationFilterError">Errors</system:String>
     <system:String x:Key="NotificationSessionOnly">Notifications are kept for this session only; the latest 200 are shown.</system:String>
+    <system:String x:Key="NotificationDetachTip">Float and pin the notification center for this session</system:String>
+    <system:String x:Key="NotificationDetachedCloseTip">Close the floating notification center</system:String>
     <system:String x:Key="NotificationConnectedTitleFormat">{0} connected</system:String>
     <system:String x:Key="NotificationDisconnectedTitleFormat">{0} disconnected</system:String>
     <system:String x:Key="NotificationConnectionLostTitleFormat">{0} connection lost</system:String>

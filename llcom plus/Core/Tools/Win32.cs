@@ -26,6 +26,8 @@ namespace llcom_plus.Tools
 
         private const int GWL_STYLE = -16;
         private const int WS_SYSMENU = 0x80000;
+        private const int DWMWA_NCRENDERING_POLICY = 2;
+        private const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
         private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
@@ -33,9 +35,18 @@ namespace llcom_plus.Tools
         private const int DWMWA_CAPTION_COLOR = 35;
         private const int DWMWA_TEXT_COLOR = 36;
         private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+        private const int DWMNCRP_DISABLED = 1;
+        private const int DWMWCP_DONOTROUND = 1;
         private const int DWMWCP_ROUND = 2;
+        private const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
         private const int DWMSBT_NONE = 1;
         private const int DWMSBT_TRANSIENTWINDOW = 3;
+        private static readonly DependencyProperty ExcludeFromNativeWindowThemeProperty =
+            DependencyProperty.RegisterAttached(
+                "ExcludeFromNativeWindowTheme",
+                typeof(bool),
+                typeof(Win32),
+                new PropertyMetadata(false));
 
         private static bool TryGetColorRef(Window window, string resourceKey, out int colorRef)
         {
@@ -63,7 +74,7 @@ namespace llcom_plus.Tools
         /// </summary>
         internal static void ApplyWindowTheme(Window window, bool darkMode, bool transientBackdrop)
         {
-            if (window == null)
+            if (window == null || (bool)window.GetValue(ExcludeFromNativeWindowThemeProperty))
                 return;
 
             try
@@ -114,6 +125,67 @@ namespace llcom_plus.Tools
             catch (EntryPointNotFoundException)
             {
                 // Unsupported Windows versions keep the WPF fallback.
+            }
+        }
+
+        /// <summary>
+        /// Keeps a transparent topmost tool window out of the normal dialog theming
+        /// path. In particular, Windows 11's transient backdrop fills transparent
+        /// margins after deactivation and makes them look like a large gray frame.
+        /// </summary>
+        internal static void ConfigureTransparentToolWindow(Window window)
+        {
+            if (window == null)
+                return;
+
+            window.SetValue(ExcludeFromNativeWindowThemeProperty, true);
+            try
+            {
+                var handle = new WindowInteropHelper(window).Handle;
+                if (handle == IntPtr.Zero)
+                    return;
+
+                var size = Marshal.SizeOf(typeof(int));
+                var nonClientRendering = DWMNCRP_DISABLED;
+                DwmSetWindowAttribute(
+                    handle,
+                    DWMWA_NCRENDERING_POLICY,
+                    ref nonClientRendering,
+                    size);
+
+                var transitionsDisabled = 1;
+                DwmSetWindowAttribute(
+                    handle,
+                    DWMWA_TRANSITIONS_FORCEDISABLED,
+                    ref transitionsDisabled,
+                    size);
+
+                var cornerPreference = DWMWCP_DONOTROUND;
+                DwmSetWindowAttribute(
+                    handle,
+                    DWMWA_WINDOW_CORNER_PREFERENCE,
+                    ref cornerPreference,
+                    size);
+
+                var backdrop = DWMSBT_NONE;
+                DwmSetWindowAttribute(
+                    handle,
+                    DWMWA_SYSTEMBACKDROP_TYPE,
+                    ref backdrop,
+                    size);
+
+                var borderColor = DWMWA_COLOR_NONE;
+                DwmSetWindowAttribute(
+                    handle,
+                    DWMWA_BORDER_COLOR,
+                    ref borderColor,
+                    size);
+            }
+            catch (DllNotFoundException)
+            {
+            }
+            catch (EntryPointNotFoundException)
+            {
             }
         }
     }

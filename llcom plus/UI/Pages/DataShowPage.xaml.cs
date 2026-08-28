@@ -711,7 +711,8 @@ namespace llcom_plus.Pages
                 title,
                 message,
                 AppNotificationLevel.Info,
-                category: AppNotificationCategory.SerialPin);
+                category: AppNotificationCategory.SerialPin,
+                portName: portName);
             Tools.Logger.AddUartLogDebug(
                 $"[ControlLineManual]{portName} {lineName} {message}");
         }
@@ -884,6 +885,14 @@ namespace llcom_plus.Pages
                             else
                                 sw.WriteLine(item.TimeText + " [" + item.RawTitle + "] " + item.RawText);
                         }
+                    }
+
+                    var notificationText = Tools.Logger.GetPortNotificationLogText(Tools.Global.uart.GetName());
+                    if (!string.IsNullOrWhiteSpace(notificationText))
+                    {
+                        sw.WriteLine();
+                        sw.WriteLine("===== NOTIFICATIONS =====");
+                        sw.Write(notificationText);
                     }
                 }
             }

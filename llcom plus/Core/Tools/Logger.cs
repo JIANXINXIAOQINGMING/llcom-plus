@@ -112,8 +112,93 @@ namespace llcom_plus.Tools
         private static readonly object sessionLogLock = new object();
         private static StreamWriter sessionStringLogWriter = null;
         private static StreamWriter sessionHexLogWriter = null;
+        private static string sessionLogPortName = string.Empty;
+        private const int MaxPortNotificationLogItems = 5000;
+        private static readonly object portNotificationLogLock = new object();
+        private static readonly List<PortNotificationLogItem> portNotificationLogItems =
+            new List<PortNotificationLogItem>();
         public static string SessionStringLogFilePath { get; private set; } = "";
         public static string SessionHexLogFilePath { get; private set; } = "";
+
+        private sealed class PortNotificationLogItem
+        {
+            public DateTime Timestamp { get; set; }
+            public string PortName { get; set; }
+            public string Title { get; set; }
+            public string Message { get; set; }
+        }
+
+        internal static void RecordPortNotification(
+            DateTime timestamp,
+            string portName,
+            string title,
+            string message)
+        {
+            var normalizedPortName = NormalizePortName(portName);
+            if (string.IsNullOrWhiteSpace(normalizedPortName))
+                return;
+
+            var item = new PortNotificationLogItem
+            {
+                Timestamp = timestamp == default(DateTime) ? DateTime.Now : timestamp,
+                PortName = normalizedPortName,
+                Title = title ?? string.Empty,
+                Message = message ?? string.Empty
+            };
+            lock (portNotificationLogLock)
+            {
+                portNotificationLogItems.Add(item);
+                while (portNotificationLogItems.Count > MaxPortNotificationLogItems)
+                    portNotificationLogItems.RemoveAt(0);
+            }
+
+            lock (sessionLogLock)
+            {
+                if (!string.Equals(sessionLogPortName, normalizedPortName, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var line = FormatPortNotificationLogLine(item);
+                sessionStringLogWriter?.WriteLine(line);
+                sessionHexLogWriter?.WriteLine(line);
+            }
+        }
+
+        internal static string GetPortNotificationLogText(string portName)
+        {
+            var normalizedPortName = NormalizePortName(portName);
+            if (string.IsNullOrWhiteSpace(normalizedPortName))
+                return string.Empty;
+
+            lock (portNotificationLogLock)
+            {
+                var text = new StringBuilder();
+                foreach (var item in portNotificationLogItems.Where(item =>
+                    string.Equals(item.PortName, normalizedPortName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    text.AppendLine(FormatPortNotificationLogLine(item));
+                }
+                return text.ToString();
+            }
+        }
+
+        internal static void ClearPortNotificationLogs()
+        {
+            lock (portNotificationLogLock)
+                portNotificationLogItems.Clear();
+        }
+
+        private static string NormalizePortName(string portName)
+        {
+            return string.IsNullOrWhiteSpace(portName)
+                ? string.Empty
+                : portName.Trim().ToUpperInvariant();
+        }
+
+        private static string FormatPortNotificationLogLine(PortNotificationLogItem item)
+        {
+            var line = $"[{item.Timestamp:yyyy/MM/dd HH:mm:ss.fff}] [notice] {item.Title}";
+            return string.IsNullOrWhiteSpace(item.Message) ? line : line + " | " + item.Message;
+        }
 
         public static void StartSessionLog(string portName)
         {
@@ -144,6 +229,7 @@ namespace llcom_plus.Tools
                 {
                     sessionStringLogWriter = CreateSessionLogWriter(SessionStringLogFilePath);
                     sessionHexLogWriter = CreateSessionLogWriter(SessionHexLogFilePath);
+                    sessionLogPortName = NormalizePortName(portName);
                     var startLine = $"[START] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  PORT={portName}";
                     sessionStringLogWriter.WriteLine(startLine);
                     sessionHexLogWriter.WriteLine(startLine);
@@ -177,6 +263,7 @@ namespace llcom_plus.Tools
                     sessionHexLogWriter?.Dispose();
                     sessionStringLogWriter = null;
                     sessionHexLogWriter = null;
+                    sessionLogPortName = string.Empty;
                     SessionStringLogFilePath = "";
                     SessionHexLogFilePath = "";
                 }

@@ -74,9 +74,9 @@ namespace llcom_plus.Pages
                 slotsCreated = true;
                 for (var i = 0; i < slotCount; i++)
                 {
-                    // 分屏中的每一路都拥有独立 SerialPort。串口 1 不再复用主大屏
-                    // 的 Global.uart，避免继承旧端口的打开状态和收发事件。
-                    var slot = new PortSlot(this, i + 1, false);
+                    // 主界面分屏的窗口 1 继续复用 Global.uart，确保进入/退出分屏
+                    // 都不会关闭主串口，已有打印和后续收发也沿用同一条事件链。
+                    var slot = new PortSlot(this, i + 1, !showSlotSendPanel && i == 0);
                     slots.Add(slot);
                 }
                 RebuildGridLayout();
@@ -107,10 +107,17 @@ namespace llcom_plus.Pages
             var slot = GetSlot(1);
             if (slot != null &&
                 !slot.IsOpen &&
-                !string.IsNullOrWhiteSpace(initialFirstPortName))
+                !string.IsNullOrWhiteSpace(initialFirstPortName) &&
+                slot.HasAvailablePort(initialFirstPortName))
             {
                 slot.SetPortName(initialFirstPortName);
                 ApplyPortProfile(slot);
+                var currentPorts = GetPortNames();
+                foreach (var otherSlot in slots.Skip(1))
+                {
+                    otherSlot.RefreshPorts(currentPorts);
+                    ApplyPortProfile(otherSlot);
+                }
             }
 
             if (slot != null && initialFirstLogSnapshot != null)
@@ -403,6 +410,12 @@ namespace llcom_plus.Pages
                 {
                     writer.WriteLine("===== " + slot.DisplayTitle + " =====");
                     writer.Write(slot.GetLogText());
+                    var notificationText = Logger.GetPortNotificationLogText(slot.SelectedPortName);
+                    if (!string.IsNullOrWhiteSpace(notificationText))
+                    {
+                        writer.WriteLine("===== NOTIFICATIONS =====");
+                        writer.Write(notificationText);
+                    }
                     writer.WriteLine();
                 }
             }
@@ -702,7 +715,8 @@ namespace llcom_plus.Pages
                 title,
                 message,
                 AppNotificationLevel.Info,
-                category: AppNotificationCategory.SerialPin);
+                category: AppNotificationCategory.SerialPin,
+                portName: portName);
             Logger.AddUartLogDebug(
                 $"[SplitControlLineManual]slot={slot.Index},port={portName} {lineName} {message}");
         }
@@ -822,6 +836,38 @@ namespace llcom_plus.Pages
             {
                 return new string[0];
             }
+        }
+
+        public void WritePortNotificationToSession(
+            DateTime timestamp,
+            string portName,
+            string title,
+            string message)
+        {
+            var normalizedPortName = NormalizePortName(portName);
+            foreach (var slot in slots.Where(slot =>
+                string.Equals(slot.SelectedPortName, normalizedPortName, StringComparison.OrdinalIgnoreCase)))
+            {
+                slot.WriteNotificationToSession(timestamp, title, message);
+            }
+        }
+
+        private bool IsPortSelectedInEarlierSlot(PortSlot target, string portName)
+        {
+            return slots.Any(slot =>
+                slot.Index < target.Index &&
+                string.Equals(slot.SelectedPortName, portName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private string GetFirstAvailablePort(PortSlot target, IEnumerable<string> ports)
+        {
+            var assignedPorts = new HashSet<string>(
+                slots
+                    .Where(slot => !ReferenceEquals(slot, target))
+                    .Select(slot => slot.SelectedPortName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name)),
+                StringComparer.OrdinalIgnoreCase);
+            return ports.FirstOrDefault(port => !assignedPorts.Contains(port)) ?? string.Empty;
         }
 
         private static string NormalizePortName(string portName)
@@ -984,6 +1030,11 @@ namespace llcom_plus.Pages
 
             public void RefreshPorts(string[] ports)
             {
+                ports = (ports ?? new string[0])
+                    .Select(NormalizePortName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
                 var selected = SelectedPortName;
                 if (string.IsNullOrWhiteSpace(selected))
                     selected = PortName;
@@ -992,18 +1043,39 @@ namespace llcom_plus.Pages
                 foreach (var port in ports)
                     portComboBox.Items.Add(port);
 
-                if (!string.IsNullOrWhiteSpace(selected) && portComboBox.Items.Contains(selected))
+                if (!string.IsNullOrWhiteSpace(selected) &&
+                    portComboBox.Items.Contains(selected) &&
+                    (IsOpen || !owner.IsPortSelectedInEarlierSlot(this, selected)))
                 {
                     selectedPortName = selected;
                     portComboBox.Text = selected;
                 }
                 else if (portComboBox.Items.Count > 0)
                 {
-                    portComboBox.SelectedIndex = Math.Min(Index - 1, portComboBox.Items.Count - 1);
-                    selectedPortName = NormalizePortName(portComboBox.SelectedItem?.ToString());
+                    var availablePort = owner.GetFirstAvailablePort(this, ports);
+                    selectedPortName = !string.IsNullOrWhiteSpace(availablePort)
+                        ? availablePort
+                        : NormalizePortName(portComboBox.Items[0]?.ToString());
+                    portComboBox.SelectedItem = selectedPortName;
+                }
+                else if (!IsOpen)
+                {
+                    selectedPortName = string.Empty;
+                    portComboBox.Text = string.Empty;
                 }
 
                 SyncOpenStateUi();
+            }
+
+            public bool HasAvailablePort(string portName)
+            {
+                var normalizedPortName = NormalizePortName(portName);
+                return !string.IsNullOrWhiteSpace(normalizedPortName) &&
+                    portComboBox.Items.Cast<object>().Any(item =>
+                        string.Equals(
+                            NormalizePortName(item?.ToString()),
+                            normalizedPortName,
+                            StringComparison.OrdinalIgnoreCase));
             }
 
             public void SetPortName(string portName)
@@ -1152,6 +1224,23 @@ namespace llcom_plus.Pages
                 CloseSessionLog();
             }
 
+            public void WriteNotificationToSession(DateTime timestamp, string title, string message)
+            {
+                if (useMainUart || !IsOpen)
+                    return;
+
+                EnsureSessionLogOpen();
+                var effectiveTimestamp = timestamp == default(DateTime) ? DateTime.Now : timestamp;
+                var line = $"[{effectiveTimestamp:yyyy/MM/dd HH:mm:ss.fff}] [notice] {title ?? string.Empty}";
+                if (!string.IsNullOrWhiteSpace(message))
+                    line += " | " + message;
+                lock (sessionLogLock)
+                {
+                    sessionStringLogWriter?.WriteLine(line);
+                    sessionHexLogWriter?.WriteLine(line);
+                }
+            }
+
             private Border BuildView()
             {
                 var root = new Border
@@ -1218,7 +1307,9 @@ namespace llcom_plus.Pages
                 hexCheckBox.Margin = new Thickness(0, 3, 8, 4);
                 dtrCheckBox.Margin = new Thickness(0, 3, 8, 4);
                 rtsCheckBox.Margin = new Thickness(0, 3, 0, 4);
-                dtrCheckBox.IsChecked = false;
+                hexCheckBox.IsChecked = useMainUart && Global.setting?.hexSend == true;
+                dtrCheckBox.IsChecked = useMainUart && Global.uart.Dtr;
+                rtsCheckBox.IsChecked = useMainUart && Global.uart.Rts;
                 dtrCheckBox.Checked += ControlLineCheckBox_Changed;
                 dtrCheckBox.Unchecked += ControlLineCheckBox_Changed;
                 dtrCheckBox.Click += ControlLineCheckBox_Click;
@@ -1435,7 +1526,8 @@ namespace llcom_plus.Pages
                             owner.FindText("NotificationSerialOpenedMessageFormat", "{0} baud"),
                             baudRate),
                         AppNotificationLevel.Success,
-                        category: AppNotificationCategory.Connection);
+                        category: AppNotificationCategory.Connection,
+                        portName: portName);
                     LastErrorMessage = string.Empty;
                     return true;
                 }
@@ -1449,7 +1541,8 @@ namespace llcom_plus.Pages
                             portName),
                         LastErrorMessage,
                         AppNotificationLevel.Error,
-                        category: AppNotificationCategory.Connection);
+                        category: AppNotificationCategory.Connection,
+                        portName: portName);
                     try
                     {
                         if (useMainUart)
