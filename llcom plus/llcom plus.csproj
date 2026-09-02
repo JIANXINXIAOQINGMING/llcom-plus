@@ -39,6 +39,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>Resources\Assets\AppIcon.ico</ApplicationIcon>
+    <UpdateSigningPublicKeyFile Condition="'$(UpdateSigningPublicKeyFile)' == ''">$(MSBuildProjectDirectory)\Resources\UpdateSigningPublicKey.xml</UpdateSigningPublicKeyFile>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
     <DebugSymbols>true</DebugSymbols>
@@ -224,6 +225,7 @@
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="System.Net.Http" />
+    <Reference Include="System.Security" />
     <Reference Include="System.Xaml">
       <RequiredTargetFramework>4.0</RequiredTargetFramework>
     </Reference>
@@ -454,6 +456,7 @@
     <Resource Include="Resources\DefaultFiles\user_script_recv_convert\绘制曲线-多条.js" />
     <Resource Include="Resources\DefaultFiles\user_script_recv_convert\绘制曲线-解析结构体.js" />
     <None Include="packages.config" />
+    <None Include="Resources\UpdateSigningPublicKey.README.txt" />
     <None Include="..\JavaScriptApi.md">
       <Link>JavaScriptApi.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -543,12 +546,19 @@
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\build\Sync-Version.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Version &quot;$(AppVersion)&quot; -AppxVersion &quot;$(AppxVersion)&quot; -AutoUpdate -AppxManifest" />
   </Target>
   <Target Name="ResolveNativeRuntimeFiles">
+    <PropertyGroup>
+      <NativeRuntimeArchitecture Condition="'$(PlatformTarget)' != ''">$(PlatformTarget)</NativeRuntimeArchitecture>
+      <NativeRuntimeArchitecture Condition="'$(NativeRuntimeArchitecture)' == ''">$(Platform)</NativeRuntimeArchitecture>
+      <NativeRuntimeBuildStamp>$(MSBuildProjectDirectory)\..\serial_monitor_rs\target\native-build-$(NativeRuntimeArchitecture).json</NativeRuntimeBuildStamp>
+    </PropertyGroup>
     <ItemGroup>
       <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\Native\x86\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x86' Or '$(Platform)' == 'x86'" />
       <NativeRuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\Native\x64\serial_monitor.dll" Condition="'$(PlatformTarget)' == 'x64' Or '$(Platform)' == 'x64'" />
     </ItemGroup>
+    <Error Condition="'$(RequireNativeSourceBuild)' == 'true' And !Exists('$(NativeRuntimeBuildStamp)')" Text="Native source-build provenance stamp is missing: $(NativeRuntimeBuildStamp). Run serial_monitor_rs\build.ps1 before packaging." />
     <Error Condition="'@(NativeRuntimeFile)' == ''" Text="No native runtime files configured for PlatformTarget=$(PlatformTarget), Platform=$(Platform)." />
     <Error Condition="'@(NativeRuntimeFile)' != '' And !Exists('%(NativeRuntimeFile.Identity)')" Text="Missing native runtime file: %(NativeRuntimeFile.Identity)" />
+    <Exec Condition="'$(RequireNativeSourceBuild)' == 'true'" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\serial_monitor_rs\verify-build.ps1&quot; -Architecture &quot;$(NativeRuntimeArchitecture)&quot; -Configuration &quot;$(Configuration)&quot; -RuntimeDll &quot;@(NativeRuntimeFile)&quot; -StampFile &quot;$(NativeRuntimeBuildStamp)&quot; -RustToolchain 1.82.0" />
   </Target>
   <Target Name="CopyNativeRuntimeFiles" AfterTargets="Build" DependsOnTargets="ResolveNativeRuntimeFiles">
     <Copy SourceFiles="@(NativeRuntimeFile)" DestinationFiles="@(NativeRuntimeFile->'$(TargetDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
@@ -568,10 +578,15 @@
     <Copy SourceFiles="@(OpenSslSharedRuntimeFile)" DestinationFiles="@(OpenSslSharedRuntimeFile->'$(TargetDir)OpenSSL\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(OpenSslPlatformRuntimeFile)" DestinationFiles="@(OpenSslPlatformRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
+  <Target Name="CopyUpdateSigningPublicKey" AfterTargets="Build">
+    <Delete Files="$(TargetDir)UpdateSigningPublicKey.xml" Condition="!Exists('$(UpdateSigningPublicKeyFile)') And Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
+    <Copy SourceFiles="$(UpdateSigningPublicKeyFile)" DestinationFiles="$(TargetDir)UpdateSigningPublicKey.xml" SkipUnchangedFiles="true" Condition="Exists('$(UpdateSigningPublicKeyFile)')" />
+    <Message Importance="High" Text="Update signing public key -> $(TargetDir)UpdateSigningPublicKey.xml" Condition="Exists('$(UpdateSigningPublicKeyFile)')" />
+  </Target>
   <Target Name="CopyTaskbarIcon" AfterTargets="Build" DependsOnTargets="GenerateApplicationIcon">
     <Copy SourceFiles="$(MSBuildProjectDirectory)\Resources\Assets\AppIcon.ico" DestinationFiles="$(TargetDir)llcom-plus-taskbar-v2.ico" SkipUnchangedFiles="true" />
   </Target>
-  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles;CopyTaskbarIcon" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles;CopyTaskbarIcon;CopyUpdateSigningPublicKey" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <ReleasePackageVersion>$(AppVersion)</ReleasePackageVersion>
       <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>
@@ -580,7 +595,8 @@
       <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
-      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir)circular_send.json;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir).credentials\**\*;$(TargetDir)circular_send.json;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <ReleasePackageFile Include="$(TargetDir)UpdateSigningPublicKey.xml" Condition="Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
       <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
     </ItemGroup>
     <MakeDir Directories="$(MSBuildProjectDirectory)\..\artifacts\release" />

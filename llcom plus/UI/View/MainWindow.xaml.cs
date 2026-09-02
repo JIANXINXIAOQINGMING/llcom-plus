@@ -55,6 +55,12 @@ namespace llcom_plus
         private const double SinglePaneDesiredMinimumWidth = 560;
         private const double SplitPaneDesiredMinimumWidth = 700;
         private const double MainPaneLayoutReserve = 0;
+        internal const long MaxQuickSendImportFileBytes = 8L * 1024 * 1024;
+        internal const int MaxQuickSendImportJsonDepth = 32;
+        internal const int MaxQuickSendImportPages = 64;
+        internal const int MaxQuickSendItemsPerPage = 2000;
+        internal const int MaxQuickSendFieldCharacters = 256 * 1024;
+        internal const long MaxQuickSendTotalCharacters = 4L * 1024 * 1024;
 
         public MainWindow()
         {
@@ -106,6 +112,9 @@ namespace llcom_plus
         private bool lazyLoadReady = false;
         private bool scriptEditorInitialized = false;
         private Task runtimeFilesTask = null;
+        private CancellationTokenSource quickSendImportCts = null;
+        private long nextQuickSendImportRunId = 0;
+        private long activeQuickSendImportRunId = 0;
         private readonly object sessionSendStringLock = new object();
         private readonly Queue<string> sessionSendStringOverrides = new Queue<string>();
         private readonly object receiveScriptContextLock = new object();
@@ -143,6 +152,25 @@ namespace llcom_plus
             {
                 return SendText ?? string.Empty;
             }
+        }
+
+        private sealed class QuickSendImportItem
+        {
+            public int id { get; set; }
+            public string text { get; set; }
+            public bool hex { get; set; }
+            public string commit { get; set; }
+            public string recvScriptPath { get; set; }
+            public string recvScriptPara { get; set; }
+            public bool appendCrlf { get; set; }
+            public bool disableSuggestion { get; set; }
+        }
+
+        private sealed class QuickSendImportResult
+        {
+            public bool ImportsAllPages { get; set; }
+            public List<List<QuickSendImportItem>> Pages { get; set; }
+            public List<string> PageNames { get; set; }
         }
 
         private sealed class AppNotificationItem
@@ -233,6 +261,7 @@ namespace llcom_plus
                         Tools.Global.IsActiveSerialTargetOpenRequest = IsActiveSerialTargetOpenForTools;
                         Tools.Global.EnsureActiveSerialTargetOpenRequest = EnsureActiveSerialTargetOpenForTools;
                         Tools.Global.SendRawDataToActiveTargetRequest = SendRawDataToActiveTargetForTools;
+                        Tools.Global.CaptureActiveSerialTargetRequest = CaptureActiveSerialTargetForTools;
                     });
 
                     //初始化所有数据
@@ -885,20 +914,91 @@ namespace llcom_plus
 
         private bool IsActiveSerialTargetOpenForTools()
         {
+            return CaptureActiveSerialTargetForTools()?.IsOpen == true;
+        }
+
+        private ActiveSerialTarget CaptureActiveSerialTargetForTools()
+        {
             if (!Dispatcher.CheckAccess())
-                return Dispatcher.Invoke(new Func<bool>(IsActiveSerialTargetOpenForTools));
+                return Dispatcher.Invoke(new Func<ActiveSerialTarget>(CaptureActiveSerialTargetForTools));
 
             if (IsSerialSplitModeActive())
             {
-                if (mainSplitPortPage == null)
-                    return false;
+                var page = mainSplitPortPage;
+                if (page == null)
+                    return null;
+
                 if (IsAllSerialTargetsSelected())
-                    return Enumerable.Range(1, mainSplitPortPage.SlotCount)
-                        .All(mainSplitPortPage.IsSlotSelectedPortOpen);
-                return mainSplitPortPage.IsSlotSelectedPortOpen(GetSelectedSerialSplitSlot());
+                {
+                    var targets = Enumerable.Range(1, page.SlotCount)
+                        .Select(page.CaptureSerialTarget)
+                        .Where(target => target != null)
+                        .ToList();
+                    if (targets.Count == 0)
+                        return null;
+
+                    var displayName = TryFindResource("SplitSendTargetAll") as string ?? "全部";
+                    return new ActiveSerialTarget(
+                        "serial-all:" + string.Join("|", targets.Select(target => target.Identity)),
+                        displayName,
+                        () => targets.All(target => target.IsOpen),
+                        (data, token, committedBytes) =>
+                            SendToCapturedSerialTargets(targets, data, token, committedBytes),
+                        supportsResumableCommits: false);
+                }
+
+                return page.CaptureSerialTarget(GetSelectedSerialSplitSlot());
             }
 
-            return IsSelectedMainSerialPortOpen();
+            var connection = Tools.Global.uart.CaptureConnectionLease();
+            return new ActiveSerialTarget(
+                connection.Identity,
+                connection.DisplayName,
+                () => connection.IsOpen,
+                (data, token, committedBytes) =>
+                    connection.Send(data, token, committedBytes, raiseEvents: false));
+        }
+
+        private static bool SendToCapturedSerialTargets(
+            IReadOnlyList<ActiveSerialTarget> targets,
+            byte[] data,
+            CancellationToken token,
+            Action<int> committedBytes)
+        {
+            if (targets == null || targets.Count == 0)
+                return false;
+
+            var committedByTarget = new int[targets.Count];
+            var reportedForAll = 0;
+            var commitLock = new object();
+            var allSent = true;
+            for (var index = 0; index < targets.Count; index++)
+            {
+                token.ThrowIfCancellationRequested();
+                var targetIndex = index;
+                var target = targets[targetIndex];
+                var sent = target.IsOpen && target.Send(
+                    data,
+                    token,
+                    count =>
+                    {
+                        var report = 0;
+                        lock (commitLock)
+                        {
+                            committedByTarget[targetIndex] = Math.Min(
+                                data.Length,
+                                committedByTarget[targetIndex] + Math.Max(0, count));
+                            var committedForAll = committedByTarget.Min();
+                            report = committedForAll - reportedForAll;
+                            if (report > 0)
+                                reportedForAll = committedForAll;
+                        }
+                        if (report > 0)
+                            committedBytes?.Invoke(report);
+                    });
+                allSent = sent && allSent;
+            }
+            return allSent;
         }
 
         private bool EnsureActiveSerialTargetOpenForTools()
@@ -980,73 +1080,8 @@ namespace llcom_plus
             if (data == null || data.Length == 0)
                 return false;
 
-            if (Dispatcher.CheckAccess())
-            {
-                if (IsSerialSplitModeActive())
-                {
-                    if (mainSplitPortPage == null)
-                        return false;
-                    if (IsAllSerialTargetsSelected())
-                    {
-                        var allSent = true;
-                        for (var broadcastSlot = 1; broadcastSlot <= mainSplitPortPage.SlotCount; broadcastSlot++)
-                        {
-                            allSent = mainSplitPortPage.SendBytesBlocking(
-                                broadcastSlot,
-                                data,
-                                token) && allSent;
-                        }
-                        return allSent;
-                    }
-
-                    var slot = GetSelectedSerialSplitSlot();
-                    return mainSplitPortPage?.SendBytesBlocking(slot, data, token) == true;
-                }
-
-                if (!IsSelectedMainSerialPortOpen())
-                    return false;
-
-                Tools.Global.uart.SendDataCancelable(data, token, null, raiseEvents: false);
-                return true;
-            }
-
-            Pages.MultiPortPage page = null;
-            var targetSlot = 1;
-            var splitMode = false;
-            var allSerialTargets = false;
-            var allSplitTargets = new List<int>();
-            var mainReady = false;
-            Dispatcher.Invoke(new Action(() =>
-            {
-                splitMode = IsSerialSplitModeActive();
-                page = mainSplitPortPage;
-                targetSlot = GetSelectedSerialSplitSlot();
-                allSerialTargets = IsAllSerialTargetsSelected();
-                if (splitMode && allSerialTargets && page != null)
-                {
-                    for (var slot = 1; slot <= page.SlotCount; slot++)
-                        allSplitTargets.Add(slot);
-                }
-                mainReady = IsSelectedMainSerialPortOpen();
-            }));
-
-            if (splitMode)
-            {
-                if (allSerialTargets)
-                {
-                    var allSent = true;
-                    foreach (var target in allSplitTargets)
-                        allSent = page?.SendBytesBlocking(target, data, token) == true && allSent;
-                    return allSent;
-                }
-                return page?.SendBytesBlocking(targetSlot, data, token) == true;
-            }
-
-            if (!mainReady)
-                return false;
-
-            Tools.Global.uart.SendDataCancelable(data, token, null, raiseEvents: false);
-            return true;
+            var target = CaptureActiveSerialTargetForTools();
+            return target?.IsOpen == true && target.Send(data, token, null);
         }
 
         private void AddLaunchTool(string key, string title, string buttonText, RoutedEventHandler clickHandler)
@@ -1418,7 +1453,8 @@ namespace llcom_plus
         {
             var data = sender as byte[];
             Tools.Logger.ShowData(data, false, null, GetReceiveScriptContext());
-            if (!IsSerialSplitModeActive() || GetSelectedSerialSplitSlot() == 1)
+            if (!IsSerialSplitModeActive() ||
+                Volatile.Read(ref lastSerialSendTargetSlot) == 1)
                 Tools.Global.NotifyActiveSerialTargetReceived(data);
         }
 
@@ -2068,6 +2104,7 @@ namespace llcom_plus
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             windowIsClosing = true;
+            CancelQuickSendImport();
             Tools.Global.setting.windowLeft = this.Left;
             Tools.Global.setting.windowTop = this.Top;
             Tools.Global.setting.windowWidth = this.Width;
@@ -2175,6 +2212,7 @@ namespace llcom_plus
         private bool toSendDataApplySendProcessing = true;
         private string toSendDataSessionStringLogOverride = null;
         private bool? toSendDataExtraEnterOverride = null;
+        private string toSendDataSourceText = null;
 
         private void ShowOpenPortFailed(string detail = null)
         {
@@ -2206,6 +2244,7 @@ namespace llcom_plus
             toSendDataApplySendProcessing = true;
             toSendDataSessionStringLogOverride = null;
             toSendDataExtraEnterOverride = null;
+            toSendDataSourceText = null;
         }
 
         private void SendPendingDataAfterOpen()
@@ -2218,13 +2257,15 @@ namespace llcom_plus
             var applySendProcessing = toSendDataApplySendProcessing;
             var sessionStringLogOverride = toSendDataSessionStringLogOverride;
             var extraEnterOverride = toSendDataExtraEnterOverride;
+            var sourceText = toSendDataSourceText;
             ClearPendingSendAfterOpenFailure();
             sendUartData(
                 data,
                 isHex,
                 applySendProcessing,
                 sessionStringLogOverride,
-                extraEnterOverride);
+                extraEnterOverride,
+                sourceText);
         }
 
         private void openPort()
@@ -2585,7 +2626,13 @@ namespace llcom_plus
         /// 发串口数据
         /// </summary>
         /// <param name="data"></param>
-        private void sendUartData(byte[] data, bool? is_hex = null, bool applySendProcessing = true, string sessionStringLogOverride = null, bool? extraEnterOverride = null)
+        private void sendUartData(
+            byte[] data,
+            bool? is_hex = null,
+            bool applySendProcessing = true,
+            string sessionStringLogOverride = null,
+            bool? extraEnterOverride = null,
+            string sourceText = null)
         {
             if (data == null)
                 return;
@@ -2598,13 +2645,22 @@ namespace llcom_plus
                         data,
                         is_hex,
                         applySendProcessing,
-                        extraEnterOverride);
+                        extraEnterOverride,
+                        sourceText);
                     return;
                 }
 
                 var targetSlot = GetSelectedSerialSplitSlot();
-                var targetHexMode = mainSplitPortPage?.IsSlotHexMode(targetSlot) ?? Tools.Global.setting.hexSend;
-                var splitData = PrepareUartSendData(data, is_hex, applySendProcessing, targetHexMode, extraEnterOverride);
+                var targetProfile = mainSplitPortPage?.GetSlotProfileSnapshot(targetSlot);
+                var targetHexMode = targetProfile?.hexSend ?? Tools.Global.setting.hexSend;
+                var splitData = PrepareUartSendData(
+                    data,
+                    is_hex,
+                    applySendProcessing,
+                    targetHexMode,
+                    extraEnterOverride,
+                    targetProfile,
+                    sourceText);
                 if (splitData == null || splitData.Length == 0)
                     return;
 
@@ -2626,13 +2682,21 @@ namespace llcom_plus
                 toSendDataApplySendProcessing = applySendProcessing;
                 toSendDataSessionStringLogOverride = sessionStringLogOverride;
                 toSendDataExtraEnterOverride = extraEnterOverride;
+                toSendDataSourceText = sourceText;
                 openPort();
                 return;
             }
 
             if (Tools.Global.uart.IsOpen())
             {
-                byte[] dataConvert = PrepareUartSendData(data, is_hex, applySendProcessing, null, extraEnterOverride);
+                byte[] dataConvert = PrepareUartSendData(
+                    data,
+                    is_hex,
+                    applySendProcessing,
+                    null,
+                    extraEnterOverride,
+                    null,
+                    sourceText);
                 if (dataConvert == null)
                     return;
 
@@ -2659,7 +2723,14 @@ namespace llcom_plus
             }
         }
 
-        private byte[] PrepareUartSendData(byte[] data, bool? isHex, bool applySendProcessing, bool? defaultHexSend = null, bool? extraEnterOverride = null)
+        private byte[] PrepareUartSendData(
+            byte[] data,
+            bool? isHex,
+            bool applySendProcessing,
+            bool? defaultHexSend = null,
+            bool? extraEnterOverride = null,
+            UartPortProfile profile = null,
+            string sourceText = null)
         {
             byte[] dataConvert = data;
             if (!applySendProcessing)
@@ -2668,13 +2739,35 @@ namespace llcom_plus
             try
             {
                 WaitRuntimeFilesReady();
+                var targetHexMode = defaultHexSend ?? profile?.hexSend ?? Tools.Global.setting.hexSend;
+                if (sourceText != null)
+                {
+                    dataConvert = (isHex ?? targetHexMode)
+                        ? Tools.Global.Hex2Byte(sourceText)
+                        : Tools.Global.GetEncoding(profile?.encoding ?? Tools.Global.setting.encoding)
+                            .GetBytes(sourceText);
+                }
+                else if (isHex == null && targetHexMode)
+                {
+                    dataConvert = Tools.Global.Hex2Byte(Tools.Global.Byte2String(data));
+                }
+
+                var requestedScript = profile?.sendScript ?? Tools.Global.setting.sendScript;
+                if (!Tools.Global.TryGetProfileScriptPath(
+                        "user_script_send_convert",
+                        requestedScript,
+                        out var scriptName,
+                        out var scriptPath) ||
+                    !File.Exists(scriptPath))
+                {
+                    scriptName = "default";
+                }
                 dataConvert = ScriptEnv.JavaScriptLoader.Run(
-                    $"{Tools.Global.setting.sendScript}.js",
+                    $"{scriptName}.js",
                     new System.Collections.ArrayList
                     {
                         "uartData",
-                        isHex == null ?
-                        ((defaultHexSend ?? Tools.Global.setting.hexSend) ? Tools.Global.Hex2Byte(Tools.Global.Byte2String(data)) : data) : data
+                        dataConvert
                     });
             }
             catch (Exception ex)
@@ -2686,14 +2779,17 @@ namespace llcom_plus
             if (dataConvert == null)
                 return null;
 
-            return AppendCrlf(dataConvert, extraEnterOverride ?? Tools.Global.setting.extraEnter);
+            return AppendCrlf(
+                dataConvert,
+                extraEnterOverride ?? profile?.extraEnter ?? Tools.Global.setting.extraEnter);
         }
 
         private async Task SendToAllSplitSlotsAsync(
             byte[] sourceData,
             bool? isHex,
             bool applySendProcessing,
-            bool? extraEnterOverride)
+            bool? extraEnterOverride,
+            string sourceText)
         {
             try
             {
@@ -2707,13 +2803,16 @@ namespace llcom_plus
                 var failures = new List<string>();
                 for (var slot = 1; slot <= page.SlotCount; slot++)
                 {
-                    var targetHexMode = page.IsSlotHexMode(slot);
+                    var targetProfile = page.GetSlotProfileSnapshot(slot);
+                    var targetHexMode = targetProfile?.hexSend ?? page.IsSlotHexMode(slot);
                     var data = PrepareUartSendData(
                         sourceData,
                         isHex,
                         applySendProcessing,
                         targetHexMode,
-                        extraEnterOverride);
+                        extraEnterOverride,
+                        targetProfile,
+                        sourceText);
                     if (data == null || data.Length == 0)
                         continue;
 
@@ -2884,9 +2983,23 @@ namespace llcom_plus
                 return;
             }
 
-            var data = Global.GetEncoding().GetBytes(toSendDataTextBox.Text);
-            SetReceiveScriptContext(recvScriptBackup, "", data);
-            sendUartData(data, null, true, Tools.Global.setting.hexSend ? toSendDataTextBox.Text : null);
+            var sourceText = toSendDataTextBox.Text ?? string.Empty;
+            var data = Global.GetEncoding().GetBytes(sourceText);
+            var receiveScript = recvScriptBackup;
+            if (IsSerialSplitModeActive() && mainSplitPortPage != null && !IsAllSerialTargetsSelected())
+            {
+                receiveScript = mainSplitPortPage
+                    .GetSlotProfileSnapshot(GetSelectedSerialSplitSlot())
+                    ?.recvScript ?? receiveScript;
+            }
+            SetReceiveScriptContext(receiveScript, "", data);
+            sendUartData(
+                data,
+                null,
+                true,
+                Tools.Global.setting.hexSend ? sourceText : null,
+                null,
+                sourceText);
         }
 
         private byte[] PrepareMainSendTargetData(string text, bool isHex)
@@ -3590,26 +3703,42 @@ namespace llcom_plus
 
             var receiveScriptName = recvScriptBackup;
 
-            // 如果有指定接收脚本，则切换
-            if (!string.IsNullOrEmpty(data.recvScriptPath))
+            // 如果有指定接收脚本，则切换；导入或旧配置中的路径不能越过脚本目录。
+            if (!string.IsNullOrWhiteSpace(data.recvScriptPath))
             {
-                //检查文件是否存在
-                if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{data.recvScriptPath}.js"))
+                if (!Tools.Global.TryGetProfileScriptPath(
+                        "user_script_recv_convert",
+                        data.recvScriptPath,
+                        out var normalizedScriptName,
+                        out var receiveScriptPath) ||
+                    !File.Exists(receiveScriptPath))
                 {
                     data.recvScriptPath = "";
-                    if (!File.Exists(Tools.Global.ProfilePath + "user_script_recv_convert/default.js"))
+                    if (Tools.Global.TryGetProfileScriptPath(
+                            "user_script_recv_convert",
+                            "default",
+                            out _,
+                            out var defaultScriptPath) &&
+                        !File.Exists(defaultScriptPath))
                     {
-                        File.Create(Tools.Global.ProfilePath + "user_script_recv_convert/default.js").Close();
+                        File.Create(defaultScriptPath).Close();
                     }
                 }
                 else
                 {
-                    receiveScriptName = data.recvScriptPath;
+                    data.recvScriptPath = normalizedScriptName;
+                    receiveScriptName = normalizedScriptName;
                 }
             }
 
             SetReceiveScriptContext(receiveScriptName, data.recvScriptPara ?? "", sendData);
-            sendUartData(sendData, true, true, data.hex ? data.text : null, data.appendCrlf);
+            sendUartData(
+                sendData,
+                data.hex,
+                true,
+                data.hex ? data.text : null,
+                data.appendCrlf,
+                sendText);
         }
 
         private byte[] PrepareMainSendTargetBytes(byte[] data, bool appendCrlf)
@@ -3696,12 +3825,21 @@ namespace llcom_plus
 
         private void NewScriptFileButton_Click(object sender, RoutedEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(newScriptFileNameTextBox.Text))
+            var scriptName = Tools.Global.NormalizeScriptFileName(newScriptFileNameTextBox.Text);
+            if (!Tools.Global.TryGetProfileScriptPath(
+                    "user_script_run",
+                    scriptName,
+                    out scriptName,
+                    out var scriptPath))
             {
-                Tools.MessageBox.Show(TryFindResource("ScriptNoName") as string ?? "?!");
+                Tools.MessageBox.Show(string.IsNullOrWhiteSpace(scriptName)
+                    ? TryFindResource("ScriptNoName") as string ?? "?!"
+                    : TryFindResource("ScriptInvalidName") as string ?? "?!");
                 return;
             }
-            if (File.Exists(Tools.Global.ProfilePath + $"user_script_run/{newScriptFileNameTextBox.Text}.js"))
+
+            newScriptFileNameTextBox.Text = scriptName;
+            if (File.Exists(scriptPath))
             {
                 Tools.MessageBox.Show(TryFindResource("ScriptExist") as string ?? "?!");
                 return;
@@ -3709,8 +3847,9 @@ namespace llcom_plus
 
             try
             {
-                File.Create(Tools.Global.ProfilePath + $"user_script_run/{newScriptFileNameTextBox.Text}.js").Close();
-                loadScriptFile(newScriptFileNameTextBox.Text);
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(scriptPath));
+                File.Create(scriptPath).Close();
+                loadScriptFile(scriptName);
             }
             catch
             {
@@ -4773,72 +4912,473 @@ namespace llcom_plus
             canSaveSendList = true;
         }
 
-        private void QuickSendImportButton_Click(object sender, RoutedEventArgs e)
+        private async void QuickSendImportButton_Click(object sender, RoutedEventArgs e)
         {
-            System.Windows.Forms.OpenFileDialog OpenFileDialog = new System.Windows.Forms.OpenFileDialog();
-            OpenFileDialog.Filter = TryFindResource("QuickSendLlcomPlusFile") as string ?? "?!";
-            if (OpenFileDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            var openFileDialog = new System.Windows.Forms.OpenFileDialog
             {
-                JToken token = null;
-                try
-                {
-                    token = JToken.Parse(File.ReadAllText(OpenFileDialog.FileName));
-                    if (token == null)
-                        throw new Exception(TryFindResource("QuickSendLoadError") as string ?? "?!");
-                }
-                catch (Exception err)
-                {
-                    Tools.MessageBox.Show(err.Message);
+                Filter = TryFindResource("QuickSendLlcomPlusFile") as string ?? "?!"
+            };
+            if (openFileDialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                return;
+
+            CancelQuickSendImport();
+            var importPath = openFileDialog.FileName;
+            var importButton = sender as Button;
+            var cts = new CancellationTokenSource();
+            quickSendImportCts = cts;
+            var runId = Interlocked.Increment(ref nextQuickSendImportRunId);
+            Interlocked.Exchange(ref activeQuickSendImportRunId, runId);
+            if (importButton != null)
+                importButton.IsEnabled = false;
+
+            try
+            {
+                // Reject oversized files before a reader or JSON object graph is created.
+                CheckQuickSendImportFileSize(importPath);
+                var result = await Task.Run(
+                    () => ParseQuickSendImportFile(importPath, cts.Token),
+                    cts.Token);
+                if (!IsCurrentQuickSendImport(runId, cts))
                     return;
+
+                ApplyQuickSendImportResult(result);
+                if (result.ImportsAllPages)
+                    Tools.MessageBox.Show(TryFindResource("QuickSendImportAllDone") as string ?? "?!");
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+            }
+            catch (Exception err)
+            {
+                if (IsCurrentQuickSendImport(runId, cts))
+                    Tools.MessageBox.Show(err.GetBaseException().Message);
+            }
+            finally
+            {
+                var detached = ReferenceEquals(
+                    Interlocked.CompareExchange(ref quickSendImportCts, null, cts),
+                    cts);
+                Interlocked.CompareExchange(ref activeQuickSendImportRunId, 0, runId);
+                cts.Dispose();
+                if (detached && !windowIsClosing && importButton != null)
+                    importButton.IsEnabled = true;
+            }
+        }
+
+        private bool IsCurrentQuickSendImport(long runId, CancellationTokenSource cts)
+        {
+            return !windowIsClosing &&
+                   runId != 0 &&
+                   runId == Interlocked.Read(ref activeQuickSendImportRunId) &&
+                   ReferenceEquals(Interlocked.CompareExchange(ref quickSendImportCts, null, null), cts);
+        }
+
+        private void CancelQuickSendImport()
+        {
+            Interlocked.Exchange(ref activeQuickSendImportRunId, 0);
+            var cts = Interlocked.Exchange(ref quickSendImportCts, null);
+            if (cts == null)
+                return;
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        }
+
+        private static QuickSendImportResult ParseQuickSendImportFile(
+            string path,
+            CancellationToken cancellationToken)
+        {
+            CheckQuickSendImportFileSize(path);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            JToken root;
+            try
+            {
+                using (var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    4096,
+                    FileOptions.SequentialScan))
+                using (var textReader = new StreamReader(
+                    stream,
+                    new UTF8Encoding(false, true),
+                    true,
+                    4096))
+                using (var jsonReader = new JsonTextReader(textReader)
+                {
+                    CloseInput = false,
+                    MaxDepth = MaxQuickSendImportJsonDepth,
+                    DateParseHandling = DateParseHandling.None
+                })
+                {
+                    root = JToken.Load(jsonReader);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (jsonReader.Read())
+                        throw QuickSendImportError("JSON 根值之后存在多余内容。");
+                }
+            }
+            catch (InvalidDataException)
+            {
+                throw;
+            }
+            catch (JsonException ex)
+            {
+                throw QuickSendImportError("JSON 格式无效或嵌套超过限制：" + ex.Message);
+            }
+
+            if (root == null)
+                throw QuickSendImportError("文件中没有可导入的数据。");
+
+            ValidateQuickSendJsonStringBudget(root, cancellationToken);
+            var allQuickSendToken = GetAllQuickSendListToken(root);
+            if (allQuickSendToken != null)
+            {
+                var pageTokens = (JArray)allQuickSendToken;
+                if (pageTokens.Count == 0 || pageTokens.Count > MaxQuickSendImportPages)
+                {
+                    throw QuickSendImportError(
+                        $"页数必须为 1 到 {MaxQuickSendImportPages} 页。");
                 }
 
-                var allQuickSendToken = GetAllQuickSendListToken(token);
-                if (allQuickSendToken != null)
+                var pages = new List<List<QuickSendImportItem>>(pageTokens.Count);
+                foreach (var pageToken in pageTokens)
                 {
-                    var allData = allQuickSendToken.ToObject<List<List<ToSendData>>>();
-                    if (allData == null)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    pages.Add(ParseQuickSendImportPage((JArray)pageToken, cancellationToken));
+                }
+
+                List<string> names = null;
+                if (root is JObject package && package["quickSendListNames"] != null)
+                {
+                    if (!(package["quickSendListNames"] is JArray namesArray) ||
+                        namesArray.Count != pages.Count ||
+                        namesArray.Any(value => value.Type != JTokenType.String))
                     {
-                        Tools.MessageBox.Show(TryFindResource("QuickSendLoadError") as string ?? "?!");
-                        return;
+                        throw QuickSendImportError("页面名称列表必须与导入页数完全对应。");
                     }
-                    var allNames = (token as JObject)?["quickSendListNames"]?.ToObject<List<string>>();
-                    this.Dispatcher.Invoke(new Action(delegate
-                    {
-                        canSaveSendList = false;
-                        Tools.Global.setting.SetAllQuickSendLists(allData);
-                        Tools.Global.setting.SetAllQuickListNames(allNames);
-                        toSendListItems.Clear();
-                        LoadQuickSendList();
-                        canSaveSendList = true;
-                        Tools.MessageBox.Show(TryFindResource("QuickSendImportAllDone") as string ?? "?!");
-                    }));
-                    return;
+                    names = namesArray.Select(value => (string)value).ToList();
                 }
 
-                List<ToSendData> data = null;
+                return new QuickSendImportResult
+                {
+                    ImportsAllPages = true,
+                    Pages = pages,
+                    PageNames = names
+                };
+            }
+
+            if (!(root is JArray singlePage))
+                throw QuickSendImportError("当前页导入数据必须是 JSON 数组。");
+
+            return new QuickSendImportResult
+            {
+                ImportsAllPages = false,
+                Pages = new List<List<QuickSendImportItem>>
+                {
+                    ParseQuickSendImportPage(singlePage, cancellationToken)
+                }
+            };
+        }
+
+        private static void CheckQuickSendImportFileSize(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw QuickSendImportError("未选择导入文件。");
+
+            var fileInfo = new FileInfo(path);
+            fileInfo.Refresh();
+            if (!fileInfo.Exists)
+                throw QuickSendImportError("导入文件不存在。");
+            if (fileInfo.Length > MaxQuickSendImportFileBytes)
+            {
+                throw QuickSendImportError(
+                    $"文件超过 {MaxQuickSendImportFileBytes / (1024 * 1024)} MiB 硬上限。");
+            }
+        }
+
+        private static void ValidateQuickSendJsonStringBudget(
+            JToken root,
+            CancellationToken cancellationToken)
+        {
+            long totalCharacters = 0;
+            var visited = 0;
+            foreach (var token in EnumerateQuickSendJsonTokens(root))
+            {
+                if ((visited++ & 0xff) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                string value = null;
+                if (token is JProperty property)
+                    value = property.Name;
+                else if (token is JValue scalar && scalar.Type == JTokenType.String)
+                    value = (string)scalar;
+
+                if (value == null)
+                    continue;
+                if (value.Length > MaxQuickSendFieldCharacters)
+                {
+                    throw QuickSendImportError(
+                        $"单个字段超过 {MaxQuickSendFieldCharacters:N0} 个字符。");
+                }
+
+                totalCharacters += value.Length;
+                if (totalCharacters > MaxQuickSendTotalCharacters)
+                {
+                    throw QuickSendImportError(
+                        $"所有文本字段合计超过 {MaxQuickSendTotalCharacters:N0} 个字符。");
+                }
+            }
+        }
+
+        private static IEnumerable<JToken> EnumerateQuickSendJsonTokens(JToken root)
+        {
+            var pending = new Stack<JToken>();
+            pending.Push(root);
+            while (pending.Count > 0)
+            {
+                var current = pending.Pop();
+                yield return current;
+                if (!(current is JContainer container))
+                    continue;
+
+                foreach (var child in container.Children().Reverse())
+                    pending.Push(child);
+            }
+        }
+
+        private static List<QuickSendImportItem> ParseQuickSendImportPage(
+            JArray pageToken,
+            CancellationToken cancellationToken)
+        {
+            if (pageToken == null)
+                throw QuickSendImportError("快捷发送页不能为空。");
+            if (pageToken.Count > MaxQuickSendItemsPerPage)
+            {
+                throw QuickSendImportError(
+                    $"单页条数超过 {MaxQuickSendItemsPerPage:N0} 条。");
+            }
+
+            var items = new List<QuickSendImportItem>(pageToken.Count);
+            foreach (var itemToken in pageToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!(itemToken is JObject))
+                    throw QuickSendImportError("每条快捷发送数据都必须是 JSON 对象。");
+
+                QuickSendImportItem item;
                 try
                 {
-                    data = token.ToObject<List<ToSendData>>();
-                    if (data == null)
-                        throw new Exception(TryFindResource("QuickSendLoadError") as string ?? "?!");
+                    item = itemToken.ToObject<QuickSendImportItem>();
                 }
-                catch (Exception err)
+                catch (JsonException ex)
                 {
-                    Tools.MessageBox.Show(err.Message);
-                    return;
+                    throw QuickSendImportError("快捷发送字段类型无效：" + ex.Message);
+                }
+                if (item == null)
+                    throw QuickSendImportError("快捷发送条目为空。");
+
+                item.text = item.text ?? string.Empty;
+                item.commit = item.commit ?? string.Empty;
+                item.recvScriptPath = item.recvScriptPath ?? string.Empty;
+                item.recvScriptPara = item.recvScriptPara ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(item.recvScriptPath))
+                {
+                    if (!Tools.Global.TryGetProfileScriptPath(
+                            "user_script_recv_convert",
+                            item.recvScriptPath,
+                            out var normalizedName,
+                            out _))
+                    {
+                        throw QuickSendImportError("接收脚本名称无效或越过脚本目录。");
+                    }
+                    item.recvScriptPath = normalizedName;
+                }
+                items.Add(item);
+            }
+            return items;
+        }
+
+        private static InvalidDataException QuickSendImportError(string detail)
+        {
+            return new InvalidDataException("快捷发送导入失败：" + detail);
+        }
+
+        private void ApplyQuickSendImportResult(QuickSendImportResult result)
+        {
+            if (result?.Pages == null || result.Pages.Count == 0)
+                throw QuickSendImportError("解析结果为空。");
+
+            var previousCanSave = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                var pages = result.Pages
+                    .Select(page => page.Select(CreateImportedQuickSendItem).ToList())
+                    .ToList();
+                if (result.ImportsAllPages)
+                {
+                    ValidateImportedQuickSendLists(pages);
+                    ApplyImportedQuickSendLists(pages, result.PageNames);
+                }
+                else
+                {
+                    ValidateImportedQuickSendList(pages[0]);
+                    ApplyImportedQuickSendList(pages[0]);
+                }
+            }
+            finally
+            {
+                canSaveSendList = previousCanSave;
+            }
+        }
+
+        private static ToSendData CreateImportedQuickSendItem(QuickSendImportItem source)
+        {
+            return new ToSendData
+            {
+                id = source.id,
+                text = source.text ?? string.Empty,
+                hex = source.hex,
+                commit = source.commit ?? string.Empty,
+                recvScriptPath = source.recvScriptPath ?? string.Empty,
+                recvScriptPara = source.recvScriptPara ?? string.Empty,
+                appendCrlf = source.appendCrlf,
+                disableSuggestion = source.disableSuggestion
+            };
+        }
+
+        private void ValidateImportedQuickSendLists(List<List<ToSendData>> lists)
+        {
+            if (lists == null || lists.Count == 0 ||
+                lists.Count > MaxQuickSendImportPages ||
+                lists.Any(list => list == null))
+            {
+                throw QuickSendImportError($"页数必须为 1 到 {MaxQuickSendImportPages} 页。");
+            }
+
+            long totalCharacters = 0;
+            foreach (var list in lists)
+                ValidateImportedQuickSendList(list, ref totalCharacters);
+        }
+
+        private void ValidateImportedQuickSendList(List<ToSendData> list)
+        {
+            long totalCharacters = 0;
+            ValidateImportedQuickSendList(list, ref totalCharacters);
+        }
+
+        private void ValidateImportedQuickSendList(
+            List<ToSendData> list,
+            ref long totalCharacters)
+        {
+            if (list == null || list.Count > MaxQuickSendItemsPerPage || list.Any(item => item == null))
+            {
+                throw QuickSendImportError(
+                    $"单页条数不能超过 {MaxQuickSendItemsPerPage:N0} 条，且条目不能为空。");
+            }
+
+            foreach (var item in list)
+            {
+                ValidateImportedQuickSendField(item.text, ref totalCharacters);
+                ValidateImportedQuickSendField(item.commit, ref totalCharacters);
+                ValidateImportedQuickSendField(item.recvScriptPath, ref totalCharacters);
+                ValidateImportedQuickSendField(item.recvScriptPara, ref totalCharacters);
+
+                if (string.IsNullOrWhiteSpace(item.recvScriptPath))
+                {
+                    item.recvScriptPath = string.Empty;
+                    continue;
                 }
 
-                this.Dispatcher.Invoke(new Action(delegate
+                if (!Tools.Global.TryGetProfileScriptPath(
+                        "user_script_recv_convert",
+                        item.recvScriptPath,
+                        out var normalizedName,
+                        out _))
                 {
-                    canSaveSendList = false;
+                    throw QuickSendImportError("接收脚本名称无效或越过脚本目录。");
+                }
+                item.recvScriptPath = normalizedName;
+            }
+        }
+
+        private static void ValidateImportedQuickSendField(
+            string value,
+            ref long totalCharacters)
+        {
+            var length = value?.Length ?? 0;
+            if (length > MaxQuickSendFieldCharacters)
+            {
+                throw QuickSendImportError(
+                    $"单个字段超过 {MaxQuickSendFieldCharacters:N0} 个字符。");
+            }
+            totalCharacters += length;
+            if (totalCharacters > MaxQuickSendTotalCharacters)
+            {
+                throw QuickSendImportError(
+                    $"所有文本字段合计超过 {MaxQuickSendTotalCharacters:N0} 个字符。");
+            }
+        }
+
+        private void ApplyImportedQuickSendLists(
+            List<List<ToSendData>> allData,
+            List<string> allNames)
+        {
+            var previousLists = Tools.Global.setting.GetAllQuickSendLists();
+            var previousNames = Tools.Global.setting.GetAllQuickListNames();
+            var previousCanSave = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                Tools.Global.setting.SetAllQuickSendLists(allData);
+                if (allNames != null)
+                    Tools.Global.setting.SetAllQuickListNames(allNames);
+                toSendListItems.Clear();
+                LoadQuickSendList();
+            }
+            catch
+            {
+                try
+                {
+                    Tools.Global.setting.SetAllQuickSendLists(previousLists);
+                    Tools.Global.setting.SetAllQuickListNames(previousNames);
                     toSendListItems.Clear();
-                    foreach(var d in data)
-                    {
-                        toSendListItems.Add(d);
-                    }
-                    canSaveSendList = true;
-                    SaveSendList(0, EventArgs.Empty);//保存并刷新数据列表
-                }));
+                    LoadQuickSendList();
+                }
+                catch { }
+                throw;
+            }
+            finally
+            {
+                canSaveSendList = previousCanSave;
+            }
+        }
+
+        private void ApplyImportedQuickSendList(List<ToSendData> data)
+        {
+            var previousData = Tools.Global.setting.quickSend;
+            var previousCanSave = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                Tools.Global.setting.quickSend = data;
+                toSendListItems.Clear();
+                LoadQuickSendList();
+            }
+            catch
+            {
+                try
+                {
+                    Tools.Global.setting.quickSend = previousData;
+                    toSendListItems.Clear();
+                    LoadQuickSendList();
+                }
+                catch { }
+                throw;
+            }
+            finally
+            {
+                canSaveSendList = previousCanSave;
             }
         }
 

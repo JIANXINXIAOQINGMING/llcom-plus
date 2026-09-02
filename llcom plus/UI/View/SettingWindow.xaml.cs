@@ -8,6 +8,8 @@ using System.Configuration;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using Path = System.IO.Path;
+
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -27,6 +29,9 @@ namespace llcom_plus
     /// </summary>
     public partial class SettingWindow : Window
     {
+        private const string SendScriptDirectory = "user_script_send_convert";
+        private const string ReceiveScriptDirectory = "user_script_recv_convert";
+
         public SettingWindow()
         {
             InitializeComponent();
@@ -47,90 +52,122 @@ namespace llcom_plus
         /// <param name="fileName">文件名，不带.js</param>
         private void loadScriptFile(string fileName)
         {
-            //检查文件是否存在
-            if (!File.Exists(Tools.Global.ProfilePath + $"user_script_send_convert/{fileName}.js"))
+            if (!Tools.Global.TryGetProfileScriptPath(
+                    SendScriptDirectory,
+                    fileName,
+                    out var normalizedName,
+                    out var scriptPath) ||
+                !File.Exists(scriptPath))
             {
-                Tools.Global.setting.sendScript = "default";
-                if (!File.Exists(Tools.Global.ProfilePath + $"user_script_send_convert/{Tools.Global.setting.sendScript}.js"))
+                if (!Tools.Global.TryGetProfileScriptPath(
+                        SendScriptDirectory,
+                        "default",
+                        out normalizedName,
+                        out scriptPath))
                 {
-                    File.Create(Tools.Global.ProfilePath + $"user_script_send_convert/{Tools.Global.setting.sendScript}.js").Close();
+                    throw new InvalidOperationException("发送脚本目录无效。");
                 }
-            }
-            else
-            {
-                Tools.Global.setting.sendScript = fileName;
+
+                Directory.CreateDirectory(Path.GetDirectoryName(scriptPath));
+                if (!File.Exists(scriptPath))
+                    File.Create(scriptPath).Close();
             }
 
-            //文件内容显示出来
-            textEditor.Text = File.ReadAllText(Tools.Global.ProfilePath + $"user_script_send_convert/{Tools.Global.setting.sendScript}.js");
+            Tools.Global.setting.sendScript = normalizedName;
+            textEditor.Text = File.ReadAllText(scriptPath);
 
-            //刷新文件列表
-            DirectoryInfo scriptFileDir = new DirectoryInfo(Tools.Global.ProfilePath + "user_script_send_convert/");
-            FileSystemInfo[] scriptFiles = scriptFileDir.GetFileSystemInfos();
+            var scriptRoot = Path.GetDirectoryName(scriptPath);
             fileLoading = true;
-            scriptFileList.Items.Clear();
-            for (int i = 0; i < scriptFiles.Length; i++)
+            try
             {
-                FileInfo file = scriptFiles[i] as FileInfo;
-                //是文件
-                if (file != null && file.Name.EndsWith(".js"))
+                scriptFileList.Items.Clear();
+                foreach (var file in new DirectoryInfo(scriptRoot).GetFiles("*.js", SearchOption.TopDirectoryOnly))
                 {
-                    string name = System.IO.Path.GetFileNameWithoutExtension(file.Name);
-                    scriptFileList.Items.Add(name);
-                    if (name == Tools.Global.setting.sendScript)
+                    var name = Path.GetFileNameWithoutExtension(file.Name);
+                    if (!Tools.Global.TryGetCanonicalScriptPath(
+                            scriptRoot,
+                            name,
+                            out name,
+                            out var canonicalPath) ||
+                        !string.Equals(
+                            Path.GetFullPath(file.FullName),
+                            canonicalPath,
+                            StringComparison.OrdinalIgnoreCase))
                     {
-                        scriptFileList.SelectedIndex = scriptFileList.Items.Count - 1;
+                        continue;
                     }
+
+                    scriptFileList.Items.Add(name);
+                    if (string.Equals(name, normalizedName, StringComparison.Ordinal))
+                        scriptFileList.SelectedIndex = scriptFileList.Items.Count - 1;
                 }
             }
-            lastScriptFile = Tools.Global.setting.sendScript;
-            fileLoading = false;
+            finally
+            {
+                fileLoading = false;
+            }
 
-            //重载脚本
+            lastScriptFile = normalizedName;
             ScriptEnv.JavaScriptLoader.ClearRun();
         }
         private void loadScriptFileRev(string fileName)
         {
-            //检查文件是否存在
-            if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{fileName}.js"))
+            if (!Tools.Global.TryGetProfileScriptPath(
+                    ReceiveScriptDirectory,
+                    fileName,
+                    out var normalizedName,
+                    out var scriptPath) ||
+                !File.Exists(scriptPath))
             {
-                Tools.Global.setting.recvScript = "default";
-                if (!File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.js"))
+                if (!Tools.Global.TryGetProfileScriptPath(
+                        ReceiveScriptDirectory,
+                        "default",
+                        out normalizedName,
+                        out scriptPath))
                 {
-                    File.Create(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.js").Close();
+                    throw new InvalidOperationException("接收脚本目录无效。");
                 }
-            }
-            else
-            {
-                Tools.Global.setting.recvScript = fileName;
+
+                Directory.CreateDirectory(Path.GetDirectoryName(scriptPath));
+                if (!File.Exists(scriptPath))
+                    File.Create(scriptPath).Close();
             }
 
-            //文件内容显示出来
-            textEditorRev.Text = File.ReadAllText(Tools.Global.ProfilePath + $"user_script_recv_convert/{Tools.Global.setting.recvScript}.js");
+            Tools.Global.setting.recvScript = normalizedName;
+            textEditorRev.Text = File.ReadAllText(scriptPath);
 
-            //刷新文件列表
-            DirectoryInfo scriptFileDir = new DirectoryInfo(Tools.Global.ProfilePath + "user_script_recv_convert/");
-            FileSystemInfo[] scriptFiles = scriptFileDir.GetFileSystemInfos();
+            var scriptRoot = Path.GetDirectoryName(scriptPath);
             fileLoadingRev = true;
-            scriptFileListRev.Items.Clear();
-            for (int i = 0; i < scriptFiles.Length; i++)
+            try
             {
-                FileInfo file = scriptFiles[i] as FileInfo;
-                //是文件
-                 if (file != null && file.Name.EndsWith(".js"))
+                scriptFileListRev.Items.Clear();
+                foreach (var file in new DirectoryInfo(scriptRoot).GetFiles("*.js", SearchOption.TopDirectoryOnly))
                 {
-                    string name = System.IO.Path.GetFileNameWithoutExtension(file.Name);
-                    scriptFileListRev.Items.Add(name);
-                    if (name== Tools.Global.setting.recvScript)
+                    var name = Path.GetFileNameWithoutExtension(file.Name);
+                    if (!Tools.Global.TryGetCanonicalScriptPath(
+                            scriptRoot,
+                            name,
+                            out name,
+                            out var canonicalPath) ||
+                        !string.Equals(
+                            Path.GetFullPath(file.FullName),
+                            canonicalPath,
+                            StringComparison.OrdinalIgnoreCase))
                     {
-                        scriptFileListRev.SelectedIndex = scriptFileListRev.Items.Count - 1;
+                        continue;
                     }
+
+                    scriptFileListRev.Items.Add(name);
+                    if (string.Equals(name, normalizedName, StringComparison.Ordinal))
+                        scriptFileListRev.SelectedIndex = scriptFileListRev.Items.Count - 1;
                 }
             }
-            lastScriptFileRev = Tools.Global.setting.recvScript;
-            fileLoadingRev = false;
+            finally
+            {
+                fileLoadingRev = false;
+            }
 
-            //重载脚本
+            lastScriptFileRev = normalizedName;
             ScriptEnv.JavaScriptLoader.ClearRun();
         }
 
@@ -140,16 +177,31 @@ namespace llcom_plus
         /// <param name="fileName">文件名，不带.js</param>
         private void saveScriptFile(string fileName)
         {
-            File.WriteAllText(Tools.Global.ProfilePath + $"user_script_send_convert/{fileName}.js", textEditor.Text);
+            if (!Tools.Global.TryGetProfileScriptPath(
+                    SendScriptDirectory,
+                    fileName,
+                    out _,
+                    out var scriptPath))
+            {
+                throw new ArgumentException("发送脚本名称无效。", nameof(fileName));
+            }
 
-            //重载脚本
+            File.WriteAllText(scriptPath, textEditor.Text);
             ScriptEnv.JavaScriptLoader.ClearRun();
         }
+
         private void saveScriptFileRev(string fileName)
         {
-            File.WriteAllText(Tools.Global.ProfilePath + $"user_script_recv_convert/{fileName}.js", textEditorRev.Text);
+            if (!Tools.Global.TryGetProfileScriptPath(
+                    ReceiveScriptDirectory,
+                    fileName,
+                    out _,
+                    out var scriptPath))
+            {
+                throw new ArgumentException("接收脚本名称无效。", nameof(fileName));
+            }
 
-            //重载脚本
+            File.WriteAllText(scriptPath, textEditorRev.Text);
             ScriptEnv.JavaScriptLoader.ClearRun();
         }
 
@@ -180,8 +232,8 @@ namespace llcom_plus
             RefreshLogColorSwatches();
             //加载上次打开的文件
             loadScriptFile(Tools.Global.setting.sendScript);
-            if(!string.IsNullOrEmpty(MainWindow.recvScriptBackup)) loadScriptFileRev(MainWindow.recvScriptBackup);
-            else loadScriptFileRev(Tools.Global.setting.recvScript);
+            loadScriptFileRev(Tools.Global.setting.recvScript);
+            MainWindow.recvScriptBackup = Tools.Global.setting.recvScript;
             //加载编码
             var el = Encoding.GetEncodings();
             List<EncodingInfo> encodingList = new List<EncodingInfo>(el);
@@ -202,7 +254,18 @@ namespace llcom_plus
 
         private void Global_UartProfileChangedEvent(object sender, EventArgs e)
         {
-            Dispatcher.Invoke(RefreshUartSettingControls);
+            Dispatcher.Invoke(() =>
+            {
+                if (lastScriptFile != "")
+                    saveScriptFile(lastScriptFile);
+                if (lastScriptFileRev != "")
+                    saveScriptFileRev(lastScriptFileRev);
+
+                RefreshUartSettingControls();
+                loadScriptFile(Tools.Global.setting.sendScript);
+                loadScriptFileRev(Tools.Global.setting.recvScript);
+                MainWindow.recvScriptBackup = Tools.Global.setting.recvScript;
+            });
         }
 
         private void Global_ThemeChanged(object sender, EventArgs e)
@@ -398,7 +461,11 @@ namespace llcom_plus
         private void NewScriptFileButton_Click(object sender, RoutedEventArgs e)
         {
             var scriptName = NormalizeScriptFileName(newScriptFileNameTextBox.Text);
-            if (!IsValidScriptFileName(scriptName))
+            if (!Tools.Global.TryGetProfileScriptPath(
+                    SendScriptDirectory,
+                    scriptName,
+                    out scriptName,
+                    out var scriptPath))
             {
                 Tools.MessageBox.Show(string.IsNullOrWhiteSpace(scriptName)
                     ? TryFindResource("ScriptNoName") as string ?? "?!"
@@ -406,7 +473,7 @@ namespace llcom_plus
                 return;
             }
             newScriptFileNameTextBox.Text = scriptName;
-            if (File.Exists(Tools.Global.ProfilePath + $"user_script_send_convert/{scriptName}.js"))
+            if (File.Exists(scriptPath))
             {
                 Tools.MessageBox.Show(TryFindResource("ScriptExist") as string ?? "?!");
                 return;
@@ -414,7 +481,8 @@ namespace llcom_plus
 
             try
             {
-                File.Create(Tools.Global.ProfilePath + $"user_script_send_convert/{scriptName}.js").Close();
+                Directory.CreateDirectory(Path.GetDirectoryName(scriptPath));
+                File.Create(scriptPath).Close();
                 loadScriptFile(scriptName);
             }
             catch
@@ -520,7 +588,11 @@ namespace llcom_plus
         private void newScriptFileButtonRev_Click(object sender, RoutedEventArgs e)
         {
             var scriptName = NormalizeScriptFileName(newScriptFileNameTextBoxRev.Text);
-            if (!IsValidScriptFileName(scriptName))
+            if (!Tools.Global.TryGetProfileScriptPath(
+                    ReceiveScriptDirectory,
+                    scriptName,
+                    out scriptName,
+                    out var scriptPath))
             {
                 Tools.MessageBox.Show(string.IsNullOrWhiteSpace(scriptName)
                     ? TryFindResource("ScriptNoName") as string ?? "?!"
@@ -528,7 +600,7 @@ namespace llcom_plus
                 return;
             }
             newScriptFileNameTextBoxRev.Text = scriptName;
-            if (File.Exists(Tools.Global.ProfilePath + $"user_script_recv_convert/{scriptName}.js"))
+            if (File.Exists(scriptPath))
             {
                 Tools.MessageBox.Show(TryFindResource("ScriptExist") as string ?? "?!");
                 return;
@@ -536,7 +608,8 @@ namespace llcom_plus
 
             try
             {
-                File.Create(Tools.Global.ProfilePath + $"user_script_recv_convert/{scriptName}.js").Close();
+                Directory.CreateDirectory(Path.GetDirectoryName(scriptPath));
+                File.Create(scriptPath).Close();
                 loadScriptFileRev(scriptName);
             }
             catch
@@ -599,26 +672,12 @@ namespace llcom_plus
 
         private static string NormalizeScriptFileName(string fileName)
         {
-            var name = (fileName ?? string.Empty).Trim();
-            return name.EndsWith(".js", StringComparison.OrdinalIgnoreCase)
-                ? name.Substring(0, name.Length - 3)
-                : name;
+            return Tools.Global.NormalizeScriptFileName(fileName);
         }
 
         private static bool IsValidScriptFileName(string fileName)
         {
-            if (string.IsNullOrWhiteSpace(fileName))
-                return false;
-            if (fileName == "." || fileName == "..")
-                return false;
-            if (fileName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
-                return false;
-            if (fileName.Contains(System.IO.Path.DirectorySeparatorChar.ToString()) ||
-                fileName.Contains(System.IO.Path.AltDirectorySeparatorChar.ToString()))
-            {
-                return false;
-            }
-            return true;
+            return Tools.Global.IsValidScriptFileName(fileName);
         }
     }
 }

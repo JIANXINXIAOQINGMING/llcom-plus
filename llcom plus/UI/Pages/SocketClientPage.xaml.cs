@@ -48,10 +48,13 @@ namespace llcom_plus.Pages
         private const ushort DnsClassInternet = 1;
         private const int DnsQueryTimeoutMs = 5000;
         private static readonly Random DnsQueryRandom = new Random();
+        private const long NtpEraSeconds = 1L << 32;
+        private static readonly DateTime NtpEpochUtc = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         public SocketClientPage()
         {
             InitializeComponent();
+            Unloaded += SocketClientPage_Unloaded;
         }
         private bool initial = false;
         private int lastProtocolType = -1;
@@ -68,6 +71,7 @@ namespace llcom_plus.Pages
 
         //暂存一个对象
         SocketObj socketNow = null;
+        private long nativeSocketEpoch = 0;
 
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
@@ -188,18 +192,109 @@ namespace llcom_plus.Pages
             ShowData(title, Encoding.UTF8.GetBytes(text ?? string.Empty), send);
         }
 
-        private System.Timers.Timer reconnectTimer = null;
-        private void Reconnect()
+        private readonly object reconnectTimerLock = new object();
+        private System.Timers.Timer reconnectTimer;
+        private long reconnectGeneration;
+
+        private bool IsReconnectGenerationActive(long generation)
         {
-            if (!Changeable || IsConnected)
+            lock (reconnectTimerLock)
+            {
+                return generation == reconnectGeneration &&
+                    NeedDisconnected &&
+                    reconnectTimer != null;
+            }
+        }
+
+        private long StartReconnectTimer()
+        {
+            System.Timers.Timer previous;
+            System.Timers.Timer current;
+            long generation;
+            lock (reconnectTimerLock)
+            {
+                previous = reconnectTimer;
+                reconnectTimer = null;
+                generation = ++reconnectGeneration;
+                NeedDisconnected = true;
+                current = new System.Timers.Timer(
+                    Math.Max(1, Tools.Global.setting.tcpReconnectInterval) * 1000.0)
+                {
+                    AutoReset = true,
+                    Enabled = false
+                };
+                reconnectTimer = current;
+            }
+
+            DisposeReconnectTimer(previous);
+            current.Elapsed += (_, __) => QueueReconnect(generation);
+            var shouldDispose = false;
+            lock (reconnectTimerLock)
+            {
+                if (generation == reconnectGeneration &&
+                    NeedDisconnected &&
+                    ReferenceEquals(reconnectTimer, current))
+                {
+                    current.Start();
+                }
+                else
+                {
+                    shouldDispose = true;
+                }
+            }
+            if (shouldDispose)
+                DisposeReconnectTimer(current);
+            return generation;
+        }
+
+        private void QueueReconnect(long generation)
+        {
+            if (!IsReconnectGenerationActive(generation) || IsConnected)
                 return;
 
-            IPEndPoint ipe = null;
-            Socket s = null;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!IsReconnectGenerationActive(generation) || IsConnected)
+                    return;
+                _ = ReconnectAsync(generation);
+            }));
+        }
+
+        private void StopReconnectTimer(bool clearDisconnectIntent)
+        {
+            System.Timers.Timer timer;
+            lock (reconnectTimerLock)
+            {
+                ++reconnectGeneration;
+                timer = reconnectTimer;
+                reconnectTimer = null;
+                if (clearDisconnectIntent)
+                    NeedDisconnected = false;
+            }
+            DisposeReconnectTimer(timer);
+        }
+
+        private static void DisposeReconnectTimer(System.Timers.Timer timer)
+        {
+            if (timer == null)
+                return;
+            try { timer.Stop(); } catch { }
+            try { timer.Dispose(); } catch { }
+        }
+
+        private async Task ReconnectAsync(long reconnectAttemptGeneration = 0)
+        {
+            if (reconnectAttemptGeneration != 0 &&
+                !IsReconnectGenerationActive(reconnectAttemptGeneration))
+            {
+                return;
+            }
+            if (!Changeable || IsConnected || !NeedDisconnected)
+                return;
+
             var protocol = GetSelectedProtocol();
             if (!IsConnectionProtocol(protocol))
                 return;
-            var targetName = BuildMainSendTargetName(protocol, ServerTextBox.Text, GetPortOrDefault(GetDefaultPort(protocol)));
 
             if (protocol == ProtocolTcpSsl || protocol == ProtocolDtls)
             {
@@ -212,84 +307,195 @@ namespace llcom_plus.Pages
                 return;
             }
 
+            Changeable = false;
+            var epoch = Interlocked.Increment(ref nativeSocketEpoch);
+            SocketObj owner = null;
+            string host;
+            int port;
+            string targetName;
+
             try
             {
-                Changeable = false;
-                IPAddress ip = null;
-                try
-                {
-                    ip = IPAddress.Parse(ServerTextBox.Text);
-                }
-                catch
-                {
-                    var hostEntry = Dns.GetHostEntry(ServerTextBox.Text);
-                    ip = hostEntry.AddressList.FirstOrDefault(a =>
-                        a.AddressFamily == AddressFamily.InterNetwork ||
-                        a.AddressFamily == AddressFamily.InterNetworkV6);
-                    if (ip == null)
-                        throw new Exception("server host has no available IP address");
-                }
-                ipe = new IPEndPoint(ip, int.Parse(PortTextBox.Text));
-                s = new Socket(ipe.AddressFamily,
+                host = GetServerHost();
+                port = int.Parse(PortTextBox.Text);
+                targetName = BuildMainSendTargetName(protocol, host, port);
+            }
+            catch (Exception ex)
+            {
+                DisconnectNativeSocket(owner, epoch, "❗ Server information error", ex.Message, true);
+                return;
+            }
+
+            IPAddress ip;
+            try
+            {
+                ip = await ResolveSocketAddressAsync(host);
+            }
+            catch (Exception ex)
+            {
+                DisconnectNativeSocket(owner, epoch, "❗ Server information error", ex.Message, true);
+                return;
+            }
+
+            if (!IsCurrentNativeAttempt(null, epoch))
+                return;
+
+            try
+            {
+                var endpoint = new IPEndPoint(ip, port);
+                var socket = new Socket(
+                    endpoint.AddressFamily,
                     protocol == ProtocolUdp ? SocketType.Dgram : SocketType.Stream,
                     protocol == ProtocolUdp ? ProtocolType.Udp : ProtocolType.Tcp);
+                owner = new SocketObj(socket, epoch);
+
+                if (!IsCurrentNativeAttempt(null, epoch))
+                {
+                    CloseSocketQuietly(owner);
+                    return;
+                }
+
+                socketNow = owner;
+                ShowData("📢 Connecting......");
+                var state = new StateObject
+                {
+                    workSocket = socket,
+                    owner = owner,
+                    epoch = epoch,
+                    isDatagram = protocol == ProtocolUdp,
+                    targetName = targetName,
+                };
+                socket.BeginConnect(endpoint, Connect_Callback, state);
             }
             catch (Exception ex)
             {
-                ShowData($"❗ Server information error {ex.Message}");
-                PublishConnectionFailure(ex.Message);
-                Changeable = true;
-                return;
+                DisconnectNativeSocket(owner, epoch, "❗ Server connect error", ex.Message, true);
             }
-            ShowData("📢 Connecting......");
+        }
+
+        private static async Task<IPAddress> ResolveSocketAddressAsync(string host)
+        {
+            IPAddress address;
+            if (IPAddress.TryParse(host, out address))
+                return address;
+
+            return await Task.Run(() =>
+            {
+                var addresses = Dns.GetHostAddresses(host)
+                    .Where(item => item.AddressFamily == AddressFamily.InterNetwork ||
+                                   item.AddressFamily == AddressFamily.InterNetworkV6)
+                    .ToArray();
+                if (addresses.Length == 0)
+                    throw new Exception("server host has no available IP address");
+                return addresses[0];
+            });
+        }
+
+        private void Connect_Callback(IAsyncResult ar)
+        {
+            var state = (StateObject)ar.AsyncState;
             try
             {
-                StateObject so = new StateObject();
-                s.BeginConnect(ipe, new AsyncCallback((r) =>
-                {
-                    var s = (Socket)r.AsyncState;
-                    if (s.Connected)
-                    {
-                        socketNow = new SocketObj(s);
-                        IsConnected = true;
-                        NeedDisconnected = true;
-                        RegisterMainSendTarget(targetName);
-                        ShowData("✔ Server connected");
-                    }
-                    else
-                    {
-                        Changeable = true;
-                        ShowData("❗ Server connect failed");
-                        PublishConnectionFailure("Server connect failed");
-                        return;
-                    }
-
-                    so.workSocket = s;
-                    try
-                    {
-                        s.BeginReceive(so.buffer, 0, StateObject.BUFFER_SIZE, 0, new AsyncCallback(Read_Callback), so);
-                    }
-                    catch(Exception ex)
-                    {
-                        ShowData($"❗ Server connect error {ex.Message}");
-                        PublishConnectionFailure(ex.Message);
-                        socketNow = null;
-                        IsConnected = false;
-                        Tools.Global.ClearMainSendTarget(MainSendTargetKey);
-                        Changeable = true;
-                        s.Close();
-                        s.Dispose();
-                        ShowData("❌ Server disconnected");
-                        return;
-                    }
-                }), s);
+                state.workSocket.EndConnect(ar);
             }
             catch (Exception ex)
             {
-                ShowData($"❗ Server connect error {ex.Message}");
-                PublishConnectionFailure(ex.Message);
-                Changeable = true;
+                DisconnectNativeSocket(state.owner, state.epoch, "❗ Server connect error", ex.Message, true);
                 return;
+            }
+
+            Dispatcher.BeginInvoke(new Action(() => CompleteNativeSocketConnect(state)));
+        }
+
+        private void CompleteNativeSocketConnect(StateObject state)
+        {
+            if (!IsCurrentNativeAttempt(state.owner, state.epoch))
+            {
+                CloseSocketQuietly(state.owner);
+                return;
+            }
+
+            try
+            {
+                IsConnected = true;
+                NeedDisconnected = true;
+                RegisterMainSendTarget(state.targetName);
+                ShowData("✔ Server connected");
+                state.workSocket.BeginReceive(
+                    state.buffer,
+                    0,
+                    StateObject.BUFFER_SIZE,
+                    SocketFlags.None,
+                    Read_Callback,
+                    state);
+            }
+            catch (Exception ex)
+            {
+                DisconnectNativeSocket(state.owner, state.epoch, "❗ Server receive error", ex.Message, false);
+            }
+        }
+
+        private bool IsCurrentNativeAttempt(SocketObj owner, long epoch)
+        {
+            if (Volatile.Read(ref nativeSocketEpoch) != epoch)
+                return false;
+
+            return owner == null
+                ? socketNow == null
+                : ReferenceEquals(socketNow, owner);
+        }
+
+        private void DisconnectNativeSocket(
+            SocketObj owner,
+            long epoch,
+            string errorTitle = null,
+            string detail = null,
+            bool publishFailure = false)
+        {
+            CloseSocketQuietly(owner);
+
+            Action updateState = () =>
+            {
+                if (!IsCurrentNativeAttempt(owner, epoch))
+                    return;
+                if (Interlocked.CompareExchange(ref nativeSocketEpoch, epoch + 1, epoch) != epoch)
+                    return;
+
+                socketNow = null;
+                IsConnected = false;
+                Tools.Global.ClearMainSendTarget(MainSendTargetKey);
+                if (!Tools.Global.setting.tcpReconnect)
+                    NeedDisconnected = false;
+                Changeable = true;
+
+                if (!string.IsNullOrWhiteSpace(errorTitle))
+                {
+                    ShowData(string.IsNullOrWhiteSpace(detail)
+                        ? errorTitle
+                        : $"{errorTitle} {detail}");
+                }
+                if (publishFailure)
+                    PublishConnectionFailure(detail ?? errorTitle ?? "Server connection failed");
+                ShowData("❌ Server disconnected");
+            };
+
+            if (Dispatcher.CheckAccess())
+                updateState();
+            else
+                Dispatcher.BeginInvoke(updateState);
+        }
+
+        private static void CloseSocketQuietly(SocketObj owner)
+        {
+            if (owner == null)
+                return;
+
+            try
+            {
+                owner.Close();
+            }
+            catch
+            {
             }
         }
 
@@ -307,33 +513,17 @@ namespace llcom_plus.Pages
                 return;
             }
 
+            long reconnectAttemptGeneration = 0;
             if (Tools.Global.setting.tcpReconnect)
             {
-                reconnectTimer = new System.Timers.Timer(Tools.Global.setting.tcpReconnectInterval * 1000);
-                reconnectTimer.Elapsed += (_, _) =>
-                {
-                    if (!IsConnected)
-                    {
-                        Dispatcher.Invoke(() =>
-                        {
-                            Reconnect();
-                        });
-                    }
-                };
-                reconnectTimer.AutoReset = true;
-                reconnectTimer.Enabled = true;                
-                NeedDisconnected = true;
+                reconnectAttemptGeneration = StartReconnectTimer();
             }
             else
             {
-                if (reconnectTimer != null)
-                {
-                    reconnectTimer.Stop();
-                    reconnectTimer.Dispose();
-                    reconnectTimer = null;
-                }
+                StopReconnectTimer(clearDisconnectIntent: false);
+                NeedDisconnected = true;
             }
-            Reconnect();
+            await ReconnectAsync(reconnectAttemptGeneration);
         }
 
         private async Task RunSingleShotProtocolAsync(int protocol)
@@ -374,6 +564,18 @@ namespace llcom_plus.Pages
                 Changeable = false;
                 var host = GetServerHost();
                 var options = OpenSslCli.FromGlobalSettings(host, GetPortOrDefault(protocol == ProtocolDtls ? 4433 : 443), protocol == ProtocolDtls);
+                if (options.AuthMode == 0)
+                {
+                    var confirmed = Tools.InputDialog.OpenDialog(
+                        "SECURITY WARNING: No authentication disables CA and hostname verification. Continue only for explicit debugging.",
+                        null,
+                        "Unverified TLS/DTLS connection").Item1;
+                    if (!confirmed)
+                    {
+                        Changeable = true;
+                        return;
+                    }
+                }
                 ShowTextData(protocol == ProtocolDtls ? "🔐 OpenSSL DTLS connecting" : "🔐 OpenSSL TLS connecting",
                     OpenSslCli.BuildDiagnosticSummary(options));
 
@@ -1175,9 +1377,6 @@ namespace llcom_plus.Pages
 
         private string QueryNtpAddress(string host, int port, IPAddress address)
         {
-            var request = new byte[48];
-            request[0] = 0x23;
-
             using (var udp = new UdpClient(address.AddressFamily))
             {
                 udp.Client.ReceiveTimeout = 5000;
@@ -1185,38 +1384,147 @@ namespace llcom_plus.Pages
                 var remote = new IPEndPoint(address, port);
                 udp.Connect(remote);
 
-                var startUtc = DateTime.UtcNow;
+                var request = BuildNtpRequest(DateTime.UtcNow);
                 udp.Send(request, request.Length);
                 var any = address.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any;
                 var endpoint = new IPEndPoint(any, 0);
                 var response = udp.Receive(ref endpoint);
-                var endUtc = DateTime.UtcNow;
-
-                if (response.Length < 48)
-                    throw new Exception($"invalid NTP response length: {response.Length}");
-
-                var seconds = ReadUInt32BigEndian(response, 40);
-                var fraction = ReadUInt32BigEndian(response, 44);
-                var milliseconds = seconds * 1000d + fraction * 1000d / 0x100000000L;
-                var serverUtc = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(milliseconds);
-                var offset = serverUtc - endUtc;
-                var roundtrip = endUtc - startUtc;
+                var destinationUtc = DateTime.UtcNow;
+                var measurement = ParseNtpResponse(request, response, destinationUtc);
 
                 var sb = new StringBuilder();
                 sb.AppendLine($"Server: {host}:{port}");
                 sb.AppendLine($"Address: {address}");
                 sb.AppendLine($"Endpoint: {endpoint}");
-                sb.AppendLine($"Mode: {response[0] & 0x7}");
-                sb.AppendLine($"Version: {(response[0] >> 3) & 0x7}");
-                sb.AppendLine($"Stratum: {response[1]}");
-                sb.AppendLine($"Request UTC: {startUtc:O}");
-                sb.AppendLine($"Response UTC: {endUtc:O}");
-                sb.AppendLine($"NTP UTC: {serverUtc:O}");
-                sb.AppendLine($"NTP Local: {serverUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff zzz}");
-                sb.AppendLine($"Roundtrip: {roundtrip.TotalMilliseconds:F0} ms");
-                sb.AppendLine($"Local offset: {offset.TotalMilliseconds:F0} ms");
+                sb.AppendLine($"Mode: {measurement.Mode}");
+                sb.AppendLine($"Version: {measurement.Version}");
+                sb.AppendLine($"Stratum: {measurement.Stratum}");
+                sb.AppendLine($"Request UTC (T1): {measurement.OriginateUtc:O}");
+                sb.AppendLine($"Server receive UTC (T2): {measurement.ReceiveUtc:O}");
+                sb.AppendLine($"Server transmit UTC (T3): {measurement.TransmitUtc:O}");
+                sb.AppendLine($"Response UTC (T4): {measurement.DestinationUtc:O}");
+                sb.AppendLine($"NTP Local: {measurement.TransmitUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff zzz}");
+                sb.AppendLine($"Roundtrip: {(measurement.DestinationUtc - measurement.OriginateUtc).TotalMilliseconds:F3} ms");
+                sb.AppendLine($"Network delay: {measurement.Delay.TotalMilliseconds:F3} ms");
+                sb.AppendLine($"Local offset: {measurement.Offset.TotalMilliseconds:F3} ms");
                 return sb.ToString();
             }
+        }
+
+        internal static byte[] BuildNtpRequest(DateTime transmitUtc)
+        {
+            var request = new byte[48];
+            request[0] = 0x23;
+            WriteNtpTimestamp(request, 40, transmitUtc);
+            return request;
+        }
+
+        internal static NtpMeasurement ParseNtpResponse(
+            byte[] request,
+            byte[] response,
+            DateTime destinationUtc)
+        {
+            if (request == null || request.Length < 48)
+                throw new Exception("invalid NTP request");
+            if (response == null || response.Length < 48)
+                throw new Exception($"invalid NTP response length: {response?.Length ?? 0}");
+
+            var mode = response[0] & 0x7;
+            var version = (response[0] >> 3) & 0x7;
+            var leapIndicator = (response[0] >> 6) & 0x3;
+            var stratum = response[1];
+            if (mode != 4)
+                throw new Exception($"invalid NTP response mode: {mode}");
+            if (stratum < 1 || stratum > 15)
+                throw new Exception($"invalid NTP response stratum: {stratum}");
+            if (leapIndicator == 3)
+                throw new Exception("NTP server clock is unsynchronized");
+            if (!NtpTimestampEquals(response, 24, request, 40))
+                throw new Exception("NTP originate timestamp mismatch");
+            if (IsZeroNtpTimestamp(response, 32) || IsZeroNtpTimestamp(response, 40))
+                throw new Exception("NTP response contains an empty server timestamp");
+
+            var t4 = NormalizeUtc(destinationUtc);
+            var t1 = ReadNtpTimestamp(request, 40, t4);
+            var t2 = ReadNtpTimestamp(response, 32, t4);
+            var t3 = ReadNtpTimestamp(response, 40, t4);
+            var offsetTicks = ((t2 - t1).Ticks + (t3 - t4).Ticks) / 2;
+            var delay = (t4 - t1) - (t3 - t2);
+
+            return new NtpMeasurement
+            {
+                Mode = mode,
+                Version = version,
+                Stratum = stratum,
+                OriginateUtc = t1,
+                ReceiveUtc = t2,
+                TransmitUtc = t3,
+                DestinationUtc = t4,
+                Offset = TimeSpan.FromTicks(offsetTicks),
+                Delay = delay,
+            };
+        }
+
+        private static void WriteNtpTimestamp(byte[] data, int offset, DateTime value)
+        {
+            var utc = NormalizeUtc(value);
+            var ticks = (utc - NtpEpochUtc).Ticks;
+            if (ticks < 0)
+                throw new ArgumentOutOfRangeException(nameof(value), "NTP timestamp cannot be before 1900-01-01 UTC");
+
+            var wholeSeconds = ticks / TimeSpan.TicksPerSecond;
+            var remainderTicks = ticks % TimeSpan.TicksPerSecond;
+            var fraction = (uint)(((ulong)remainderTicks * (1UL << 32)) / TimeSpan.TicksPerSecond);
+            WriteUInt32BigEndian(data, offset, unchecked((uint)wholeSeconds));
+            WriteUInt32BigEndian(data, offset + 4, fraction);
+        }
+
+        private static DateTime ReadNtpTimestamp(byte[] data, int offset, DateTime referenceUtc)
+        {
+            var seconds = ReadUInt32BigEndian(data, offset);
+            var fraction = ReadUInt32BigEndian(data, offset + 4);
+            var referenceSeconds = (NormalizeUtc(referenceUtc) - NtpEpochUtc).Ticks / TimeSpan.TicksPerSecond;
+            var era = (long)Math.Round(
+                (referenceSeconds - seconds) / (double)NtpEraSeconds,
+                MidpointRounding.AwayFromZero);
+            var unfoldedSeconds = seconds + era * NtpEraSeconds;
+            var fractionTicks = (long)(((ulong)fraction * TimeSpan.TicksPerSecond + (1UL << 31)) / (1UL << 32));
+            if (fractionTicks == TimeSpan.TicksPerSecond)
+            {
+                unfoldedSeconds++;
+                fractionTicks = 0;
+            }
+
+            return NtpEpochUtc.AddTicks(checked(unfoldedSeconds * TimeSpan.TicksPerSecond + fractionTicks));
+        }
+
+        private static bool NtpTimestampEquals(byte[] left, int leftOffset, byte[] right, int rightOffset)
+        {
+            for (var i = 0; i < 8; i++)
+            {
+                if (left[leftOffset + i] != right[rightOffset + i])
+                    return false;
+            }
+            return true;
+        }
+
+        private static bool IsZeroNtpTimestamp(byte[] data, int offset)
+        {
+            for (var i = 0; i < 8; i++)
+            {
+                if (data[offset + i] != 0)
+                    return false;
+            }
+            return true;
+        }
+
+        private static DateTime NormalizeUtc(DateTime value)
+        {
+            if (value.Kind == DateTimeKind.Utc)
+                return value;
+            if (value.Kind == DateTimeKind.Local)
+                return value.ToUniversalTime();
+            return DateTime.SpecifyKind(value, DateTimeKind.Utc);
         }
 
         private static uint ReadUInt32BigEndian(byte[] data, int offset)
@@ -1227,43 +1535,64 @@ namespace llcom_plus.Pages
                    data[offset + 3];
         }
 
+        private static void WriteUInt32BigEndian(byte[] data, int offset, uint value)
+        {
+            data[offset] = (byte)(value >> 24);
+            data[offset + 1] = (byte)(value >> 16);
+            data[offset + 2] = (byte)(value >> 8);
+            data[offset + 3] = (byte)value;
+        }
+
+        internal sealed class NtpMeasurement
+        {
+            public int Mode { get; set; }
+            public int Version { get; set; }
+            public int Stratum { get; set; }
+            public DateTime OriginateUtc { get; set; }
+            public DateTime ReceiveUtc { get; set; }
+            public DateTime TransmitUtc { get; set; }
+            public DateTime DestinationUtc { get; set; }
+            public TimeSpan Offset { get; set; }
+            public TimeSpan Delay { get; set; }
+        }
+
         public void Read_Callback(IAsyncResult ar)
         {
-            StateObject so = (StateObject)ar.AsyncState;
-
-            Socket s = so.workSocket;
+            var state = (StateObject)ar.AsyncState;
             try
             {
+                var read = state.workSocket.EndReceive(ar);
+                if (!IsCurrentNativeAttempt(state.owner, state.epoch))
+                {
+                    CloseSocketQuietly(state.owner);
+                    return;
+                }
 
-                int read = s.EndReceive(ar);
+                if (read == 0 && !state.isDatagram)
+                {
+                    DisconnectNativeSocket(state.owner, state.epoch);
+                    return;
+                }
 
+                var buffer = new byte[read];
                 if (read > 0)
-                {
-                    var buff = new byte[read];
-                    for (int i = 0; i < buff.Length; i++)
-                        buff[i] = so.buffer[i];
-                    DataRecived?.Invoke(null, buff);
-                    s.BeginReceive(so.buffer, 0, StateObject.BUFFER_SIZE, 0,
-                                             new AsyncCallback(Read_Callback), so);
-                }
-                else//断了？
-                {
-                    try
-                    {
-                        s.Close();
-                        s.Dispose();
-                    }
-                    catch { }
-                    socketNow = null;
-                    IsConnected = false;
-                    Tools.Global.ClearMainSendTarget(MainSendTargetKey);
-                    if (!Tools.Global.setting.tcpReconnect)
-                        NeedDisconnected = false;
-                    Changeable = true;
-                    ShowData("❌ Server disconnected");
-                }
+                    Buffer.BlockCopy(state.buffer, 0, buffer, 0, read);
+                DataRecived?.Invoke(null, buffer);
+
+                if (!IsCurrentNativeAttempt(state.owner, state.epoch))
+                    return;
+                state.workSocket.BeginReceive(
+                    state.buffer,
+                    0,
+                    StateObject.BUFFER_SIZE,
+                    SocketFlags.None,
+                    Read_Callback,
+                    state);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                DisconnectNativeSocket(state.owner, state.epoch, "❗ Receive data error", ex.Message, false);
+            }
         }
 
         private void Reconnect_TextInputCheck(object sender, TextCompositionEventArgs e)
@@ -1276,96 +1605,173 @@ namespace llcom_plus.Pages
 
         private void DisconnectButton_Click(object sender, RoutedEventArgs e)
         {
-            if(socketNow != null)
+            DisconnectCurrentSocket();
+        }
+
+        private void SocketClientPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            DisconnectCurrentSocket();
+        }
+
+        private void DisconnectCurrentSocket()
+        {
+            // Invalidate queued callbacks before closing the current transport.
+            StopReconnectTimer(clearDisconnectIntent: true);
+            var current = socketNow;
+            if (current != null && current.IsNativeSocket)
             {
-                try
+                DisconnectNativeSocket(current, current.NativeEpoch);
+            }
+            else
+            {
+                Interlocked.Increment(ref nativeSocketEpoch);
+                if (current != null)
                 {
-                    socketNow.Close();
+                    CloseSocketQuietly(current);
+                    ShowData("❌ Server disconnected");
                 }
-                catch { }
                 socketNow = null;
                 IsConnected = false;
                 Tools.Global.ClearMainSendTarget(MainSendTargetKey);
                 Changeable = true;
-                ShowData("❌ Server disconnected");
             }
 
             NeedDisconnected = false;
-            if (reconnectTimer != null)
-            {
-                reconnectTimer.Stop();
-                reconnectTimer.Dispose();
-                reconnectTimer = null;
-            }
         }
 
         private bool Send(byte[] buff)
         {
-            if (socketNow == null || !IsConnected || buff == null)
+            var current = socketNow;
+            if (current == null || !IsConnected || buff == null)
                 return false;
 
             try
             {
-                socketNow.Send(buff);
-                ShowData($" ← send", buff, true);
+                current.Send(buff);
+                ShowData(" ← send", buff, true);
                 return true;
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                ShowData($"❗ Send data error {ex.Message}");
+                if (current.IsNativeSocket)
+                {
+                    DisconnectNativeSocket(current, current.NativeEpoch, "❗ Send data error", ex.Message, false);
+                }
+                else
+                {
+                    ShowData($"❗ Send data error {ex.Message}");
+                }
                 return false;
             }
+        }
+
+        private static void SendAll(Socket socket, byte[] buffer)
+        {
+            var offset = 0;
+            while (offset < buffer.Length)
+            {
+                var sent = socket.Send(buffer, offset, buffer.Length - offset, SocketFlags.None);
+                if (sent <= 0)
+                    throw new InvalidOperationException("stream socket send returned 0 bytes");
+                offset += sent;
+            }
+        }
+
+        private static void SendDatagram(Socket socket, byte[] buffer)
+        {
+            var sent = socket.Send(buffer, 0, buffer.Length, SocketFlags.None);
+            if (sent != buffer.Length)
+                throw new InvalidOperationException($"datagram socket sent {sent} of {buffer.Length} bytes");
         }
 
         public class StateObject
         {
             public Socket workSocket = null;
+            public SocketObj owner = null;
+            public long epoch;
+            public bool isDatagram;
+            public string targetName;
             public const int BUFFER_SIZE = 204800;
             public byte[] buffer = new byte[BUFFER_SIZE];
         }
 
         public class SocketObj
         {
-            Socket socket;
-            OpenSslInteractiveConnection openSslConnection;
-            SshInteractiveConnection sshConnection;
-            public SocketObj(Socket s)
+            private readonly Socket socket;
+            private readonly OpenSslInteractiveConnection openSslConnection;
+            private readonly SshInteractiveConnection sshConnection;
+            private readonly bool isDatagram;
+            private int closed;
+
+            public SocketObj(Socket socket)
+                : this(socket, 0)
             {
-                socket = s;
             }
+
+            public SocketObj(Socket socket, long nativeEpoch)
+            {
+                this.socket = socket ?? throw new ArgumentNullException(nameof(socket));
+                isDatagram = socket.SocketType == SocketType.Dgram;
+                NativeEpoch = nativeEpoch;
+            }
+
             public SocketObj(OpenSslInteractiveConnection openSsl)
             {
                 openSslConnection = openSsl;
             }
+
             public SocketObj(SshInteractiveConnection ssh)
             {
                 sshConnection = ssh;
             }
+
+            public bool IsNativeSocket => socket != null;
+            public long NativeEpoch { get; }
+
             public bool Owns(OpenSslInteractiveConnection connection)
             {
                 return ReferenceEquals(openSslConnection, connection);
             }
+
             public bool Owns(SshInteractiveConnection connection)
             {
                 return ReferenceEquals(sshConnection, connection);
             }
+
             public void Send(byte[] buff)
             {
                 if (socket != null)
-                    socket.Send(buff);
+                {
+                    if (isDatagram)
+                        SendDatagram(socket, buff);
+                    else
+                        SendAll(socket, buff);
+                }
                 else if (openSslConnection != null)
+                {
                     openSslConnection.Send(buff);
+                }
                 else if (sshConnection != null)
+                {
                     sshConnection.Send(buff);
-                    
+                }
             }
 
             public void Close()
             {
+                if (Interlocked.Exchange(ref closed, 1) != 0)
+                    return;
+
                 if (socket != null)
                 {
-                    socket.Close();
-                    socket.Dispose();
+                    try
+                    {
+                        socket.Close();
+                    }
+                    finally
+                    {
+                        socket.Dispose();
+                    }
                 }
                 else if (openSslConnection != null)
                 {
@@ -1377,5 +1783,6 @@ namespace llcom_plus.Pages
                 }
             }
         }
+
     }
 }

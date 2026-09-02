@@ -1,0 +1,46 @@
+llcom plus automatic-update trust deployment
+============================================
+
+Automatic installation is intentionally fail-closed until a trusted RSA public key is deployed.
+
+Public-key build entry
+----------------------
+Place the RSA XML *public key only* at:
+
+    Resources\UpdateSigningPublicKey.xml
+
+or pass an alternate path to MSBuild:
+
+    /p:UpdateSigningPublicKeyFile=C:\secure-build-input\UpdateSigningPublicKey.xml
+
+The build copies it to the application directory as UpdateSigningPublicKey.xml. The public key is
+safe to commit and is deployed with official builds. Never add the matching private key to this
+repository, the application package, CI artifacts, or source control. The official release workflow
+reads it only from the UPDATE_SIGNING_PRIVATE_KEY_XML GitHub Actions secret.
+
+Detached signature asset
+------------------------
+For each release ZIP, publish a separate asset whose name is exactly `<zip asset name>.sig`.
+The UTF-8 JSON format is:
+
+{
+  "schema": "llcom-plus-update-signature-v1",
+  "asset": "llcom plus_1.2.11_x64.zip",
+  "version": "1.2.11.0",
+  "architecture": "x64",
+  "sha256": "UPPERCASE_64_HEX_SHA256_OF_ZIP",
+  "signature": "BASE64_RSA_SHA256_SIGNATURE"
+}
+
+Sign the UTF-8 bytes of this exact canonical payload (including the final newline):
+
+llcom-plus-update-signature-v1\n
+asset=<exact zip asset name>\n
+version=<four-part normalized version>\n
+architecture=<lowercase x64 or x86>\n
+sha256=<uppercase SHA-256>\n
+
+Use RSA PKCS#1 v1.5 with SHA-256 and a key of at least 2048 bits. GitHub's asset digest may be
+published and is checked as an additional consistency signal, but it is not accepted as the
+independent signature. Without both the deployed public key and a valid detached signature, the UI
+only opens the release page for manual download and never starts automatic installation.

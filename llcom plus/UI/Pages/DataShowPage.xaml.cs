@@ -1,4 +1,5 @@
 using llcom_plus.Tools;
+using llcom_plus.Model;
 using ScottPlot.Drawing.Colormaps;
 using System;
 using System.Collections.Generic;
@@ -614,7 +615,10 @@ namespace llcom_plus.Pages
             }
         }
 
-        private static byte[] ApplyReceiveScript(byte[] data, DataShowPara source)
+        private static byte[] ApplyReceiveScript(
+            byte[] data,
+            DataShowPara source,
+            UartPortProfile profile = null)
         {
             var temp = data?.ToArray() ?? new byte[0];
             if (source?.send ?? false)
@@ -623,7 +627,9 @@ namespace llcom_plus.Pages
             try
             {
                 var context = source?.receiveScriptContext;
-                var scriptName = ResolveReceiveScriptName(context?.ScriptName);
+                var scriptName = ResolveReceiveScriptName(
+                    context?.ScriptName,
+                    profile?.recvScript);
                 var uartPara = context?.Parameter ?? "";
                 var uartSendRaw = context?.SendRaw ?? new byte[0];
                 return ScriptEnv.JavaScriptLoader.Run(
@@ -640,16 +646,29 @@ namespace llcom_plus.Pages
             }
         }
 
-        private static string ResolveReceiveScriptName(string requestedScriptName)
+        private static string ResolveReceiveScriptName(
+            string requestedScriptName,
+            string profileScriptName = null)
         {
-            var scriptName = string.IsNullOrWhiteSpace(requestedScriptName)
-                ? Tools.Global.setting.recvScript
-                : requestedScriptName.Trim();
+            var scriptName = !string.IsNullOrWhiteSpace(requestedScriptName)
+                ? requestedScriptName.Trim()
+                : !string.IsNullOrWhiteSpace(profileScriptName)
+                    ? profileScriptName.Trim()
+                    : Tools.Global.setting?.recvScript;
             if (string.IsNullOrWhiteSpace(scriptName))
                 scriptName = "default";
 
-            var scriptPath = System.IO.Path.Combine(Tools.Global.ProfilePath, "user_script_recv_convert", scriptName + ".js");
-            return File.Exists(scriptPath) ? scriptName : "default";
+            if (Tools.Global.TryGetProfileScriptPath(
+                    "user_script_recv_convert",
+                    scriptName,
+                    out var normalizedName,
+                    out var scriptPath) &&
+                File.Exists(scriptPath))
+            {
+                return normalizedName;
+            }
+
+            return "default";
         }
 
 
@@ -790,13 +809,18 @@ namespace llcom_plus.Pages
 
 
             internal DataShow(DataShowPara source)
+                : this(source, null)
+            {
+            }
+
+            internal DataShow(DataShowPara source, UartPortProfile profile)
             {
                 var data = source?.data ?? new byte[0];
                 var time = source?.time ?? DateTime.Now;
                 var sent = source?.send ?? false;
                 if (data == null || data.Length == 0)
                     return;
-                byte[] temp = ApplyReceiveScript(data, source);
+                byte[] temp = ApplyReceiveScript(data, source, profile);
                 if (temp == null || temp.Length == 0)
                     return;
 
@@ -807,17 +831,20 @@ namespace llcom_plus.Pages
                 DataTextColor = Tools.Logger.GetLogDataBrush(sent);
                 HexTextColor = sent ? ResourceBrush("AppDataSentSoftBrush", Brushes.IndianRed) : ResourceBrush("AppDataReceivedSoftBrush", Brushes.ForestGreen);
 
+                var showHexFormat = profile?.showHexFormat ?? Tools.Global.setting.showHexFormat;
+                var encoding = profile?.encoding ?? Tools.Global.setting.encoding;
+                var enableSymbol = profile?.enableSymbol ?? Tools.Global.setting.EnableSymbol;
                 var len = temp.Length;
                 //主要数据
                 if (temp != null && temp.Length > 0)
                 {
-                    DataText = Tools.Global.setting.showHexFormat switch
+                    DataText = showHexFormat switch
                     {
                         2 => Tools.Global.Byte2Hex(temp, " ", len),
-                        _ => Tools.Global.Byte2Readable(temp, len),
+                        _ => Tools.Global.Byte2Readable(temp, len, encoding, enableSymbol),
                     };
                     //同时显示模式时，才显示小字hex
-                    if (Tools.Global.setting.showHexFormat == 0)
+                    if (showHexFormat == 0)
                         HexText = "\nHex: " + Tools.Global.Byte2Hex(temp, " ", len);
                 }
                 IsVisible = true;

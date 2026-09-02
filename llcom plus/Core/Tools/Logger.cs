@@ -120,6 +120,29 @@ namespace llcom_plus.Tools
         public static string SessionStringLogFilePath { get; private set; } = "";
         public static string SessionHexLogFilePath { get; private set; } = "";
 
+        internal sealed class SessionLogWriterPair
+        {
+            internal SessionLogWriterPair(
+                string fileName,
+                string stringLogFilePath,
+                string hexLogFilePath,
+                StreamWriter stringWriter,
+                StreamWriter hexWriter)
+            {
+                FileName = fileName;
+                StringLogFilePath = stringLogFilePath;
+                HexLogFilePath = hexLogFilePath;
+                StringWriter = stringWriter;
+                HexWriter = hexWriter;
+            }
+
+            public string FileName { get; }
+            public string StringLogFilePath { get; }
+            public string HexLogFilePath { get; }
+            public StreamWriter StringWriter { get; }
+            public StreamWriter HexWriter { get; }
+        }
+
         private sealed class PortNotificationLogItem
         {
             public DateTime Timestamp { get; set; }
@@ -219,18 +242,18 @@ namespace llcom_plus.Tools
                 var portFolder = Path.Combine(folder, safePortName);
                 var stringFolder = Path.Combine(portFolder, "STRING");
                 var hexFolder = Path.Combine(portFolder, "HEX");
-                Directory.CreateDirectory(stringFolder);
-                Directory.CreateDirectory(hexFolder);
+                var startedAt = DateTime.Now;
+                var preferredFileName = $"{startedAt:yyyyMMdd_HHmmss_fff}.log";
 
-                var fileName = $"{DateTime.Now:yyyyMMdd_HHmmss}.log";
-                SessionStringLogFilePath = Path.Combine(stringFolder, fileName);
-                SessionHexLogFilePath = Path.Combine(hexFolder, fileName);
                 lock (sessionLogLock)
                 {
-                    sessionStringLogWriter = CreateSessionLogWriter(SessionStringLogFilePath);
-                    sessionHexLogWriter = CreateSessionLogWriter(SessionHexLogFilePath);
+                    var writers = CreateUniqueSessionLogWriters(stringFolder, hexFolder, preferredFileName);
+                    sessionStringLogWriter = writers.StringWriter;
+                    sessionHexLogWriter = writers.HexWriter;
+                    SessionStringLogFilePath = writers.StringLogFilePath;
+                    SessionHexLogFilePath = writers.HexLogFilePath;
                     sessionLogPortName = NormalizePortName(portName);
-                    var startLine = $"[START] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  PORT={portName}";
+                    var startLine = $"[START] {startedAt:yyyy-MM-dd HH:mm:ss.fff}  PORT={portName}";
                     sessionStringLogWriter.WriteLine(startLine);
                     sessionHexLogWriter.WriteLine(startLine);
                 }
@@ -270,14 +293,104 @@ namespace llcom_plus.Tools
             }
         }
 
-        private static StreamWriter CreateSessionLogWriter(string path)
+        internal static SessionLogWriterPair CreateUniqueSessionLogWriters(
+            string stringFolder,
+            string hexFolder,
+            string preferredFileName)
         {
-            return new StreamWriter(
-                new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read),
-                Encoding.UTF8)
+            if (string.IsNullOrWhiteSpace(stringFolder))
+                throw new ArgumentException("A STRING log folder is required.", nameof(stringFolder));
+            if (string.IsNullOrWhiteSpace(hexFolder))
+                throw new ArgumentException("A HEX log folder is required.", nameof(hexFolder));
+            if (string.IsNullOrWhiteSpace(preferredFileName))
+                throw new ArgumentException("A preferred log file name is required.", nameof(preferredFileName));
+
+            var fileNameOnly = Path.GetFileName(preferredFileName);
+            if (!string.Equals(fileNameOnly, preferredFileName, StringComparison.Ordinal))
+                throw new ArgumentException("The preferred log file name must not include a directory.", nameof(preferredFileName));
+
+            var baseName = Path.GetFileNameWithoutExtension(fileNameOnly);
+            var extension = Path.GetExtension(fileNameOnly);
+            if (string.IsNullOrWhiteSpace(baseName))
+                throw new ArgumentException("The preferred log file name must have a base name.", nameof(preferredFileName));
+
+            Directory.CreateDirectory(stringFolder);
+            Directory.CreateDirectory(hexFolder);
+
+            for (var collisionIndex = 0; ; collisionIndex++)
             {
-                AutoFlush = true
-            };
+                var collisionSuffix = collisionIndex == 0 ? string.Empty : $"_{collisionIndex:000}";
+                var fileName = baseName + collisionSuffix + extension;
+                var stringPath = Path.Combine(stringFolder, fileName);
+                var hexPath = Path.Combine(hexFolder, fileName);
+                StreamWriter stringWriter = null;
+                StreamWriter hexWriter = null;
+                var stringCreated = false;
+                var hexCreated = false;
+
+                try
+                {
+                    stringWriter = CreateSessionLogWriter(stringPath);
+                    stringCreated = true;
+                    hexWriter = CreateSessionLogWriter(hexPath);
+                    hexCreated = true;
+                    return new SessionLogWriterPair(fileName, stringPath, hexPath, stringWriter, hexWriter);
+                }
+                catch (IOException)
+                {
+                    var isNameCollision =
+                        (!stringCreated && File.Exists(stringPath)) ||
+                        (stringCreated && !hexCreated && File.Exists(hexPath));
+                    CleanupCreatedSessionLogWriter(hexWriter, hexPath, hexCreated);
+                    CleanupCreatedSessionLogWriter(stringWriter, stringPath, stringCreated);
+                    if (isNameCollision)
+                        continue;
+                    throw;
+                }
+                catch
+                {
+                    CleanupCreatedSessionLogWriter(hexWriter, hexPath, hexCreated);
+                    CleanupCreatedSessionLogWriter(stringWriter, stringPath, stringCreated);
+                    throw;
+                }
+            }
+        }
+
+        internal static StreamWriter CreateSessionLogWriter(string path)
+        {
+            FileStream stream = null;
+            var created = false;
+            try
+            {
+                stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                created = true;
+                var writer = new StreamWriter(stream, Encoding.UTF8)
+                {
+                    AutoFlush = true
+                };
+                stream = null;
+                return writer;
+            }
+            catch
+            {
+                stream?.Dispose();
+                if (created)
+                    File.Delete(path);
+                throw;
+            }
+        }
+
+        private static void CleanupCreatedSessionLogWriter(StreamWriter writer, string path, bool created)
+        {
+            try
+            {
+                writer?.Dispose();
+            }
+            finally
+            {
+                if (created)
+                    File.Delete(path);
+            }
         }
 
         private static string MakeSafeFileName(string value)
@@ -289,6 +402,10 @@ namespace llcom_plus.Tools
 
         internal static string Byte2SessionString(byte[] data)
         {
+            var encoding = Tools.Global.GetEncoding(
+                Tools.Global.uart?.GetRuntimeEncodingCodePage() ??
+                Tools.Global.setting?.encoding ??
+                65001);
             var text = new StringBuilder();
             var plainBytes = new List<byte>();
             foreach (var b in data)
@@ -297,7 +414,7 @@ namespace llcom_plus.Tools
                 {
                     if (plainBytes.Count > 0)
                     {
-                        text.Append(Tools.Global.GetEncoding().GetString(plainBytes.ToArray()));
+                        text.Append(encoding.GetString(plainBytes.ToArray()));
                         plainBytes.Clear();
                     }
                     text.Append(Byte2SessionVisibleSymbol(b));
@@ -308,7 +425,7 @@ namespace llcom_plus.Tools
                 }
             }
             if (plainBytes.Count > 0)
-                text.Append(Tools.Global.GetEncoding().GetString(plainBytes.ToArray()));
+                text.Append(encoding.GetString(plainBytes.ToArray()));
             return text.ToString();
         }
 

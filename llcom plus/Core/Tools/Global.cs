@@ -9,6 +9,8 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using Path = System.IO.Path;
+
 using System.IO.Ports;
 using System.Linq;
 using System.Management;
@@ -56,6 +58,61 @@ namespace llcom_plus.Tools
         public bool? IsHex { get; set; }
         public bool ApplySendProcessing { get; set; } = true;
         public string SessionStringLogOverride { get; set; }
+    }
+
+    /// <summary>
+    /// An immutable lease for the serial connection that was active when it was captured.
+    /// The delegates close over a concrete page/slot/connection generation, so changing the
+    /// UI selection or reopening a port cannot redirect an in-flight operation.
+    /// </summary>
+    internal sealed class ActiveSerialTarget
+    {
+        private readonly Func<bool> isOpen;
+        private readonly Func<byte[], CancellationToken, Action<int>, bool> send;
+
+        internal ActiveSerialTarget(
+            string identity,
+            string displayName,
+            Func<bool> isOpen,
+            Func<byte[], CancellationToken, Action<int>, bool> send,
+            bool supportsResumableCommits = true)
+        {
+            Identity = identity ?? string.Empty;
+            DisplayName = displayName ?? string.Empty;
+            SupportsResumableCommits = supportsResumableCommits;
+            this.isOpen = isOpen ?? throw new ArgumentNullException(nameof(isOpen));
+            this.send = send ?? throw new ArgumentNullException(nameof(send));
+        }
+
+        public string Identity { get; }
+        public string DisplayName { get; }
+        public bool SupportsResumableCommits { get; }
+
+        public bool IsOpen
+        {
+            get
+            {
+                try { return isOpen(); }
+                catch (ObjectDisposedException) { return false; }
+                catch (IOException) { return false; }
+                catch (InvalidOperationException) { return false; }
+            }
+        }
+
+        /// <summary>
+        /// Sends through this captured connection. committedBytes is invoked immediately
+        /// after each successful SerialPort.Write and before waiting for driver drain.
+        /// </summary>
+        public bool Send(byte[] data, CancellationToken token, Action<int> committedBytes = null)
+        {
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+            if (data.Length == 0)
+                return true;
+
+            token.ThrowIfCancellationRequested();
+            return send(data, token, committedBytes);
+        }
     }
 
     class Global
@@ -168,6 +225,211 @@ namespace llcom_plus.Tools
 
         //配置文件路径（普通exe时，会被替换为AppPath）
         public static string ProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + @"\llcom plus\";
+
+        internal static string NormalizeScriptFileName(string value)
+        {
+            var name = (value ?? string.Empty).Trim();
+            if (name.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+                name = name.Substring(0, name.Length - 3).TrimEnd();
+            return name;
+        }
+
+        internal static bool IsValidScriptFileName(string value)
+        {
+            var rawName = (value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(rawName) ||
+                Path.IsPathRooted(rawName) ||
+                rawName == "." ||
+                rawName == ".." ||
+                rawName.IndexOf(Path.DirectorySeparatorChar) >= 0 ||
+                rawName.IndexOf(Path.AltDirectorySeparatorChar) >= 0)
+            {
+                return false;
+            }
+
+            var name = NormalizeScriptFileName(rawName);
+            if (string.IsNullOrWhiteSpace(name) ||
+                name == "." ||
+                name == ".." ||
+                name.EndsWith(".", StringComparison.Ordinal) ||
+                name.EndsWith(" ", StringComparison.Ordinal) ||
+                name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                !string.Equals(Path.GetFileName(name), name, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return !Regex.IsMatch(
+                name,
+                @"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private static bool IsValidPathSegment(string value)
+        {
+            var segment = (value ?? string.Empty).Trim();
+            return !string.IsNullOrWhiteSpace(segment) &&
+                segment != "." &&
+                segment != ".." &&
+                !Path.IsPathRooted(segment) &&
+                segment.IndexOf(Path.DirectorySeparatorChar) < 0 &&
+                segment.IndexOf(Path.AltDirectorySeparatorChar) < 0 &&
+                segment.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
+                string.Equals(Path.GetFileName(segment), segment, StringComparison.Ordinal);
+        }
+
+        private static string GetCanonicalDirectoryPath(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            var pathRoot = Path.GetPathRoot(fullPath);
+            if (string.Equals(fullPath, pathRoot, StringComparison.OrdinalIgnoreCase))
+                return fullPath;
+
+            return fullPath.TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+        }
+
+        private static bool IsPathWithinOrEqual(string canonicalRoot, string canonicalPath)
+        {
+            if (string.Equals(canonicalRoot, canonicalPath, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var rootWithSeparator = canonicalRoot.TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return canonicalPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static bool TryGetCanonicalScriptPath(
+            string allowedRoot,
+            string scriptName,
+            out string normalizedScriptName,
+            out string scriptPath)
+        {
+            normalizedScriptName = NormalizeScriptFileName(scriptName);
+            scriptPath = string.Empty;
+            if (!IsValidScriptFileName(scriptName) || string.IsNullOrWhiteSpace(allowedRoot))
+                return false;
+
+            try
+            {
+                var profileRoot = GetCanonicalDirectoryPath(ProfilePath);
+                var canonicalRoot = GetCanonicalDirectoryPath(allowedRoot);
+                if (!IsPathWithinOrEqual(profileRoot, canonicalRoot))
+                    return false;
+
+                var candidate = Path.GetFullPath(Path.Combine(
+                    canonicalRoot,
+                    normalizedScriptName + ".js"));
+                var candidateDirectory = GetCanonicalDirectoryPath(Path.GetDirectoryName(candidate));
+                if (!string.Equals(
+                        candidateDirectory,
+                        canonicalRoot,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(Path.GetExtension(candidate), ".js", StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(
+                        Path.GetFileNameWithoutExtension(candidate),
+                        normalizedScriptName,
+                        StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                scriptPath = candidate;
+                return true;
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException ||
+                ex is NotSupportedException ||
+                ex is PathTooLongException ||
+                ex is IOException)
+            {
+                return false;
+            }
+        }
+
+        internal static bool TryGetProfileScriptPath(
+            string directoryName,
+            string scriptName,
+            out string normalizedScriptName,
+            out string scriptPath)
+        {
+            normalizedScriptName = NormalizeScriptFileName(scriptName);
+            scriptPath = string.Empty;
+            if (!IsValidPathSegment(directoryName))
+                return false;
+
+            try
+            {
+                var profileRoot = GetCanonicalDirectoryPath(ProfilePath);
+                var root = GetCanonicalDirectoryPath(Path.Combine(profileRoot, directoryName));
+                if (!IsPathWithinOrEqual(profileRoot, root))
+                    return false;
+
+                return TryGetCanonicalScriptPath(
+                    root,
+                    scriptName,
+                    out normalizedScriptName,
+                    out scriptPath);
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException ||
+                ex is NotSupportedException ||
+                ex is PathTooLongException ||
+                ex is IOException)
+            {
+                return false;
+            }
+        }
+
+        internal static bool TryGetProfileScriptPathFromRelativePath(
+            string expectedDirectoryName,
+            string relativePath,
+            out string normalizedScriptName,
+            out string scriptPath)
+        {
+            normalizedScriptName = string.Empty;
+            scriptPath = string.Empty;
+            var value = (relativePath ?? string.Empty).Trim();
+            if (!IsValidPathSegment(expectedDirectoryName) ||
+                string.IsNullOrWhiteSpace(value) ||
+                Path.IsPathRooted(value))
+            {
+                return false;
+            }
+
+            var separatorIndex = value.IndexOfAny(new[]
+            {
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar
+            });
+            if (separatorIndex <= 0 ||
+                separatorIndex != value.LastIndexOfAny(new[]
+                {
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar
+                }))
+            {
+                return false;
+            }
+
+            var directoryName = value.Substring(0, separatorIndex);
+            var fileName = value.Substring(separatorIndex + 1);
+            if (!string.Equals(
+                    directoryName,
+                    expectedDirectoryName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return TryGetProfileScriptPath(
+                expectedDirectoryName,
+                fileName,
+                out normalizedScriptName,
+                out scriptPath);
+        }
 
         /// <summary>
         /// 获取实际的ProfilePath路径（目前没啥用了）
@@ -345,21 +607,62 @@ namespace llcom_plus.Tools
         public static Func<bool> IsActiveSerialTargetOpenRequest;
         public static Func<bool> EnsureActiveSerialTargetOpenRequest;
         public static Func<byte[], CancellationToken, bool> SendRawDataToActiveTargetRequest;
+        public static Func<ActiveSerialTarget> CaptureActiveSerialTargetRequest;
         public static event EventHandler<byte[]> ActiveSerialTargetReceivedEvent;
+
+        public static ActiveSerialTarget CaptureActiveSerialTarget()
+        {
+            var capture = CaptureActiveSerialTargetRequest;
+            if (capture != null)
+                return capture();
+
+            var connection = uart?.CaptureConnectionLease();
+            if (connection == null)
+                return null;
+
+            return new ActiveSerialTarget(
+                connection.Identity,
+                connection.DisplayName,
+                () => connection.IsOpen,
+                (data, token, committedBytes) =>
+                    connection.Send(data, token, committedBytes, raiseEvents: false));
+        }
+
         public static void NotifyActiveSerialTargetReceived(byte[] data)
         {
             if (data == null || data.Length == 0)
                 return;
 
-            ActiveSerialTargetReceivedEvent?.Invoke(null, data);
+            var handlers = ActiveSerialTargetReceivedEvent;
+            if (handlers != null)
+            {
+                foreach (EventHandler<byte[]> handler in handlers.GetInvocationList())
+                {
+                    try { handler(null, data); }
+                    catch (Exception ex)
+                    {
+                        Logger.AddUartLogDebug($"[ActiveSerialReceive]handler error:{ex.Message}");
+                    }
+                }
+            }
+
+            try
+            {
+                ScriptEnv.ScriptApis.SendChannelsReceived("uart", data);
+            }
+            catch (Exception ex)
+            {
+                Logger.AddUartLogDebug($"[ActiveSerialReceive]script channel error:{ex.Message}");
+            }
         }
 
         public static bool IsActiveSerialTargetOpen()
         {
-            if (IsActiveSerialTargetOpenRequest != null)
-                return IsActiveSerialTargetOpenRequest();
+            var target = CaptureActiveSerialTarget();
+            if (target != null)
+                return target.IsOpen;
 
-            return uart?.IsOpen() == true;
+            return IsActiveSerialTargetOpenRequest?.Invoke() == true;
         }
 
         public static bool EnsureActiveSerialTargetOpen()
@@ -375,14 +678,11 @@ namespace llcom_plus.Tools
             if (data == null || data.Length == 0)
                 return false;
 
-            if (SendRawDataToActiveTargetRequest != null)
-                return SendRawDataToActiveTargetRequest(data, token);
+            var target = CaptureActiveSerialTarget();
+            if (target != null)
+                return target.IsOpen && target.Send(data, token, null);
 
-            if (uart?.IsOpen() != true)
-                return false;
-
-            uart.SendDataCancelable(data, token, null, raiseEvents: false);
-            return true;
+            return SendRawDataToActiveTargetRequest?.Invoke(data, token) == true;
         }
 
         /// <summary>
@@ -718,7 +1018,13 @@ namespace llcom_plus.Tools
             Logger.AddUartLogDebug($"[HEX]{Byte2Hex((byte[])sender, " ")}");
         }
 
-        public static Encoding GetEncoding() => Encoding.GetEncoding(setting.encoding);
+        public static Encoding GetEncoding() => GetEncoding(setting?.encoding ?? 65001);
+
+        internal static Encoding GetEncoding(int encodingCodePage)
+        {
+            try { return Encoding.GetEncoding(encodingCodePage); }
+            catch { return Encoding.UTF8; }
+        }
 
         /// <summary>
         /// 字符串转hex值
@@ -857,13 +1163,28 @@ namespace llcom_plus.Tools
         /// <returns></returns>
         public static string Byte2Readable(byte[] vBytes, int len = -1)
         {
+            return Byte2Readable(
+                vBytes,
+                len,
+                setting?.encoding ?? 65001,
+                setting?.EnableSymbol == true);
+        }
+
+        internal static string Byte2Readable(
+            byte[] vBytes,
+            int len,
+            int encodingCodePage,
+            bool enableSymbol)
+        {
             if (vBytes == null)//fix
                 return "";
             if (len == -1 || len > vBytes.Length)
                 len = vBytes.Length;
+
+            var encoding = GetEncoding(encodingCodePage);
             //没开这个功能/非utf8就别搞了
-            if (!setting.EnableSymbol || setting.encoding != 65001)
-                return Byte2String(vBytes, len);
+            if (!enableSymbol || encodingCodePage != 65001)
+                return encoding.GetString(vBytes, 0, len);
 
             var text = new StringBuilder();
             var plainBytes = new List<byte>();
@@ -874,7 +1195,7 @@ namespace llcom_plus.Tools
                 {
                     if (plainBytes.Count > 0)
                     {
-                        text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+                        text.Append(encoding.GetString(plainBytes.ToArray()));
                         plainBytes.Clear();
                     }
                     text.Append("\\r\\n");
@@ -886,7 +1207,7 @@ namespace llcom_plus.Tools
                 {
                     if (plainBytes.Count > 0)
                     {
-                        text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+                        text.Append(encoding.GetString(plainBytes.ToArray()));
                         plainBytes.Clear();
                     }
                     text.Append(Byte2VisibleSymbol(vBytes[i]));
@@ -898,7 +1219,7 @@ namespace llcom_plus.Tools
                 {
                     if (plainBytes.Count > 0)
                     {
-                        text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+                        text.Append(encoding.GetString(plainBytes.ToArray()));
                         plainBytes.Clear();
                     }
                     text.Append(Byte2VisibleSymbol(vBytes[i]));
@@ -909,7 +1230,7 @@ namespace llcom_plus.Tools
                 }
             }
             if (plainBytes.Count > 0)
-                text.Append(GetEncoding().GetString(plainBytes.ToArray()));
+                text.Append(encoding.GetString(plainBytes.ToArray()));
             return text.ToString();
         }
 

@@ -42,11 +42,24 @@ jobs:
         run: |
           Remove-Item -Recurse -Force "${{ env.RELEASE_ARTIFACT_DIR }}" -ErrorAction SilentlyContinue
 
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.82.0 --profile minimal
+          rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc --toolchain 1.82.0
+          cargo +1.82.0 --version
+          rustc +1.82.0 --version
+
+      - name: Build x64 and x86 native monitor from source
+        shell: pwsh
+        run: |
+          .\serial_monitor_rs\build.ps1 -Config Release -Arch All -RustToolchain 1.82.0
+
       - name: Build x64
-        run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x64 /v:normal
+        run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x64 /p:RequireNativeSourceBuild=true /v:normal
 
       - name: Build x86
-        run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x86 /v:normal
+        run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x86 /p:RequireNativeSourceBuild=true /v:normal
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -74,11 +87,19 @@ jobs:
           name: llcom-plus-release
           path: artifacts/release
 
+      - name: Sign release artifacts
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_PRIVATE_KEY_XML: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_XML }}
+        run: |
+          .\build\Sign-Release.ps1 -ArtifactsDirectory "${{ env.RELEASE_ARTIFACT_DIR }}" -Version "${{ github.ref_name }}"
+
       - name: Prepare release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path temp
           Copy-Item "${{ env.RELEASE_ARTIFACT_DIR }}\*.zip" temp\
+          Copy-Item "${{ env.RELEASE_ARTIFACT_DIR }}\*.zip.sig" temp\
           Copy-Item changlog\index.html temp\changelog.html
           Copy-Item changlog\autoUpdate.xml temp\autoUpdate.xml
 
@@ -86,18 +107,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: false
-          files: artifacts/release/*.zip
+          files: |
+            artifacts/release/*.zip
+            artifacts/release/*.zip.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to COS
-        shell: cmd
+        shell: pwsh
         env:
           COS_A: ${{ secrets.COS_A }}
           COS_S: ${{ secrets.COS_S }}
           COS_B: ${{ secrets.COS_B }}
           COS_R: ${{ secrets.COS_R }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:COS_A) -or
+              [string]::IsNullOrWhiteSpace($env:COS_S) -or
+              [string]::IsNullOrWhiteSpace($env:COS_B) -or
+              [string]::IsNullOrWhiteSpace($env:COS_R)) {
+            Write-Host 'COS credentials are not configured; skipping mirror upload.'
+            exit 0
+          }
           python -m pip install coscmd==1.8.6.31
-          coscmd config -a %COS_A% -s %COS_S% -b %COS_B% -r %COS_R%
+          coscmd config -a $env:COS_A -s $env:COS_S -b $env:COS_B -r $env:COS_R
           coscmd upload temp/ / -r

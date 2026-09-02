@@ -331,7 +331,6 @@ ASALocalRun/
 
 # Rust
 serial_monitor_rs/target/
-serial_monitor_rs/Cargo.lock
 **/*.rs.bk
 
 # Packaged native runtime libraries kept in source control.

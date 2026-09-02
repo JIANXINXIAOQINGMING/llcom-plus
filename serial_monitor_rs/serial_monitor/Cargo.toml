@@ -9,8 +9,9 @@ name = "serial_monitor"
 
 [dependencies]
 
+# Exact pin: windows 0.58.0 supplies the Win32 bindings used by the host.
 [dependencies.windows]
-version = "0.58"
+version = "=0.58.0"
 features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -26,7 +27,3 @@ features = [
 ]
 
 [build-dependencies]
-
-[profile.release]
-opt-level = 2
-panic = "abort"

@@ -123,7 +123,7 @@
                             <TextBlock Text="{DynamicResource MQTTUser}" />
                             <TextBox Name="UserTextBox" Text="{Binding mqttUser}" />
                             <TextBlock Text="{DynamicResource MQTTPassword}" />
-                            <TextBox Name="PasswordTextBox" Text="{Binding mqttPassword}" />
+                            <PasswordBox Name="PasswordTextBox" PasswordChanged="MqttPasswordBox_PasswordChanged" />
                             <TextBlock Text="{DynamicResource MQTTKeepAlive}" />
                             <TextBox Name="KeepAliveTextBox" Text="{Binding mqttKeepAlive}" />
                             <CheckBox
@@ -154,7 +154,29 @@
                                     Text="{DynamicResource MQTTTLSClient}" />
                                 <TextBox Name="MQTTTLSClient" Text="{Binding mqttTLSCertClientPath}" />
                                 <TextBlock Text="{DynamicResource MQTTTLSPassword}" />
-                                <TextBox Name="MQTTTLSPassword" Text="{Binding mqttTLSCertClientPassword}" />
+                                <PasswordBox Name="MQTTTLSPassword" PasswordChanged="MqttTlsPasswordBox_PasswordChanged" />
+                                <CheckBox
+                                    Name="MQTTTLSCheckRevocation"
+                                    Margin="0,6,0,0"
+                                    Content="Check certificate revocation (recommended)"
+                                    IsChecked="{Binding mqttTLSCheckRevocation}" />
+                                <TextBlock
+                                    Margin="0,4,0,0"
+                                    Foreground="OrangeRed"
+                                    FontWeight="SemiBold"
+                                    Text="WARNING: NoCheck disables certificate revocation checks. Use only for explicit debugging."
+                                    TextWrapping="Wrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ElementName=MQTTTLSCheckRevocation, Path=IsChecked}" Value="False">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </StackPanel>
                         </StackPanel>
                     </StackPanel>

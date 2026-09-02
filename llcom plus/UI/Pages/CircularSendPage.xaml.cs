@@ -21,6 +21,7 @@ namespace llcom_plus.Pages
     public partial class CircularSendPage : Page
     {
         private const int DefaultRowCount = 10;
+        private const int ZeroDelayYieldBatchSize = 64;
         private bool suppressSave = false;
         private bool suppressSelectionHeader = false;
         private CancellationTokenSource loopCts = null;
@@ -415,6 +416,10 @@ namespace llcom_plus.Pages
 
         private async Task RunLoopAsync(List<CircularSendStep> plan, int runTimes, CancellationToken token)
         {
+            var yieldForZeroDelayLoop = ShouldYieldForZeroDelayLoop(
+                runTimes,
+                plan.All(step => step.DelayMs == 0));
+            var zeroDelayBatchCount = 0;
             var round = 0;
             while (runTimes == 0 || round < runTimes)
             {
@@ -440,9 +445,24 @@ namespace llcom_plus.Pages
 
                     var isLast = runTimes > 0 && round == runTimes && i == plan.Count - 1;
                     if (!isLast && step.DelayMs > 0)
+                    {
+                        zeroDelayBatchCount = 0;
                         await Task.Delay(step.DelayMs, token);
+                    }
+                    else if (!isLast && yieldForZeroDelayLoop &&
+                        ++zeroDelayBatchCount >= ZeroDelayYieldBatchSize)
+                    {
+                        zeroDelayBatchCount = 0;
+                        await Task.Yield();
+                        token.ThrowIfCancellationRequested();
+                    }
                 }
             }
+        }
+
+        internal static bool ShouldYieldForZeroDelayLoop(int runTimes, bool allDelaysAreZero)
+        {
+            return runTimes >= 0 && allDelaysAreZero;
         }
 
         private void SendOneButton_Click(object sender, RoutedEventArgs e)

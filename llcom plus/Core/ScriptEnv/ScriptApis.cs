@@ -40,18 +40,184 @@ namespace llcom_plus.ScriptEnv
 
         public static string QuickSendList(int id)
         {
-            if (Tools.Global.setting.quickSend.Count < id || id <= 0)
-                return "";
-            if (Tools.Global.setting.quickSend[id - 1].hex)
-                return "H" + Tools.Global.setting.quickSend[id - 1].text;
-            return "S" + Tools.Global.setting.quickSend[id - 1].text;
+            var settings = Tools.Global.setting;
+            if (settings == null || id <= 0)
+                return string.Empty;
+
+            // One API call observes exactly one immutable Settings snapshot.
+            var snapshot = settings.GetQuickSendSnapshot();
+            if (id > snapshot.Count)
+                return string.Empty;
+
+            var item = snapshot[id - 1];
+            return item.Hex ? "H" + item.Text : "S" + item.Text;
         }
 
         public static string InputBox(string prompt, string defaultInput = "", string title = null)
         {
-            Tuple<bool, string> ret = App.Current.Dispatcher.Invoke(() =>
-                Tools.InputDialog.OpenDialog(prompt, defaultInput, title));
-            return ret.Item1 ? ret.Item2 : null;
+            return InputBox(prompt, defaultInput, title, System.Threading.CancellationToken.None);
+        }
+
+        public static string InputBox(
+            string prompt,
+            string defaultInput,
+            string title,
+            System.Threading.CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var application = System.Windows.Application.Current;
+            if (application == null || application.Dispatcher == null)
+                throw new InvalidOperationException("A WPF application dispatcher is required for apiInputBox.");
+
+            return new SessionInputDialogRequest(
+                application,
+                prompt,
+                defaultInput,
+                title,
+                cancellationToken).ShowAndWait();
+        }
+
+        private sealed class SessionInputDialogRequest
+        {
+            private readonly System.Windows.Application application;
+            private readonly System.Windows.Threading.Dispatcher dispatcher;
+            private readonly string prompt;
+            private readonly string defaultInput;
+            private readonly string title;
+            private readonly System.Threading.CancellationToken cancellationToken;
+            private readonly System.Threading.Tasks.TaskCompletionSource<string> completion =
+                new System.Threading.Tasks.TaskCompletionSource<string>(
+                    System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+            private llcom_plus.InputDialogWindow dialog;
+            private int cancellationRequested = 0;
+
+            public SessionInputDialogRequest(
+                System.Windows.Application application,
+                string prompt,
+                string defaultInput,
+                string title,
+                System.Threading.CancellationToken cancellationToken)
+            {
+                this.application = application;
+                dispatcher = application.Dispatcher;
+                this.prompt = prompt;
+                this.defaultInput = defaultInput;
+                this.title = title;
+                this.cancellationToken = cancellationToken;
+            }
+
+            public string ShowAndWait()
+            {
+                using (cancellationToken.Register(Cancel))
+                {
+                    try
+                    {
+                        if (dispatcher.CheckAccess())
+                            ShowOnDispatcher();
+                        else
+                            dispatcher.BeginInvoke(new Action(ShowOnDispatcher));
+                    }
+                    catch (Exception ex)
+                    {
+                        completion.TrySetException(ex);
+                    }
+
+                    try
+                    {
+                        return completion.Task.GetAwaiter().GetResult();
+                    }
+                    catch (System.Threading.Tasks.TaskCanceledException)
+                    {
+                        throw new OperationCanceledException(cancellationToken);
+                    }
+                }
+            }
+
+            private void Cancel()
+            {
+                if (System.Threading.Interlocked.Exchange(ref cancellationRequested, 1) != 0)
+                    return;
+
+                completion.TrySetCanceled();
+                try
+                {
+                    if (dispatcher.CheckAccess())
+                        CloseOnDispatcher();
+                    else if (!dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
+                        dispatcher.BeginInvoke(new Action(CloseOnDispatcher));
+                }
+                catch
+                {
+                    // Completion is already cancelled; shutdown must not strand the script worker.
+                }
+            }
+
+            private void ShowOnDispatcher()
+            {
+                if (System.Threading.Volatile.Read(ref cancellationRequested) != 0 ||
+                    cancellationToken.IsCancellationRequested)
+                {
+                    completion.TrySetCanceled();
+                    return;
+                }
+
+                try
+                {
+                    var localDialog = new llcom_plus.InputDialogWindow(prompt, defaultInput, title);
+                    dialog = localDialog;
+                    var owner = application.Windows
+                        .OfType<System.Windows.Window>()
+                        .FirstOrDefault(window => window.IsActive) ?? application.MainWindow;
+                    if (owner != null && owner.IsVisible)
+                        localDialog.Owner = owner;
+                    else
+                        localDialog.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen;
+
+                    if (System.Threading.Volatile.Read(ref cancellationRequested) != 0 ||
+                        cancellationToken.IsCancellationRequested)
+                    {
+                        completion.TrySetCanceled();
+                        return;
+                    }
+
+                    var accepted = localDialog.ShowDialog() ?? false;
+                    if (System.Threading.Volatile.Read(ref cancellationRequested) != 0 ||
+                        cancellationToken.IsCancellationRequested)
+                    {
+                        completion.TrySetCanceled();
+                    }
+                    else
+                    {
+                        completion.TrySetResult(accepted ? localDialog.Value : null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                        completion.TrySetCanceled();
+                    else
+                        completion.TrySetException(ex);
+                }
+                finally
+                {
+                    dialog = null;
+                }
+            }
+
+            private void CloseOnDispatcher()
+            {
+                var localDialog = dialog;
+                if (localDialog == null)
+                    return;
+
+                try
+                {
+                    localDialog.Close();
+                }
+                catch
+                {
+                }
+            }
         }
 
         public static event EventHandler<Model.LinePlotPoint> LinePlotAdd;
@@ -61,12 +227,19 @@ namespace llcom_plus.ScriptEnv
             LinePlotAdd?.Invoke(null, new Model.LinePlotPoint { N = n, Line = l });
         }
 
-        private static readonly Dictionary<string, Func<byte[], object, bool>> SendChannels =
-            new Dictionary<string, Func<byte[], object, bool>>();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SendChannelRegistration> SendChannels =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, SendChannelRegistration>();
 
-        public static void SendChannelsRegister(string channel, Func<byte[], object, bool> cb)
+        public static IDisposable SendChannelsRegister(string channel, Func<byte[], object, bool> cb)
         {
-            SendChannels[channel] = cb;
+            if (channel == null)
+                throw new ArgumentNullException(nameof(channel));
+            if (cb == null)
+                throw new ArgumentNullException(nameof(cb));
+
+            var registration = new SendChannelRegistration(channel, cb);
+            SendChannels.AddOrUpdate(channel, registration, (key, previous) => registration);
+            return registration;
         }
 
         public static bool Send(string channel, object data)
@@ -76,9 +249,31 @@ namespace llcom_plus.ScriptEnv
 
         public static bool Send(string channel, object data, object options)
         {
-            if (!SendChannels.ContainsKey(channel))
+            if (!SendChannels.TryGetValue(channel, out var registration))
                 return false;
-            return SendChannels[channel](ToBytes(data), options);
+            return registration.Callback(ToBytes(data), options);
+        }
+
+        private sealed class SendChannelRegistration : IDisposable
+        {
+            private int disposed = 0;
+
+            public SendChannelRegistration(string channel, Func<byte[], object, bool> callback)
+            {
+                Channel = channel;
+                Callback = callback;
+            }
+
+            public string Channel { get; }
+            public Func<byte[], object, bool> Callback { get; }
+
+            public void Dispose()
+            {
+                if (System.Threading.Interlocked.Exchange(ref disposed, 1) != 0)
+                    return;
+                ((ICollection<KeyValuePair<string, SendChannelRegistration>>)SendChannels).Remove(
+                    new KeyValuePair<string, SendChannelRegistration>(Channel, this));
+            }
         }
 
         public static void SendChannelsReceived(string channel, object data)

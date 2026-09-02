@@ -6,6 +6,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,6 +20,7 @@ namespace llcom_plus
         private readonly ObservableCollection<FormFieldModel> _formFields = new ObservableCollection<FormFieldModel>();
         private readonly ObservableCollection<FormFieldModel> _multipartFields = new ObservableCollection<FormFieldModel>();
         private readonly ObservableCollection<FileFieldModel> _files = new ObservableCollection<FileFieldModel>();
+        private CancellationTokenSource _requestCts;
         private readonly List<HeaderPreset> _headerPresets = new List<HeaderPreset>
         {
             new HeaderPreset("Accept", "application/json"),
@@ -53,6 +55,12 @@ namespace llcom_plus
             InitializeHeaderPresets();
             InitializeBodyEditors();
             ApplySelectedHeaderPreset();
+            Unloaded += HttpToolWindow_Unloaded;
+        }
+
+        private void HttpToolWindow_Unloaded(object sender, RoutedEventArgs e)
+        {
+            _requestCts?.Cancel();
         }
 
         private void SelectHttpSslCaCertPathButton_Click(object sender, RoutedEventArgs e)
@@ -104,29 +112,61 @@ namespace llcom_plus
 
         private async void SendButton_Click(object sender, RoutedEventArgs e)
         {
+            if (_requestCts != null)
+            {
+                _requestCts.Cancel();
+                return;
+            }
+
+            var cts = new CancellationTokenSource();
+            _requestCts = cts;
             SetSendingState(true);
             ClearResponse();
 
             try
             {
                 var requestModel = BuildRequestModelFromUi();
-                var responseModel = await _httpRequestService.SendAsync(requestModel);
+                if (requestModel.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+                    Tools.Global.setting != null &&
+                    Tools.Global.setting.tcpClientSslAuthMode == 0)
+                {
+                    var confirmed = Tools.InputDialog.OpenDialog(
+                        "SECURITY WARNING: No authentication disables CA and hostname verification. " +
+                        "Continue only for explicit debugging.",
+                        null,
+                        "Unverified HTTPS request").Item1;
+                    if (!confirmed)
+                        return;
+                }
+                var responseModel = await _httpRequestService.SendAsync(requestModel, cts.Token);
+                cts.Token.ThrowIfCancellationRequested();
                 ShowResponse(responseModel);
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                if (IsLoaded)
+                    ShowError(GetResourceText("HttpRequestCancelled", "Request cancelled."));
             }
             catch (TaskCanceledException)
             {
-                ShowError(GetResourceText("HttpRequestTimeout", "Request timed out. Check the network and try again later."));
+                if (IsLoaded)
+                    ShowError(GetResourceText("HttpRequestTimeout", "Request timed out. Check the network and try again later."));
             }
             catch (HttpRequestException ex)
             {
-                ShowError(string.Format(GetResourceText("HttpNetworkFailedFormat", "Network connection failed: {0}"), ex.Message));
+                if (IsLoaded)
+                    ShowError(string.Format(GetResourceText("HttpNetworkFailedFormat", "Network connection failed: {0}"), ex.Message));
             }
             catch (Exception ex)
             {
-                ShowError(ex.Message);
+                if (IsLoaded)
+                    ShowError(ex.Message);
             }
             finally
             {
+                if (ReferenceEquals(_requestCts, cts))
+                    _requestCts = null;
+                cts.Dispose();
                 SetSendingState(false);
             }
         }
@@ -336,10 +376,10 @@ namespace llcom_plus
 
         private void SetSendingState(bool isSending)
         {
-            SendButton.IsEnabled = !isSending;
+            SendButton.IsEnabled = true;
             HttpTlsSettingsGrid.IsEnabled = !isSending;
             SendButton.Content = isSending
-                ? GetResourceText("HttpSending", "Sending...")
+                ? GetResourceText("HttpCancel", GetResourceText("Cancel", "Cancel"))
                 : GetResourceText("HttpSend", "Send");
         }
 

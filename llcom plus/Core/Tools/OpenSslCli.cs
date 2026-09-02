@@ -183,6 +183,14 @@ namespace llcom_plus.Tools
                     {
                         FlushBlock();
                         blockBuffer.AppendLine(line);
+                        if (blockBuffer.Length > OpenSslCli.MaxInteractiveDiagnosticCharacters)
+                        {
+                            onText?.Invoke("OpenSSL diagnostic block exceeded the display limit and was discarded." + Environment.NewLine);
+                            blockBuffer.Clear();
+                            blockExpectedLength = -1;
+                            blockActualLength = 0;
+                            return;
+                        }
                         blockExpectedLength = expectedLength;
                         blockActualLength = 0;
                         if (blockExpectedLength == 0)
@@ -194,6 +202,14 @@ namespace llcom_plus.Tools
                     {
                         blockBuffer.AppendLine(line);
                         blockActualLength += hexByteCount;
+                        if (blockBuffer.Length > OpenSslCli.MaxInteractiveDiagnosticCharacters)
+                        {
+                            onText?.Invoke("OpenSSL diagnostic block exceeded the display limit and was discarded." + Environment.NewLine);
+                            blockBuffer.Clear();
+                            blockExpectedLength = -1;
+                            blockActualLength = 0;
+                            return;
+                        }
                         if (blockExpectedLength >= 0 && blockActualLength >= blockExpectedLength)
                             FlushBlock();
                         return;
@@ -206,6 +222,12 @@ namespace llcom_plus.Tools
                 void ProcessText(string text)
                 {
                     textBuffer.Append(text);
+                    if (textBuffer.Length > OpenSslCli.MaxInteractiveDiagnosticCharacters)
+                    {
+                        onText?.Invoke("OpenSSL diagnostic line exceeded the display limit and was discarded." + Environment.NewLine);
+                        textBuffer.Clear();
+                        return;
+                    }
                     while (true)
                     {
                         var current = textBuffer.ToString();
@@ -308,6 +330,11 @@ namespace llcom_plus.Tools
 
     public static class OpenSslCli
     {
+        internal const long MaxHttpResponseHeaderBytes = 64L * 1024L;
+        internal const long MaxHttpCompressedBodyBytes = 16L * 1024L * 1024L;
+        internal const long MaxStandardOutputBytes = MaxHttpResponseHeaderBytes + MaxHttpCompressedBodyBytes;
+        internal const long MaxStandardErrorBytes = 2L * 1024L * 1024L;
+        internal const int MaxInteractiveDiagnosticCharacters = 256 * 1024;
         private const string PasswordEnvironmentVariable = "LLCOM_OPENSSL_CERT_PASSWORD";
 
         public static OpenSslClientOptions FromGlobalSettings(string host, int port, bool useDtls)
@@ -354,59 +381,103 @@ namespace llcom_plus.Tools
             }
         }
 
-        public static async Task<OpenSslCommandResult> SendAsync(
+        public static Task<OpenSslCommandResult> SendAsync(
             OpenSslClientOptions options,
             byte[] request,
             int timeoutMilliseconds,
             CancellationToken cancellationToken)
         {
-            using (var context = StartSClient(options, interactive: false))
+            if (request == null)
+                throw new ArgumentNullException(nameof(request));
+
+            return SendAsync(
+                options,
+                (stream, token) => stream.WriteAsync(request, 0, request.Length, token),
+                timeoutMilliseconds,
+                cancellationToken);
+        }
+
+        public static async Task<OpenSslCommandResult> SendAsync(
+            OpenSslClientOptions options,
+            Func<Stream, CancellationToken, Task> writeRequestAsync,
+            int timeoutMilliseconds,
+            CancellationToken cancellationToken)
+        {
+            if (writeRequestAsync == null)
+                throw new ArgumentNullException(nameof(writeRequestAsync));
+            if (timeoutMilliseconds <= 0)
+                timeoutMilliseconds = 30000;
+
+            using (var operationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
-                var process = context.Process;
-                if (timeoutMilliseconds <= 0)
-                    timeoutMilliseconds = 30000;
-                try
+                operationCts.CancelAfter(timeoutMilliseconds);
+                var operationToken = operationCts.Token;
+                operationToken.ThrowIfCancellationRequested();
+
+                using (var context = StartSClient(options, interactive: false))
                 {
-                    var outputTask = ReadAllBytesAsync(process.StandardOutput.BaseStream, cancellationToken);
-                    var errorTask = ReadAllTextAsync(process.StandardError.BaseStream, cancellationToken);
-
-                    await process.StandardInput.BaseStream.WriteAsync(request, 0, request.Length, cancellationToken);
-                    process.StandardInput.Close();
-
-                    var waitTask = Task.Run(() =>
+                    var process = context.Process;
+                    Task<byte[]> outputTask = null;
+                    Task<string> errorTask = null;
+                    using (operationToken.Register(() => StopProcess(process)))
                     {
-                        process.WaitForExit();
-                        return process.ExitCode;
-                    });
+                        try
+                        {
+                            operationToken.ThrowIfCancellationRequested();
+                            outputTask = ReadHttpResponseBytesAsync(
+                                process.StandardOutput.BaseStream,
+                                process,
+                                operationToken);
+                            errorTask = ReadAllTextAsync(
+                                process.StandardError.BaseStream,
+                                MaxStandardErrorBytes,
+                                "stderr",
+                                process,
+                                operationToken);
 
-                    var completed = await Task.WhenAny(waitTask, Task.Delay(timeoutMilliseconds, cancellationToken));
-                    var timedOut = completed != waitTask;
-                    if (timedOut)
-                    {
-                        StopProcess(process);
-                        cancellationToken.ThrowIfCancellationRequested();
+                            await writeRequestAsync(process.StandardInput.BaseStream, operationToken).ConfigureAwait(false);
+                            operationToken.ThrowIfCancellationRequested();
+                            process.StandardInput.Close();
+
+                            var exitCode = await WaitForExitAsync(process, operationToken).ConfigureAwait(false);
+                            var output = await outputTask.ConfigureAwait(false);
+                            var diagnostics = await errorTask.ConfigureAwait(false);
+
+                            return new OpenSslCommandResult
+                            {
+                                Output = output,
+                                Diagnostics = diagnostics,
+                                ExitCode = exitCode,
+                                TimedOut = false
+                            };
+                        }
+                        catch (Exception) when (operationToken.IsCancellationRequested)
+                        {
+                            StopProcess(process);
+                            var output = await GetTaskResultOrDefaultAsync(outputTask, new byte[0]).ConfigureAwait(false);
+                            var diagnostics = await GetTaskResultOrDefaultAsync(errorTask, string.Empty).ConfigureAwait(false);
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            return new OpenSslCommandResult
+                            {
+                                Output = output,
+                                Diagnostics = diagnostics,
+                                ExitCode = null,
+                                TimedOut = true
+                            };
+                        }
+                        catch
+                        {
+                            StopProcess(process);
+                            await GetTaskResultOrDefaultAsync(outputTask, new byte[0]).ConfigureAwait(false);
+                            await GetTaskResultOrDefaultAsync(errorTask, string.Empty).ConfigureAwait(false);
+                            throw;
+                        }
+                        finally
+                        {
+                            StopProcess(process);
+                        }
                     }
-
-                    byte[] output;
-                    string diagnostics;
-                    try { output = await outputTask; } catch { output = new byte[0]; }
-                    try { diagnostics = await errorTask; } catch { diagnostics = string.Empty; }
-
-                    int? exitCode = null;
-                    if (!timedOut)
-                        exitCode = await waitTask;
-
-                    return new OpenSslCommandResult
-                    {
-                        Output = output,
-                        Diagnostics = diagnostics,
-                        ExitCode = exitCode,
-                        TimedOut = timedOut
-                    };
-                }
-                finally
-                {
-                    StopProcess(process);
                 }
             }
         }
@@ -751,15 +822,33 @@ namespace llcom_plus.Tools
                     if (process == null)
                         return Array.Empty<string>();
 
-                    var output = process.StandardOutput.ReadToEnd();
-                    process.StandardError.ReadToEnd();
-                    if (!process.WaitForExit(3000))
+                    using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
                     {
-                        try { process.Kill(); } catch { }
-                        return Array.Empty<string>();
-                    }
+                        var outputTask = ReadAllTextAsync(
+                            process.StandardOutput.BaseStream,
+                            MaxStandardErrorBytes,
+                            "cipher stdout",
+                            process,
+                            cts.Token);
+                        var errorTask = ReadAllTextAsync(
+                            process.StandardError.BaseStream,
+                            MaxStandardErrorBytes,
+                            "cipher stderr",
+                            process,
+                            cts.Token);
+                        if (!process.WaitForExit(3000))
+                        {
+                            try { cts.Cancel(); } catch { }
+                            StopProcess(process);
+                            GetTaskResultOrDefaultAsync(outputTask, string.Empty).GetAwaiter().GetResult();
+                            GetTaskResultOrDefaultAsync(errorTask, string.Empty).GetAwaiter().GetResult();
+                            return Array.Empty<string>();
+                        }
 
-                    return ParseCipherListOutput(output);
+                        var output = outputTask.GetAwaiter().GetResult();
+                        errorTask.GetAwaiter().GetResult();
+                        return ParseCipherListOutput(output);
+                    }
                 }
             }
             catch
@@ -811,6 +900,7 @@ namespace llcom_plus.Tools
         {
             if (process == null)
                 return;
+            try { process.StandardInput.BaseStream.Close(); } catch { }
             try
             {
                 if (!process.HasExited)
@@ -818,6 +908,33 @@ namespace llcom_plus.Tools
             }
             catch { }
             try { process.WaitForExit(2000); } catch { }
+        }
+
+        private static Task<int> WaitForExitAsync(Process process, CancellationToken cancellationToken)
+        {
+            return Task.Run(() =>
+            {
+                while (!process.WaitForExit(100))
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return process.ExitCode;
+            }, cancellationToken);
+        }
+
+        private static async Task<T> GetTaskResultOrDefaultAsync<T>(Task<T> task, T defaultValue)
+        {
+            if (task == null)
+                return defaultValue;
+
+            try
+            {
+                return await task.ConfigureAwait(false);
+            }
+            catch
+            {
+                return defaultValue;
+            }
         }
 
         private static string FindOpenSslExecutable()
@@ -829,25 +946,112 @@ namespace llcom_plus.Tools
             throw new FileNotFoundException("找不到程序自带的 OpenSSL：" + bundledOpenSsl);
         }
 
-        private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken cancellationToken)
+        private static async Task<byte[]> ReadHttpResponseBytesAsync(
+            Stream stream,
+            Process ownerProcess,
+            CancellationToken cancellationToken)
         {
             using (var memory = new MemoryStream())
             {
                 var buffer = new byte[8192];
+                var headerEnd = -1;
                 while (true)
                 {
-                    var read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var previousLength = (int)memory.Length;
+                    var read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
                     if (read <= 0)
                         break;
+                    memory.Write(buffer, 0, read);
+
+                    var currentLength = (int)memory.Length;
+                    var data = memory.GetBuffer();
+                    if (headerEnd < 0)
+                    {
+                        var searchStart = Math.Max(0, previousLength - 3);
+                        for (var index = searchStart; index <= currentLength - 4; index++)
+                        {
+                            if (data[index] == '\r' && data[index + 1] == '\n' &&
+                                data[index + 2] == '\r' && data[index + 3] == '\n')
+                            {
+                                headerEnd = index + 4;
+                                break;
+                            }
+                        }
+                        if (headerEnd < 0 && currentLength > MaxHttpResponseHeaderBytes)
+                        {
+                            StopProcess(ownerProcess);
+                            throw new InvalidDataException(
+                                $"OpenSSL HTTP response headers exceeded {MaxHttpResponseHeaderBytes} bytes.");
+                        }
+                        if (headerEnd > MaxHttpResponseHeaderBytes)
+                        {
+                            StopProcess(ownerProcess);
+                            throw new InvalidDataException(
+                                $"OpenSSL HTTP response headers exceeded {MaxHttpResponseHeaderBytes} bytes.");
+                        }
+                    }
+
+                    if (headerEnd >= 0 && currentLength - headerEnd > MaxHttpCompressedBodyBytes)
+                    {
+                        StopProcess(ownerProcess);
+                        throw new InvalidDataException(
+                            $"OpenSSL HTTP response body exceeded {MaxHttpCompressedBodyBytes} compressed bytes.");
+                    }
+                    if (currentLength > MaxStandardOutputBytes)
+                    {
+                        StopProcess(ownerProcess);
+                        throw new InvalidDataException(
+                            $"OpenSSL stdout exceeded the {MaxStandardOutputBytes} byte safety limit.");
+                    }
+                }
+                return memory.ToArray();
+            }
+        }
+
+        private static async Task<byte[]> ReadAllBytesAsync(
+            Stream stream,
+            long maximumBytes,
+            string streamName,
+            Process ownerProcess,
+            CancellationToken cancellationToken)
+        {
+            using (var memory = new MemoryStream())
+            {
+                var buffer = new byte[8192];
+                long total = 0;
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+                    if (read <= 0)
+                        break;
+                    total = checked(total + read);
+                    if (total > maximumBytes)
+                    {
+                        StopProcess(ownerProcess);
+                        throw new InvalidDataException(
+                            $"OpenSSL {streamName} exceeded the {maximumBytes} byte safety limit.");
+                    }
                     memory.Write(buffer, 0, read);
                 }
                 return memory.ToArray();
             }
         }
 
-        private static async Task<string> ReadAllTextAsync(Stream stream, CancellationToken cancellationToken)
+        private static async Task<string> ReadAllTextAsync(
+            Stream stream,
+            long maximumBytes,
+            string streamName,
+            Process ownerProcess,
+            CancellationToken cancellationToken)
         {
-            var bytes = await ReadAllBytesAsync(stream, cancellationToken);
+            var bytes = await ReadAllBytesAsync(
+                stream,
+                maximumBytes,
+                streamName,
+                ownerProcess,
+                cancellationToken).ConfigureAwait(false);
             return Encoding.UTF8.GetString(bytes);
         }
 

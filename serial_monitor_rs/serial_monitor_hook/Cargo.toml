@@ -9,12 +9,15 @@ name = "serial_monitor_hook"
 
 [dependencies]
 
-# retour uses `extern "win64"` in its macro which is only valid on x86_64.
+# Exact pin: retour 0.3.1 provides instruction decoding/relocation-backed x64
+# GenericDetour on stable Rust. It is intentionally not compiled for x86; x86
+# monitoring is fail-closed instead of using a fixed five-byte patch.
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-retour = { version = "0.3", features = ["static-detour"] }
+retour = "=0.3.1"
 
+# Exact pin: windows 0.58.0 supplies the Win32 ABI bindings used by the hook.
 [dependencies.windows]
-version = "0.58"
+version = "=0.58.0"
 features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -25,7 +28,3 @@ features = [
     "Win32_System_SystemServices",
     "Win32_System_Threading",
 ]
-
-[profile.release]
-opt-level = 2
-panic = "abort"

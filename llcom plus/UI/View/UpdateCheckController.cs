@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -93,6 +94,15 @@ namespace llcom_plus
                         return;
                     }
 
+                    if (!release.CanAutoInstall)
+                    {
+                        Tools.MessageBox.Show(
+                            release.AutomaticUpdateTrustError + "\r\n\r\n" +
+                            ResourceText("AboutUpdateManualOnly", "The release page will be opened for manual download."));
+                        System.Diagnostics.Process.Start(release.ReleaseUrl);
+                        return;
+                    }
+
                     var assetName = string.IsNullOrWhiteSpace(release.AssetName)
                         ? ResourceText("AboutUpdateAssetUnknown", "Unknown package")
                         : release.AssetName;
@@ -171,6 +181,10 @@ namespace llcom_plus
                     ResourceText("AboutUpdateNoNewVersion", "Already latest version: {0}"),
                     Tools.AppInfo.DisplayVersion));
             }
+            catch (OperationCanceledException)
+            {
+                SetStatus("AboutUpdateCancelled", "Update download cancelled.");
+            }
             catch (Exception ex)
             {
                 Tools.Global.PublishNotification(
@@ -222,32 +236,36 @@ namespace llcom_plus
         private async Task<string> DownloadUpdateWithProgressAsync(Tools.GitHubReleaseInfo release)
         {
             UpdateProgressWindow progressWindow = null;
-            try
+            using (var cts = new CancellationTokenSource())
             {
-                progressWindow = new UpdateProgressWindow(
-                    ResourceText("AboutUpdateProgressTitle", "Download update"),
-                    ResourceText("AboutUpdateDownloading", "Downloading..."))
+                try
                 {
-                    Owner = owner
-                };
-                progressWindow.Show();
-
-                var progress = new Progress<Tools.GitHubDownloadProgress>(value =>
-                {
-                    progressWindow.Report(
-                        value,
+                    progressWindow = new UpdateProgressWindow(
+                        ResourceText("AboutUpdateProgressTitle", "Download update"),
                         ResourceText("AboutUpdateDownloading", "Downloading..."),
-                        ResourceText("AboutUpdateSizeUnknown", "Unknown"));
-                });
+                        () => cts.Cancel())
+                    {
+                        Owner = owner
+                    };
+                    progressWindow.Show();
 
-                return await Tools.GitHubReleaseUpdater.DownloadUpdateAsync(release, progress);
-            }
-            finally
-            {
-                if (progressWindow != null)
+                    var progress = new Progress<Tools.GitHubDownloadProgress>(value =>
+                    {
+                        progressWindow.Report(
+                            value,
+                            ResourceText("AboutUpdateDownloading", "Downloading..."),
+                            ResourceText("AboutUpdateSizeUnknown", "Unknown"));
+                    });
+
+                    return await Tools.GitHubReleaseUpdater.DownloadUpdateAsync(release, progress, cts.Token);
+                }
+                finally
                 {
-                    progressWindow.AllowClose();
-                    progressWindow.Close();
+                    if (progressWindow != null)
+                    {
+                        progressWindow.AllowClose();
+                        progressWindow.Close();
+                    }
                 }
             }
         }
@@ -279,10 +297,14 @@ namespace llcom_plus
         {
             private readonly ProgressBar progressBar;
             private readonly TextBlock statusTextBlock;
+            private readonly Button cancelButton;
+            private readonly Action cancel;
             private bool canClose;
+            private bool cancelRequested;
 
-            public UpdateProgressWindow(string title, string initialStatus)
+            public UpdateProgressWindow(string title, string initialStatus, Action cancel)
             {
+                this.cancel = cancel ?? throw new ArgumentNullException(nameof(cancel));
                 Title = title;
                 Width = 420;
                 MinHeight = 120;
@@ -292,6 +314,13 @@ namespace llcom_plus
                 ShowInTaskbar = false;
                 Topmost = true;
 
+                // This window is created in code, so it does not automatically pick up
+                // the application window style. In dark mode the implicit TextBlock
+                // style was therefore drawing light text over the stock white client area.
+                SetResourceReference(StyleProperty, "AppGlassWindowStyle");
+                SetResourceReference(BackgroundProperty, "AppWindowBackgroundBrush");
+                SetResourceReference(ForegroundProperty, "AppGlassTextBrush");
+
                 var panel = new StackPanel { Margin = new Thickness(16) };
                 statusTextBlock = new TextBlock
                 {
@@ -299,6 +328,7 @@ namespace llcom_plus
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 0, 0, 12)
                 };
+                statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppGlassTextBrush");
                 progressBar = new ProgressBar
                 {
                     Height = 18,
@@ -306,15 +336,39 @@ namespace llcom_plus
                     Maximum = 100,
                     IsIndeterminate = true
                 };
+                progressBar.SetResourceReference(ProgressBar.ForegroundProperty, "AppAccentBrush");
+                progressBar.SetResourceReference(ProgressBar.BackgroundProperty, "AppGlassControlBackground");
+                cancelButton = new Button
+                {
+                    Width = 100,
+                    Margin = new Thickness(0, 12, 0, 0),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Content = "Cancel"
+                };
+                cancelButton.Click += (_, __) => RequestCancel();
                 panel.Children.Add(statusTextBlock);
                 panel.Children.Add(progressBar);
+                panel.Children.Add(cancelButton);
                 Content = panel;
 
                 Closing += (_, e) =>
                 {
                     if (!canClose)
+                    {
+                        RequestCancel();
                         e.Cancel = true;
+                    }
                 };
+            }
+
+            private void RequestCancel()
+            {
+                if (cancelRequested || canClose)
+                    return;
+                cancelRequested = true;
+                cancelButton.IsEnabled = false;
+                statusTextBlock.Text = "Cancelling update download...";
+                cancel();
             }
 
             public void AllowClose()
@@ -327,7 +381,7 @@ namespace llcom_plus
                 string downloadingText,
                 string unknownSizeText)
             {
-                if (progress == null)
+                if (progress == null || cancelRequested)
                     return;
 
                 if (progress.TotalBytes > 0)

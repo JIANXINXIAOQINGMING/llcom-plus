@@ -1,5 +1,7 @@
 using llcom_plus.Tools;
+using llcom_plus.Model;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -25,9 +27,11 @@ namespace llcom_plus.Pages
         private const int MaxSlotCount = 4;
         private const int MaxLogCharsPerSlot = 256 * 1024;
         private const int LogTrimChars = 64 * 1024;
+        private readonly string pageIdentity = Guid.NewGuid().ToString("N");
         private int slotCount;
         private readonly bool showSlotSendPanel;
         private readonly List<PortSlot> slots = new List<PortSlot>();
+        private Settings subscribedSettings;
         private bool slotsCreated;
         private bool subscribedProgramClosed;
         private bool updatingExternalControls;
@@ -88,6 +92,14 @@ namespace llcom_plus.Pages
                 Global.LogColorsChanged += Global_LogColorsChanged;
                 subscribedProgramClosed = true;
             }
+            if (!ReferenceEquals(subscribedSettings, Global.setting))
+            {
+                if (subscribedSettings != null)
+                    subscribedSettings.UartProcessingSettingsChanged -= Settings_UartProcessingSettingsChanged;
+                subscribedSettings = Global.setting;
+                if (subscribedSettings != null)
+                    subscribedSettings.UartProcessingSettingsChanged += Settings_UartProcessingSettingsChanged;
+            }
 
             BindExternalGlobalOptions();
             ownerWindow = Window.GetWindow(this);
@@ -98,6 +110,7 @@ namespace llcom_plus.Pages
             }
             RefreshPorts();
             ApplyInitialFirstState();
+            ActivateSettingsProfileForActiveSlot();
             UpdateStatus();
             ActiveSlotChanged?.Invoke(activeSlotNumber);
         }
@@ -206,6 +219,7 @@ namespace llcom_plus.Pages
             activeSlotNumber = Math.Max(1, activeSlotNumber);
 
             RebuildGridLayout();
+            ActivateSettingsProfileForActiveSlot();
             RefreshExternalControls();
             UpdateStatus();
             return true;
@@ -338,6 +352,34 @@ namespace llcom_plus.Pages
                 Global.LogColorsChanged -= Global_LogColorsChanged;
                 subscribedProgramClosed = false;
             }
+            if (subscribedSettings != null)
+            {
+                subscribedSettings.UartProcessingSettingsChanged -= Settings_UartProcessingSettingsChanged;
+                subscribedSettings = null;
+            }
+        }
+
+        private void Settings_UartProcessingSettingsChanged(object sender, EventArgs e)
+        {
+            RunOnUi(() =>
+            {
+                var settings = Global.setting;
+                if (settings == null)
+                    return;
+
+                var slot = GetSlot(activeSlotNumber);
+                if (slot == null || string.IsNullOrWhiteSpace(slot.SelectedPortName))
+                    return;
+                if (!string.Equals(
+                        settings.ActiveUartProfileName,
+                        slot.SelectedPortName,
+                        StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var merged = settings.MergeCurrentUartProcessingSettings(slot.GetProfileSnapshot());
+                slot.ApplyProcessingSettings(merged);
+                settings.SaveUartProfileSnapshot(slot.SelectedPortName, merged);
+            });
         }
 
         private void Global_LogColorsChanged(object sender, EventArgs e)
@@ -431,12 +473,17 @@ namespace llcom_plus.Pages
             if (portsReleased)
                 return;
 
+            var mainSlot = slots.FirstOrDefault(slot => slot.UsesMainUart);
+            if (mainSlot != null && !string.IsNullOrWhiteSpace(mainSlot.SelectedPortName))
+                Global.setting?.SetActiveUartProfile(mainSlot.SelectedPortName, usesMainUart: true);
+
             portsReleased = true;
             CloseAll(
                 closeMainUart: false,
                 detachMainUart: true,
                 waitForDispose: true,
                 disposeOwnedPorts: true);
+            Global.uart?.ClearRuntimeProfileOverride();
         }
 
         private void RefreshPortsButton_Click(object sender, RoutedEventArgs e)
@@ -457,6 +504,7 @@ namespace llcom_plus.Pages
                 slot.RefreshPorts(ports);
                 ApplyPortProfile(slot);
             }
+            ActivateSettingsProfileForActiveSlot();
             UpdateStatus();
         }
 
@@ -467,6 +515,7 @@ namespace llcom_plus.Pages
                 slot.RefreshPorts(ports);
                 ApplyPortProfile(slot);
             }
+            ActivateSettingsProfileForActiveSlot();
         }
 
         private void CloseAll(
@@ -505,6 +554,7 @@ namespace llcom_plus.Pages
         private void SetActiveSlot(int slotNumber, bool notify)
         {
             activeSlotNumber = Math.Max(1, Math.Min(slotCount, slotNumber));
+            ActivateSettingsProfileForActiveSlot();
             RefreshExternalControls();
             if (notify)
                 ActiveSlotChanged?.Invoke(activeSlotNumber);
@@ -513,6 +563,19 @@ namespace llcom_plus.Pages
         private void ActivateSlotFromPane(int slotNumber)
         {
             SetActiveSlot(slotNumber, true);
+        }
+
+        private void ActivateSettingsProfileForActiveSlot()
+        {
+            var slot = GetSlot(activeSlotNumber);
+            if (slot == null || string.IsNullOrWhiteSpace(slot.SelectedPortName))
+                return;
+
+            Global.setting?.SetActiveUartProfile(
+                slot.SelectedPortName,
+                usesMainUart: slot.UsesMainUart);
+            if (Global.setting != null)
+                llcom_plus.MainWindow.recvScriptBackup = Global.setting.recvScript;
         }
 
         public string GetSlotPortName(int slotNumber)
@@ -535,6 +598,8 @@ namespace llcom_plus.Pages
             // 选择端口只更新待使用端口；发送或状态按钮才切换实际连接。
             slot.SetPortName(portName);
             ApplyPortProfile(slot);
+            if (slotNumber == activeSlotNumber)
+                ActivateSettingsProfileForActiveSlot();
             RefreshExternalControls();
             UpdateStatus();
         }
@@ -619,8 +684,18 @@ namespace llcom_plus.Pages
             if (data == null || data.Length == 0)
                 return false;
 
-            var index = Math.Max(1, Math.Min(slotCount, slotNumber)) - 1;
-            return index >= 0 && index < slots.Count && slots[index].SendBytesBlocking(data, token);
+            var target = CaptureSerialTarget(slotNumber);
+            return target?.IsOpen == true && target.Send(data, token, null);
+        }
+
+        internal ActiveSerialTarget CaptureSerialTarget(int slotNumber)
+        {
+            return GetSlot(slotNumber)?.CaptureSerialTarget();
+        }
+
+        internal UartPortProfile GetSlotProfileSnapshot(int slotNumber)
+        {
+            return GetSlot(slotNumber)?.GetProfileSnapshot();
         }
 
         private PortSlot GetSlot(int slotNumber)
@@ -723,20 +798,26 @@ namespace llcom_plus.Pages
 
         private void ApplyPortProfile(PortSlot slot)
         {
-            if (slot == null || slot.IsOpen)
+            if (slot == null)
                 return;
 
-            var profile = Global.setting?.GetUartProfileForPort(slot.SelectedPortName);
+            if (slot.IsOpen &&
+                !string.Equals(
+                    slot.PortName,
+                    slot.SelectedPortName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var profile = Global.setting?.GetUartProfileSnapshot(slot.SelectedPortName);
             if (profile == null)
                 return;
 
             suppressSlotProfileSave = true;
             try
             {
-                slot.SetBaudRate(profile.baudRate);
-                slot.HexMode = profile.hexSend;
-                slot.Dtr = profile.dtr;
-                slot.Rts = profile.rts;
+                slot.ApplyProfile(profile);
             }
             finally
             {
@@ -749,12 +830,17 @@ namespace llcom_plus.Pages
             if (suppressSlotProfileSave || slot == null)
                 return;
 
-            Global.setting?.SaveUartProfileForPort(
-                slot.SelectedPortName,
-                slot.BaudRate,
-                slot.HexMode,
-                slot.Rts,
-                slot.Dtr);
+            var profile = slot.GetProfileSnapshot() ??
+                Global.setting?.GetUartProfileSnapshot(slot.SelectedPortName);
+            if (profile == null)
+                return;
+
+            profile.baudRate = slot.BaudRate;
+            profile.hexSend = slot.HexMode;
+            profile.rts = slot.Rts;
+            profile.dtr = slot.Dtr;
+            slot.UpdateProfileSnapshot(profile);
+            Global.setting?.SaveUartProfileSnapshot(slot.SelectedPortName, profile);
         }
 
         private bool IsPortOpenInOtherSlot(PortSlot requester, string portName)
@@ -905,6 +991,8 @@ namespace llcom_plus.Pages
             private readonly TextBox sendTextBox = new TextBox();
             private readonly TextBlock titleTextBlock = new TextBlock();
             private readonly object serialLock = new object();
+            private readonly object serialLifecycleLock = new object();
+            private readonly object sendLock = new object();
             private readonly object receiveBufferLock = new object();
             private readonly object sessionLogLock = new object();
             private readonly List<byte> pendingReceiveData = new List<byte>();
@@ -912,7 +1000,12 @@ namespace llcom_plus.Pages
             private SerialPinMonitor pinMonitor;
             private Timer receiveFlushTimer;
             private bool receiveFlushScheduled;
+            private bool serialTransition;
+            private bool serialDisposed;
+            private bool applyingProfile;
+            private long connectionGeneration;
             private string selectedPortName = "";
+            private UartPortProfile profileSnapshot = new UartPortProfile();
             private StreamWriter sessionStringLogWriter;
             private StreamWriter sessionHexLogWriter;
             private int logCharCount;
@@ -929,6 +1022,7 @@ namespace llcom_plus.Pages
                 {
                     Global.uart.UartDataRecived += MainUart_UartDataRecived;
                     Global.uart.UartDataSent += MainUart_UartDataSent;
+                    Global.uart.SetDirectReceiveMode(true);
                 }
                 else
                 {
@@ -948,13 +1042,15 @@ namespace llcom_plus.Pages
             {
                 get
                 {
-                    try
+                    if (useMainUart)
+                        return Global.uart.IsOpen();
+
+                    lock (serialLock)
                     {
-                        return useMainUart ? Global.uart.IsOpen() : serial.IsOpen;
-                    }
-                    catch (Exception ex) when (IsClosedSerialException(ex))
-                    {
-                        return false;
+                        if (serialDisposed || serialTransition)
+                            return false;
+                        try { return serial.IsOpen; }
+                        catch (Exception ex) when (IsClosedSerialException(ex)) { return false; }
                     }
                 }
             }
@@ -962,13 +1058,13 @@ namespace llcom_plus.Pages
             {
                 get
                 {
-                    try
+                    if (useMainUart)
+                        return NormalizePortName(Global.uart.GetName());
+
+                    lock (serialLock)
                     {
-                        return NormalizePortName(useMainUart ? Global.uart.GetName() : serial.PortName);
-                    }
-                    catch (Exception ex) when (IsClosedSerialException(ex))
-                    {
-                        return SelectedPortName;
+                        try { return NormalizePortName(serial.PortName); }
+                        catch (Exception ex) when (IsClosedSerialException(ex)) { return SelectedPortName; }
                     }
                 }
             }
@@ -993,25 +1089,183 @@ namespace llcom_plus.Pages
             public bool Rts
             {
                 get { return rtsCheckBox.IsChecked == true; }
-                set
-                {
-                    rtsCheckBox.IsChecked = value;
-                    ApplyControlLines();
-                }
+                set { rtsCheckBox.IsChecked = value; }
             }
             public bool Dtr
             {
                 get { return dtrCheckBox.IsChecked == true; }
-                set
-                {
-                    dtrCheckBox.IsChecked = value;
-                    ApplyControlLines();
-                }
+                set { dtrCheckBox.IsChecked = value; }
             }
             public bool HexMode
             {
                 get { return hexCheckBox.IsChecked == true; }
                 set { hexCheckBox.IsChecked = value; }
+            }
+
+            public void ApplyProfile(UartPortProfile profile)
+            {
+                if (profile == null)
+                    return;
+
+                applyingProfile = true;
+                try
+                {
+                    profileSnapshot = CloneProfile(profile);
+                    if (useMainUart)
+                        Global.uart.SetRuntimeProfileOverride(profileSnapshot);
+                    SetBaudRateText(profileSnapshot.baudRate);
+                    hexCheckBox.IsChecked = profileSnapshot.hexSend;
+                    dtrCheckBox.IsChecked = profileSnapshot.dtr;
+                    rtsCheckBox.IsChecked = profileSnapshot.rts;
+                    lastPackedLogMode = profileSnapshot.timeout >= 0;
+                }
+                finally
+                {
+                    applyingProfile = false;
+                }
+            }
+
+            public void UpdateProfileSnapshot(UartPortProfile profile)
+            {
+                if (profile != null)
+                {
+                    profileSnapshot = CloneProfile(profile);
+                    if (useMainUart)
+                        Global.uart.SetRuntimeProfileOverride(profileSnapshot);
+                }
+            }
+
+            public void ApplyProcessingSettings(UartPortProfile profile)
+            {
+                if (profile == null)
+                    return;
+
+                UpdateProfileSnapshot(profile);
+                lastPackedLogMode = profileSnapshot.timeout >= 0;
+                if (useMainUart)
+                    return;
+
+                lock (serialLock)
+                {
+                    if (serialDisposed)
+                        return;
+
+                    try
+                    {
+                        serial.DataBits = profileSnapshot.dataBits;
+                        serial.Parity = (Parity)profileSnapshot.parity;
+                        serial.StopBits = (StopBits)profileSnapshot.stopBit;
+                        serial.Handshake = GetHandshake(profileSnapshot.flowControl);
+                        if (serial.Handshake != Handshake.RequestToSend)
+                            serial.RtsEnable = profileSnapshot.rts;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.AddUartLogDebug(
+                            $"[SplitSettings]slot={Index},port={SelectedPortName},apply failed:{ex.Message}");
+                    }
+                }
+            }
+
+            public UartPortProfile GetProfileSnapshot()
+            {
+                return CloneProfile(profileSnapshot);
+            }
+
+            public ActiveSerialTarget CaptureSerialTarget()
+            {
+                var displayName = DisplayTitle;
+                var profile = GetProfileSnapshot();
+                if (useMainUart)
+                {
+                    var connection = Global.uart.CaptureConnectionLease();
+                    return new ActiveSerialTarget(
+                        $"split:{owner.pageIdentity}:slot:{Index}:{connection.Identity}",
+                        displayName,
+                        () => connection.IsOpen,
+                        (data, token, committedBytes) =>
+                            SendCapturedMainUart(connection, data, token, committedBytes));
+                }
+
+                long generation;
+                string portName;
+                lock (serialLock)
+                {
+                    generation = connectionGeneration;
+                    try { portName = NormalizePortName(serial.PortName); }
+                    catch (Exception ex) when (IsClosedSerialException(ex)) { portName = SelectedPortName; }
+                }
+
+                return new ActiveSerialTarget(
+                    $"split:{owner.pageIdentity}:slot:{Index}:{portName}:{generation}",
+                    displayName,
+                    () => IsDirectConnectionOpen(generation),
+                    (data, token, committedBytes) =>
+                        SendCapturedDirect(generation, portName, profile, data, token, committedBytes));
+            }
+
+            private static UartPortProfile CloneProfile(UartPortProfile profile)
+            {
+                profile = profile ?? new UartPortProfile();
+                return new UartPortProfile
+                {
+                    baudRate = profile.baudRate,
+                    autoReconnect = profile.autoReconnect,
+                    showHexFormat = profile.showHexFormat,
+                    hexSend = profile.hexSend,
+                    showSend = profile.showSend,
+                    showSendRaw = profile.showSendRaw,
+                    parity = profile.parity,
+                    timeout = profile.timeout,
+                    dataBits = profile.dataBits,
+                    stopBit = profile.stopBit,
+                    flowControl = profile.flowControl,
+                    sendThrottlePacketSize = profile.sendThrottlePacketSize,
+                    sendThrottleDelayMs = profile.sendThrottleDelayMs,
+                    bitDelay = profile.bitDelay,
+                    maxLength = profile.maxLength,
+                    sendScript = profile.sendScript,
+                    recvScript = profile.recvScript,
+                    terminal = profile.terminal,
+                    encoding = profile.encoding,
+                    extraEnter = profile.extraEnter,
+                    enterSend = profile.enterSend,
+                    enableSymbol = profile.enableSymbol,
+                    rts = profile.rts,
+                    dtr = profile.dtr
+                };
+            }
+
+            private bool IsDirectConnectionOpen(long generation)
+            {
+                lock (serialLock)
+                {
+                    if (serialDisposed || serialTransition || generation != connectionGeneration)
+                        return false;
+                    try { return serial.IsOpen; }
+                    catch (Exception ex) when (IsClosedSerialException(ex)) { return false; }
+                }
+            }
+
+            private long BeginSerialTransition()
+            {
+                lock (serialLock)
+                {
+                    connectionGeneration = unchecked(connectionGeneration + 1);
+                    if (connectionGeneration == 0)
+                        connectionGeneration = 1;
+                    serialTransition = true;
+                    return connectionGeneration;
+                }
+            }
+
+            private void CompleteSerialTransition(long generation)
+            {
+                lock (serialLock)
+                {
+                    if (generation == connectionGeneration)
+                        serialTransition = false;
+                }
             }
 
             public void SetIndex(int index)
@@ -1137,30 +1391,44 @@ namespace llcom_plus.Pages
             public void Close(bool closeMainUart = true, bool waitForDispose = false)
             {
                 Exception closeError = null;
-                lock (serialLock)
+                if (useMainUart)
                 {
                     try
                     {
-                        if (!useMainUart)
-                            pinMonitor?.Disarm();
-
-                        if (useMainUart)
+                        if (closeMainUart && Global.uart.IsOpen())
                         {
-                            if (closeMainUart && Global.uart.IsOpen())
-                            {
-                                Global.uart.Close(waitForDispose);
-                                Logger.StopSessionLog();
-                            }
-                        }
-                        else if (IsOpen)
-                        {
-                            Logger.AddUartLogDebug($"[SplitUartClose]slot={Index},port={serial.PortName}");
-                            serial.Close();
+                            Global.uart.Close(waitForDispose);
+                            Logger.StopSessionLog();
                         }
                     }
                     catch (Exception ex)
                     {
                         closeError = ex;
+                    }
+                }
+                else
+                {
+                    var generation = BeginSerialTransition();
+                    string portName;
+                    try { portName = serial.PortName; }
+                    catch { portName = SelectedPortName; }
+                    pinMonitor?.Disarm();
+                    Logger.AddUartLogDebug($"[SplitUartClose]slot={Index},port={portName},generation={generation}");
+                    try
+                    {
+                        lock (serialLifecycleLock)
+                        {
+                            if (serial.IsOpen)
+                                serial.Close();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        closeError = ex;
+                    }
+                    finally
+                    {
+                        CompleteSerialTransition(generation);
                     }
                 }
 
@@ -1182,6 +1450,7 @@ namespace llcom_plus.Pages
                 if (!useMainUart)
                     return;
 
+                Global.uart.SetDirectReceiveMode(false);
                 Global.uart.UartDataRecived -= MainUart_UartDataRecived;
                 Global.uart.UartDataSent -= MainUart_UartDataSent;
             }
@@ -1191,13 +1460,17 @@ namespace llcom_plus.Pages
                 if (useMainUart)
                     return;
 
+                BeginSerialTransition();
                 lock (serialLock)
+                    serialDisposed = true;
+
+                try { pinMonitor?.Dispose(); }
+                catch { }
+                pinMonitor = null;
+                try { serial.DataReceived -= Serial_DataReceived; }
+                catch { }
+                lock (serialLifecycleLock)
                 {
-                    try { pinMonitor?.Dispose(); }
-                    catch { }
-                    pinMonitor = null;
-                    try { serial.DataReceived -= Serial_DataReceived; }
-                    catch { }
                     try { serial.Close(); }
                     catch { }
                     try { serial.Dispose(); }
@@ -1307,7 +1580,7 @@ namespace llcom_plus.Pages
                 hexCheckBox.Margin = new Thickness(0, 3, 8, 4);
                 dtrCheckBox.Margin = new Thickness(0, 3, 8, 4);
                 rtsCheckBox.Margin = new Thickness(0, 3, 0, 4);
-                hexCheckBox.IsChecked = useMainUart && Global.setting?.hexSend == true;
+                hexCheckBox.IsChecked = profileSnapshot.hexSend;
                 dtrCheckBox.IsChecked = useMainUart && Global.uart.Dtr;
                 rtsCheckBox.IsChecked = useMainUart && Global.uart.Rts;
                 dtrCheckBox.Checked += ControlLineCheckBox_Changed;
@@ -1351,7 +1624,7 @@ namespace llcom_plus.Pages
                     CommandTarget = logTextBox
                 });
                 logTextBox.ContextMenu = logContextMenu;
-                lastPackedLogMode = Global.setting?.timeout >= 0;
+                lastPackedLogMode = GetProfileSnapshot().timeout >= 0;
                 Grid.SetRow(logTextBox, 2);
                 grid.Children.Add(logTextBox);
 
@@ -1396,6 +1669,8 @@ namespace llcom_plus.Pages
                 if (!string.IsNullOrWhiteSpace(selected))
                     selectedPortName = selected;
                 owner.ApplyPortProfile(this);
+                if (Index == owner.activeSlotNumber)
+                    owner.ActivateSettingsProfileForActiveSlot();
                 UpdateTitle();
                 owner.UpdateStatus();
             }
@@ -1422,9 +1697,13 @@ namespace llcom_plus.Pages
                         else
                             Global.uart.SetBaudRate(baudRate);
                     }
-                    else if (IsOpen)
+                    else
                     {
-                        serial.BaudRate = baudRate;
+                        lock (serialLock)
+                        {
+                            if (!serialDisposed && !serialTransition && serial.IsOpen)
+                                serial.BaudRate = baudRate;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -1480,6 +1759,14 @@ namespace llcom_plus.Pages
                     return false;
                 }
 
+                var profile = GetProfileSnapshot();
+                profile.baudRate = baudRate;
+                profile.hexSend = HexMode;
+                profile.rts = Rts;
+                profile.dtr = Dtr;
+                UpdateProfileSnapshot(profile);
+                long generation = 0;
+
                 try
                 {
                     if (useMainUart)
@@ -1488,30 +1775,55 @@ namespace llcom_plus.Pages
                         if (Global.setting != null)
                             Global.setting.baudRate = baudRate;
                         Global.uart.SetName(portName);
-                        Global.uart.Rts = rtsCheckBox.IsChecked == true;
-                        Global.uart.Dtr = dtrCheckBox.IsChecked == true;
+                        Global.uart.Rts = profile.rts;
+                        Global.uart.Dtr = profile.dtr;
                         Global.uart.Open();
                         Logger.StartSessionLog(portName);
                     }
                     else
                     {
+                        lock (serialLock)
+                        {
+                            if (serialDisposed)
+                                throw new ObjectDisposedException(nameof(PortSlot));
+                        }
+
                         ResetReceiveBuffer();
-                        serial.PortName = portName;
-                        serial.BaudRate = baudRate;
-                        serial.DataBits = Global.setting?.dataBits ?? 8;
-                        serial.Parity = (Parity)(Global.setting?.parity ?? 0);
-                        serial.StopBits = (StopBits)(Global.setting?.stopBit ?? 1);
-                        serial.Handshake = GetHandshake();
-                        serial.DtrEnable = dtrCheckBox.IsChecked == true;
-                        if (serial.Handshake != Handshake.RequestToSend)
-                            serial.RtsEnable = rtsCheckBox.IsChecked == true;
+                        generation = BeginSerialTransition();
+                        var handshake = GetHandshake(profile.flowControl);
                         Logger.AddUartLogDebug(
-                            $"[SplitUartOpen]slot={Index},port={serial.PortName},baud={serial.BaudRate}," +
-                            $"parity={serial.Parity},dataBits={serial.DataBits},stopBits={serial.StopBits}," +
-                            $"handshake={serial.Handshake},dtr={serial.DtrEnable},rts={serial.RtsEnable}");
-                        serial.Open();
+                            $"[SplitUartOpen]slot={Index},port={portName},baud={baudRate}," +
+                            $"parity={(Parity)profile.parity},dataBits={profile.dataBits},stopBits={(StopBits)profile.stopBit}," +
+                            $"handshake={handshake},dtr={profile.dtr},rts={profile.rts},generation={generation}");
+                        lock (serialLifecycleLock)
+                        {
+                            serial.PortName = portName;
+                            serial.BaudRate = baudRate;
+                            serial.DataBits = profile.dataBits;
+                            serial.Parity = (Parity)profile.parity;
+                            serial.StopBits = (StopBits)profile.stopBit;
+                            serial.Handshake = handshake;
+                            serial.DtrEnable = profile.dtr;
+                            if (serial.Handshake != Handshake.RequestToSend)
+                                serial.RtsEnable = profile.rts;
+                            serial.Open();
+                        }
+
+                        lock (serialLock)
+                        {
+                            if (serialDisposed || generation != connectionGeneration)
+                                throw new IOException("The split serial connection changed while opening.");
+                            serialTransition = false;
+                        }
                         pinMonitor?.Arm();
                         EnsureSessionLogOpen();
+
+                        try
+                        {
+                            if (serial.BytesToRead > 0)
+                                ThreadPool.QueueUserWorkItem(_ => Serial_DataReceived(serial, null));
+                        }
+                        catch { }
                     }
 
                     SyncOpenStateUi();
@@ -1533,6 +1845,20 @@ namespace llcom_plus.Pages
                 }
                 catch (Exception ex)
                 {
+                    if (!useMainUart && generation != 0)
+                    {
+                        try
+                        {
+                            lock (serialLifecycleLock)
+                            {
+                                if (serial.IsOpen)
+                                    serial.Close();
+                            }
+                        }
+                        catch { }
+                        CompleteSerialTransition(generation);
+                    }
+
                     LastErrorMessage = ex.Message;
                     AppendLog("ERR", owner.FindText("MultiPortOpenFailed", "打开失败: ") + LastErrorMessage);
                     Global.PublishNotification(
@@ -1545,16 +1871,8 @@ namespace llcom_plus.Pages
                         portName: portName);
                     try
                     {
-                        if (useMainUart)
-                        {
-                            if (Global.uart.IsOpen())
-                                Global.uart.Close();
-                        }
-                        else if (IsOpen)
-                        {
-                            pinMonitor?.Disarm();
-                            serial.Close();
-                        }
+                        if (useMainUart && Global.uart.IsOpen())
+                            Global.uart.Close();
                     }
                     catch { }
                     SyncOpenStateUi();
@@ -1620,7 +1938,7 @@ namespace llcom_plus.Pages
                     return;
                 }
 
-                var packedMode = Global.setting?.timeout >= 0;
+                var packedMode = GetProfileSnapshot().timeout >= 0;
                 lastPackedLogMode = packedMode;
                 if (!packedMode || !snapshot.PackedMode)
                 {
@@ -1646,7 +1964,7 @@ namespace llcom_plus.Pages
                 packedLogItems.Clear();
                 logCharCount = snapshot.Length;
                 plainDataParagraph = null;
-                lastPackedLogMode = Global.setting?.timeout >= 0;
+                lastPackedLogMode = GetProfileSnapshot().timeout >= 0;
                 if (snapshot.Length == 0)
                     return;
 
@@ -1690,12 +2008,9 @@ namespace llcom_plus.Pages
                 }
 
                 byte[] data;
-                var sendAsHex = hexCheckBox.IsChecked == true;
                 try
                 {
-                    data = sendAsHex
-                        ? Global.Hex2Byte(sendTextBox.Text)
-                        : GetEncoding().GetBytes(sendTextBox.Text ?? "");
+                    data = PrepareSlotSendData(sendTextBox.Text ?? string.Empty);
                 }
                 catch (Exception ex)
                 {
@@ -1703,41 +2018,61 @@ namespace llcom_plus.Pages
                     return;
                 }
 
-                if (data.Length == 0)
+                if (data == null || data.Length == 0)
                     return;
 
                 await SendBytesAsync(data);
             }
 
+            private byte[] PrepareSlotSendData(string text)
+            {
+                var profile = GetProfileSnapshot();
+                var input = profile.hexSend
+                    ? Global.Hex2Byte(text)
+                    : Global.GetEncoding(profile.encoding).GetBytes(text ?? string.Empty);
+                var scriptName = ResolveProfileScriptName(
+                    "user_script_send_convert",
+                    profile.sendScript,
+                    "default");
+                var converted = ScriptEnv.JavaScriptLoader.Run(
+                    scriptName + ".js",
+                    new ArrayList { "uartData", input });
+                if (converted == null || !profile.extraEnter)
+                    return converted;
+
+                return converted.Concat(new byte[] { 0x0d, 0x0a }).ToArray();
+            }
+
+            private static string ResolveProfileScriptName(
+                string directoryName,
+                string requestedName,
+                string fallbackName)
+            {
+                if (Global.TryGetProfileScriptPath(
+                        directoryName,
+                        requestedName,
+                        out var normalizedName,
+                        out var path) &&
+                    File.Exists(path))
+                {
+                    return normalizedName;
+                }
+                return fallbackName;
+            }
+
             public async Task<bool> SendBytesAsync(byte[] data)
             {
-                if (!IsSelectedPortOpen)
+                var target = CaptureSerialTarget();
+                if (target?.IsOpen != true)
                 {
                     AppendLog("ERR", owner.FindText("MultiPortNotOpen", "请先打开串口。"));
                     return false;
                 }
 
-                var notOpenText = owner.FindText("MultiPortNotOpen", "请先打开串口。");
                 sendButton.IsEnabled = false;
                 try
                 {
-                    await Task.Run(() =>
-                    {
-                        lock (serialLock)
-                        {
-                            if (!IsSelectedPortOpen)
-                                throw new InvalidOperationException(notOpenText);
-                            if (useMainUart)
-                                Global.uart.SendData(data);
-                            else
-                                WriteDirectSerial(data, CancellationToken.None);
-                        }
-                    });
-                    if (!useMainUart)
-                    {
-                        WriteDataLog(data, true);
-                    }
-                    return true;
+                    return await Task.Run(() => target.Send(data, CancellationToken.None, null));
                 }
                 catch (Exception ex)
                 {
@@ -1750,27 +2085,58 @@ namespace llcom_plus.Pages
                 }
             }
 
-            public bool SendBytesBlocking(byte[] data, CancellationToken token)
+            private bool SendCapturedMainUart(
+                Uart.ConnectionLease connection,
+                byte[] data,
+                CancellationToken token,
+                Action<int> committedBytes)
             {
                 token.ThrowIfCancellationRequested();
                 try
                 {
-                    lock (serialLock)
+                    // Keep the main UART on its normal event path. The split pane's
+                    // MainUart_UartDataSent handler renders it, while MainWindow/Logger
+                    // retain the ordinary session-log and subscriber behavior.
+                    return connection.Send(data, token, committedBytes, raiseEvents: true);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    owner.RunOnUi(() => AppendLog(
+                        "ERR",
+                        owner.FindText("MultiPortSendFailed", "发送失败: ") + ex.Message));
+                    return false;
+                }
+            }
+
+            private bool SendCapturedDirect(
+                long generation,
+                string portName,
+                UartPortProfile profile,
+                byte[] data,
+                CancellationToken token,
+                Action<int> committedBytes)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!IsDirectConnectionOpen(generation))
+                    return false;
+
+                try
+                {
+                    lock (sendLock)
                     {
-                        token.ThrowIfCancellationRequested();
-                        if (!IsSelectedPortOpen)
-                        {
-                            owner.RunOnUi(() => AppendLog("ERR", owner.FindText("MultiPortNotOpen", "请先打开串口。")));
-                            return false;
-                        }
-
-                        if (useMainUart)
-                            Global.uart.SendDataCancelable(data, token, null, raiseEvents: false);
-                        else
-                            WriteDirectSerial(data, token);
+                        WriteDirectSerial(
+                            generation,
+                            portName,
+                            profile,
+                            data,
+                            token,
+                            committedBytes);
                     }
-
-                    owner.RunOnUi(() => WriteDataLog(data, true, updateCounters: !useMainUart));
+                    owner.RunOnUi(() => WriteDataLog(data, true, profile));
                     return true;
                 }
                 catch (OperationCanceledException)
@@ -1779,19 +2145,22 @@ namespace llcom_plus.Pages
                 }
                 catch (Exception ex)
                 {
-                    owner.RunOnUi(() => AppendLog("ERR", owner.FindText("MultiPortSendFailed", "发送失败: ") + ex.Message));
+                    owner.RunOnUi(() => AppendLog(
+                        "ERR",
+                        owner.FindText("MultiPortSendFailed", "发送失败: ") + ex.Message));
                     return false;
                 }
             }
 
             private void ControlLineCheckBox_Changed(object sender, RoutedEventArgs e)
             {
-                ApplyControlLines();
+                if (!applyingProfile)
+                    ApplyControlLines();
             }
 
             private void ControlLineCheckBox_Click(object sender, RoutedEventArgs e)
             {
-                if (!(sender is CheckBox checkBox))
+                if (applyingProfile || !(sender is CheckBox checkBox))
                     return;
 
                 owner.PublishControlLineNotification(
@@ -1801,9 +2170,9 @@ namespace llcom_plus.Pages
 
             private void ApplyControlLines()
             {
-                // 配置加载、刷新端口时只更新并保存当前端口的 UI 配置。
-                // 只有端口真正打开后才改变硬件控制线，避免分屏切换过程中
-                // 对仍在使用的主串口重复产生 DTR/RTS 边沿。
+                if (applyingProfile)
+                    return;
+
                 if (!IsOpen)
                 {
                     owner.SaveSlotProfile(this);
@@ -1816,40 +2185,50 @@ namespace llcom_plus.Pages
                     {
                         Global.uart.Dtr = dtrCheckBox.IsChecked == true;
                         Global.uart.Rts = rtsCheckBox.IsChecked == true;
-                        owner.SaveSlotProfile(this);
                     }
                     catch (Exception ex)
                     {
                         AppendLog("ERR", ex.Message);
                     }
+                    owner.SaveSlotProfile(this);
                     return;
                 }
 
+                Exception applyError = null;
                 try
                 {
-                    serial.DtrEnable = dtrCheckBox.IsChecked == true;
-                    if (serial.Handshake != Handshake.RequestToSend)
-                        serial.RtsEnable = rtsCheckBox.IsChecked == true;
-                    owner.SaveSlotProfile(this);
+                    lock (serialLock)
+                    {
+                        if (!serialDisposed && !serialTransition && serial.IsOpen)
+                        {
+                            serial.DtrEnable = dtrCheckBox.IsChecked == true;
+                            if (serial.Handshake != Handshake.RequestToSend)
+                                serial.RtsEnable = rtsCheckBox.IsChecked == true;
+                        }
+                    }
                 }
                 catch (Exception ex) when (IsClosedSerialException(ex))
                 {
-                    owner.SaveSlotProfile(this);
                 }
                 catch (Exception ex)
                 {
-                    AppendLog("ERR", ex.Message);
+                    applyError = ex;
                 }
+
+                owner.SaveSlotProfile(this);
+                if (applyError != null)
+                    AppendLog("ERR", applyError.Message);
             }
 
             private void SlotProfileCheckBox_Changed(object sender, RoutedEventArgs e)
             {
-                owner.SaveSlotProfile(this);
+                if (!applyingProfile)
+                    owner.SaveSlotProfile(this);
             }
 
-            private static Handshake GetHandshake()
+            private static Handshake GetHandshake(int flowControl)
             {
-                switch (Global.setting?.flowControl ?? 0)
+                switch (flowControl)
                 {
                     case 1:
                         return Handshake.RequestToSend;
@@ -1862,32 +2241,53 @@ namespace llcom_plus.Pages
 
             private void Serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
             {
+                long generation;
+                lock (serialLock)
+                {
+                    if (serialDisposed ||
+                        serialTransition ||
+                        !ReferenceEquals(sender, serial) ||
+                        !serial.IsOpen)
+                    {
+                        return;
+                    }
+                    generation = connectionGeneration;
+                }
+
                 try
                 {
-                    byte[] data;
-                    lock (serialLock)
+                    var result = new List<byte>();
+                    while (true)
                     {
-                        using (var buffer = new MemoryStream())
+                        byte[] block;
+                        int read;
+                        lock (serialLock)
                         {
-                            while (serial.IsOpen)
+                            if (serialDisposed ||
+                                serialTransition ||
+                                generation != connectionGeneration ||
+                                !serial.IsOpen)
                             {
-                                var length = serial.BytesToRead;
-                                if (length <= 0)
-                                    break;
-
-                                var block = new byte[length];
-                                var read = serial.Read(block, 0, block.Length);
-                                if (read <= 0)
-                                    break;
-                                buffer.Write(block, 0, read);
+                                break;
                             }
-                            data = buffer.ToArray();
+
+                            var length = serial.BytesToRead;
+                            if (length <= 0)
+                                break;
+                            block = new byte[length];
+                            read = serial.Read(block, 0, block.Length);
                         }
+
+                        if (read <= 0)
+                            break;
+                        if (read == block.Length)
+                            result.AddRange(block);
+                        else
+                            result.AddRange(block.Take(read));
                     }
 
-                    if (data.Length == 0)
-                        return;
-                    QueueReceivedData(data);
+                    if (result.Count > 0)
+                        QueueReceivedData(result.ToArray());
                 }
                 catch (Exception ex) when (IsClosedSerialException(ex))
                 {
@@ -1903,11 +2303,12 @@ namespace llcom_plus.Pages
                 if (data == null || data.Length == 0)
                     return;
 
+                var profile = GetProfileSnapshot();
                 var flushImmediately = false;
                 lock (receiveBufferLock)
                 {
                     pendingReceiveData.AddRange(data);
-                    var maxLength = Math.Max(1L, Global.setting?.maxLength ?? 10240);
+                    var maxLength = Math.Max(1L, profile.maxLength);
                     if (pendingReceiveData.Count > maxLength)
                     {
                         receiveFlushTimer?.Change(Timeout.Infinite, Timeout.Infinite);
@@ -1916,9 +2317,9 @@ namespace llcom_plus.Pages
                     }
                     else
                     {
-                        var timeout = Global.setting?.timeout ?? 50;
+                        var timeout = profile.timeout;
                         var delay = timeout > 0 ? timeout : 10;
-                        var resetOnEveryReceive = timeout < 0 || Global.setting?.bitDelay != false;
+                        var resetOnEveryReceive = timeout < 0 || profile.bitDelay;
                         if (!receiveFlushScheduled || resetOnEveryReceive)
                             receiveFlushTimer?.Change(delay, Timeout.Infinite);
                         receiveFlushScheduled = true;
@@ -1960,27 +2361,68 @@ namespace llcom_plus.Pages
                 }
             }
 
-            private static void WaitForWriteDrain(SerialPort port, int byteCount, CancellationToken token)
+            private void WaitForWriteDrain(
+                long generation,
+                SerialPort port,
+                int byteCount,
+                CancellationToken token)
             {
                 var baudRate = Math.Max(1, port.BaudRate);
                 var estimatedMilliseconds = (long)Math.Ceiling(byteCount * 11000d / baudRate);
                 var timeoutMilliseconds = Math.Max(5000L, estimatedMilliseconds + 2000L);
                 var stopwatch = Stopwatch.StartNew();
-                while (port.BytesToWrite > 0)
+                while (true)
                 {
                     token.ThrowIfCancellationRequested();
+                    if (!IsDirectConnectionOpen(generation))
+                        throw new IOException("The captured split serial connection changed while draining.");
+                    if (port.BytesToWrite <= 0)
+                        return;
                     if (stopwatch.ElapsedMilliseconds > timeoutMilliseconds)
                         throw new TimeoutException("等待串口发送缓冲区清空超时。");
                     Thread.Sleep(2);
                 }
             }
 
-            private void WriteDirectSerial(byte[] data, CancellationToken token)
+            private void WriteDirectSerial(
+                long generation,
+                string portName,
+                UartPortProfile profile,
+                byte[] data,
+                CancellationToken token,
+                Action<int> committedBytes)
             {
+                var packetSize = Math.Max(0, profile?.sendThrottlePacketSize ?? 0);
+                var delayMs = Math.Max(0, profile?.sendThrottleDelayMs ?? 0);
+                if (packetSize == 0 || delayMs == 0)
+                    packetSize = data.Length;
+
                 Logger.AddUartLogDebug(
-                    $"[SplitUartWrite]slot={Index},port={serial.PortName},baud={serial.BaudRate},bytes={data.Length}");
-                serial.Write(data, 0, data.Length);
-                WaitForWriteDrain(serial, data.Length, token);
+                    $"[SplitUartWrite]slot={Index},port={portName},bytes={data.Length},generation={generation}");
+                for (var offset = 0; offset < data.Length; offset += packetSize)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var count = Math.Min(packetSize, data.Length - offset);
+                    lock (serialLock)
+                    {
+                        if (serialDisposed ||
+                            serialTransition ||
+                            generation != connectionGeneration ||
+                            !serial.IsOpen)
+                        {
+                            throw new IOException("The captured split serial connection is no longer open.");
+                        }
+                        serial.Write(data, offset, count);
+                    }
+
+                    committedBytes?.Invoke(count);
+                    WaitForWriteDrain(generation, serial, count, token);
+                    if (delayMs > 0 && offset + count < data.Length &&
+                        token.WaitHandle.WaitOne(delayMs))
+                    {
+                        token.ThrowIfCancellationRequested();
+                    }
+                }
             }
 
             private void MainUart_UartDataSent(object sender, EventArgs e)
@@ -2003,11 +2445,17 @@ namespace llcom_plus.Pages
                     WriteDataLog(data, false, updateCounters: false, writeSessionLog: false));
             }
 
-            private void WriteDataLog(byte[] data, bool sent, bool updateCounters = true, bool writeSessionLog = true)
+            private void WriteDataLog(
+                byte[] data,
+                bool sent,
+                UartPortProfile profile = null,
+                bool updateCounters = true,
+                bool writeSessionLog = true)
             {
                 if (data == null || data.Length == 0 || Global.setting == null || Global.setting.DisableLog)
                     return;
 
+                profile = profile == null ? GetProfileSnapshot() : CloneProfile(profile);
                 if (updateCounters)
                 {
                     if (sent)
@@ -2020,18 +2468,23 @@ namespace llcom_plus.Pages
                     WriteSessionLog(sent ? "send" : "recv", data);
 
                 // 与普通模式一致：关闭“显示实际发出的数据”时，不显示分屏发送回显。
-                if (sent && !Global.setting.showSend)
+                if (sent && !profile.showSend)
                     return;
 
-                var displayItem = new DataShowPage.DataShow(new DataShowPara
-                {
-                    data = data,
-                    send = sent
-                });
+                var displayItem = new DataShowPage.DataShow(
+                    new DataShowPara
+                    {
+                        data = data,
+                        send = sent,
+                        receiveScriptContext = sent
+                            ? null
+                            : new ReceiveScriptContext { ScriptName = profile.recvScript }
+                    },
+                    profile);
                 if (!displayItem.IsVisible)
                     return;
 
-                var packedLogMode = Global.setting.timeout >= 0;
+                var packedLogMode = profile.timeout >= 0;
                 if (lastPackedLogMode != packedLogMode)
                 {
                     lastPackedLogMode = packedLogMode;
@@ -2041,7 +2494,7 @@ namespace llcom_plus.Pages
                 if (!packedLogMode)
                 {
                     var text = displayItem.DataText ?? string.Empty;
-                    if (Global.setting.showHexFormat == 2 && text.Length > 0)
+                    if (profile.showHexFormat == 2 && text.Length > 0)
                         text += " ";
                     AppendPlainData(text, sent);
                     return;
@@ -2131,7 +2584,7 @@ namespace llcom_plus.Pages
 
             private void AppendLog(string direction, string text, Brush dataBrush)
             {
-                var packedLogMode = Global.setting?.timeout >= 0;
+                var packedLogMode = GetProfileSnapshot().timeout >= 0;
                 if (lastPackedLogMode != packedLogMode)
                 {
                     lastPackedLogMode = packedLogMode;
@@ -2261,10 +2714,15 @@ namespace llcom_plus.Pages
                         Directory.CreateDirectory(stringFolder);
                         Directory.CreateDirectory(hexFolder);
 
-                        var fileName = $"{DateTime.Now:yyyyMMdd_HHmmss}_slot{Index}.log";
-                        sessionStringLogWriter = CreateSessionLogWriter(Path.Combine(stringFolder, fileName));
-                        sessionHexLogWriter = CreateSessionLogWriter(Path.Combine(hexFolder, fileName));
-                        var startLine = $"[START] {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  PORT={PortName}  SLOT={Index}";
+                        var startedAt = DateTime.Now;
+                        var fileName = $"{startedAt:yyyyMMdd_HHmmss_fff}_slot{Index}.log";
+                        var writers = Logger.CreateUniqueSessionLogWriters(
+                            stringFolder,
+                            hexFolder,
+                            fileName);
+                        sessionStringLogWriter = writers.StringWriter;
+                        sessionHexLogWriter = writers.HexWriter;
+                        var startLine = $"[START] {startedAt:yyyy-MM-dd HH:mm:ss.fff}  PORT={PortName}  SLOT={Index}";
                         sessionStringLogWriter.WriteLine(startLine);
                         sessionHexLogWriter.WriteLine(startLine);
                     }
@@ -2322,7 +2780,7 @@ namespace llcom_plus.Pages
                         Logger.WriteSessionStringLine(
                             sessionStringLogWriter,
                             prefix,
-                            Logger.Byte2SessionString(data));
+                            Byte2SessionString(data, GetProfileSnapshot().encoding));
                         sessionHexLogWriter?.WriteLine($"{prefix} │ {Global.Byte2Hex(data, " ", data.Length)}");
                     }
                     catch (Exception ex)
@@ -2332,14 +2790,47 @@ namespace llcom_plus.Pages
                 }
             }
 
-            private static StreamWriter CreateSessionLogWriter(string path)
+            private static string Byte2SessionString(byte[] data, int encodingCodePage)
             {
-                return new StreamWriter(
-                    new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read),
-                    Encoding.UTF8)
+                var text = new StringBuilder();
+                var plainBytes = new List<byte>();
+                var encoding = Global.GetEncoding(encodingCodePage);
+                foreach (var value in data ?? new byte[0])
                 {
-                    AutoFlush = true
-                };
+                    if (value <= 0x1f || value == 0x7f)
+                    {
+                        if (plainBytes.Count > 0)
+                        {
+                            text.Append(encoding.GetString(plainBytes.ToArray()));
+                            plainBytes.Clear();
+                        }
+                        text.Append(Byte2SessionVisibleSymbol(value));
+                    }
+                    else
+                    {
+                        plainBytes.Add(value);
+                    }
+                }
+                if (plainBytes.Count > 0)
+                    text.Append(encoding.GetString(plainBytes.ToArray()));
+                return text.ToString();
+            }
+
+            private static string Byte2SessionVisibleSymbol(byte value)
+            {
+                switch (value)
+                {
+                    case 0x00: return "\\0";
+                    case 0x07: return "\\a";
+                    case 0x08: return "\\b";
+                    case 0x09: return "\\t";
+                    case 0x0a: return "\\n" + Environment.NewLine;
+                    case 0x0b: return "\\v";
+                    case 0x0c: return "\\f";
+                    case 0x0d: return "\\r";
+                    case 0x1b: return "\\e";
+                    default: return $"\\x{value:X2}";
+                }
             }
 
             private static string MakeSafeFileName(string value)
@@ -2347,12 +2838,6 @@ namespace llcom_plus.Pages
                 foreach (var c in Path.GetInvalidFileNameChars())
                     value = value.Replace(c, '_');
                 return value;
-            }
-
-            private static Encoding GetEncoding()
-            {
-                try { return Global.GetEncoding(); }
-                catch { return Encoding.UTF8; }
             }
 
             private static bool IsClosedSerialException(Exception ex)

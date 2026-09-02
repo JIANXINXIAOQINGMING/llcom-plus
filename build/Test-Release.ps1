@@ -2,10 +2,103 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [ValidateSet('x64', 'x86')]
-    [string]$Platform = 'x64'
+    [string]$Platform = 'x64',
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+
+# Reflection cannot load an x86 .NET Framework executable into a 64-bit test
+# host (or vice versa). Relaunch in same-bitness STA Windows PowerShell 5.1 so
+# `-Platform x86` works from the normal 64-bit PowerShell/pwsh prompt as well.
+$want64BitProcess = $Platform -eq 'x64'
+if ($want64BitProcess -and -not [Environment]::Is64BitOperatingSystem) {
+    Write-Host 'FAIL  Setup - an x64 build cannot be tested on 32-bit Windows.' -ForegroundColor Red
+    exit 1
+}
+
+$powerShellEdition = if ($PSVersionTable.ContainsKey('PSEdition')) {
+    [string]$PSVersionTable['PSEdition']
+} else {
+    'Desktop'
+}
+$currentProcess = [Diagnostics.Process]::GetCurrentProcess()
+try {
+    $isConsoleWindowsPowerShell = $currentProcess.ProcessName -ieq 'powershell'
+}
+finally {
+    $currentProcess.Dispose()
+}
+$isWindowsPowerShell51 =
+    $powerShellEdition -eq 'Desktop' -and
+    $PSVersionTable.PSVersion.Major -eq 5 -and
+    $PSVersionTable.PSVersion.Minor -eq 1 -and
+    $isConsoleWindowsPowerShell
+$isMatchingBitness = [Environment]::Is64BitProcess -eq $want64BitProcess
+$isStaThread = [Threading.Thread]::CurrentThread.GetApartmentState() -eq [Threading.ApartmentState]::STA
+
+if (-not $isWindowsPowerShell51 -or -not $isMatchingBitness -or -not $isStaThread) {
+    if ($want64BitProcess) {
+        $powerShellCandidates = @(
+            (Join-Path $env:WINDIR 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'),
+            (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')
+        )
+    } elseif ([Environment]::Is64BitOperatingSystem) {
+        $powerShellCandidates = @(
+            (Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe')
+        )
+    } else {
+        $powerShellCandidates = @(
+            (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')
+        )
+    }
+
+    $matchingPowerShell = $powerShellCandidates |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($matchingPowerShell)) {
+        Write-Host "FAIL  Setup - could not find $Platform Windows PowerShell 5.1." -ForegroundColor Red
+        exit 1
+    }
+
+    $versionOutput = & $matchingPowerShell `
+        -NoLogo `
+        -NoProfile `
+        -NonInteractive `
+        -Command '$PSVersionTable.PSVersion.ToString()'
+    $versionExitCode = $LASTEXITCODE
+    $versionText = ([string]($versionOutput | Select-Object -Last 1)).Trim()
+    $parsedVersion = $null
+    $versionIsValid = [Version]::TryParse($versionText, [ref]$parsedVersion)
+    if ($versionExitCode -ne 0 -or
+        -not $versionIsValid -or
+        $parsedVersion.Major -ne 5 -or
+        $parsedVersion.Minor -ne 1) {
+        Write-Host "FAIL  Setup - matching Windows PowerShell 5.1 is unavailable (reported '$versionText')." -ForegroundColor Red
+        exit 1
+    }
+
+    $relaunchArguments = @(
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-STA',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        $MyInvocation.MyCommand.Path,
+        '-Configuration',
+        $Configuration,
+        '-Platform',
+        $Platform)
+    if ($SkipBuild) {
+        $relaunchArguments += '-SkipBuild'
+    }
+    & $matchingPowerShell @relaunchArguments
+    exit $LASTEXITCODE
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $projectDir = Join-Path $root 'llcom plus'
 $outputDir = Join-Path $projectDir "bin\$Platform\$Configuration"
@@ -25,9 +118,48 @@ function Invoke-Static([Reflection.MethodInfo]$method, [object[]]$arguments) {
     return $method.Invoke($null, $arguments)
 }
 
+function Get-PeMachine([string]$path) {
+    $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $reader = New-Object IO.BinaryReader($stream)
+    try {
+        if ($reader.ReadUInt16() -ne 0x5A4D) {
+            return [uint16]0
+        }
+        $stream.Position = 0x3C
+        $peOffset = $reader.ReadUInt32()
+        $stream.Position = $peOffset
+        if ($reader.ReadUInt32() -ne 0x00004550) {
+            return [uint16]0
+        }
+        return $reader.ReadUInt16()
+    }
+    finally {
+        $reader.Dispose()
+        $stream.Dispose()
+    }
+}
+
+if (-not $SkipBuild) {
+    & (Join-Path $PSScriptRoot 'Build-Current.ps1') `
+        -Configuration $Configuration `
+        -Platform $Platform
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
 Test-Condition (Test-Path -LiteralPath $exePath) "Application executable exists ($Configuration|$Platform)"
 if (-not (Test-Path -LiteralPath $exePath)) {
     exit 1
+}
+
+$nativeMonitorPath = Join-Path $outputDir 'serial_monitor.dll'
+$expectedNativeMachine = if ($Platform -eq 'x64') { [uint16]0x8664 } else { [uint16]0x014C }
+Test-Condition (Test-Path -LiteralPath $nativeMonitorPath -PathType Leaf) 'Native serial monitor DLL exists'
+if (Test-Path -LiteralPath $nativeMonitorPath -PathType Leaf) {
+    Test-Condition (
+        (Get-PeMachine $nativeMonitorPath) -eq $expectedNativeMachine
+    ) "Native serial monitor PE machine matches $Platform"
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -175,8 +307,30 @@ try {
         $mainWindowSource.Contains('TaskbarIntegration.ConfigureWindow(this)')
     ) 'Main window publishes taskbar relaunch and pinning properties'
 
+    $updateControllerSource = [IO.File]::ReadAllText(
+        (Join-Path $projectDir 'UI\View\UpdateCheckController.cs'))
+    Test-Condition (
+        $updateControllerSource.Contains('SetResourceReference(StyleProperty, "AppGlassWindowStyle")') -and
+        $updateControllerSource.Contains('SetResourceReference(BackgroundProperty, "AppWindowBackgroundBrush")') -and
+        $updateControllerSource.Contains('statusTextBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppGlassTextBrush")')
+    ) 'Update progress window keeps readable surface and text colors in both themes'
+
+    $uartSource = [IO.File]::ReadAllText((Join-Path $projectDir 'Core\Model\Uart.cs'))
+    $multiPortSource = [IO.File]::ReadAllText((Join-Path $projectDir 'UI\Pages\MultiPortPage.xaml.cs'))
+    Test-Condition (
+        $uartSource.Contains('public void SetDirectReceiveMode(bool enabled)') -and
+        $uartSource.Contains('ThreadPool.QueueUserWorkItem(_ => ReadDataDirect(eventPort))') -and
+        $multiPortSource.Contains('Global.uart.SetDirectReceiveMode(true)') -and
+        $multiPortSource.Contains('Global.uart.SetDirectReceiveMode(false)')
+    ) 'First split pane uses direct receive events without closing the main UART'
+
     $calculatorType = $assembly.GetType('llcom_plus.Tools.DataCalcCalculator', $true)
-    $calculate = $calculatorType.GetMethod('Calculate', [Reflection.BindingFlags]'Public,Static')
+    $calculate = $calculatorType.GetMethod(
+        'Calculate',
+        [Reflection.BindingFlags]'Public,Static',
+        $null,
+        [Type[]]@([byte[]]),
+        $null)
     [byte[]]$vector = [Text.Encoding]::ASCII.GetBytes('123456789')
     $calculateArguments = New-Object object[] 1
     $calculateArguments[0] = $vector
@@ -241,8 +395,21 @@ try {
         $settingsType.GetMethod('EnsureRuntimeState', [Reflection.BindingFlags]'Public,Instance').Invoke($migratedSettings, $null)
         $settingsType.GetMethod('RemovePersistedTlsPassword', [Reflection.BindingFlags]'NonPublic,Instance').Invoke($migratedSettings, $null)
         $migratedJson = [IO.File]::ReadAllText($legacySettingsPath)
-        Test-Condition (-not $migratedJson.Contains('legacy-audit-secret')) 'Legacy TLS certificate password value is scrubbed during migration'
-        Test-Condition (-not $migratedJson.Contains('tcpClientSslClientCertPassword')) 'Legacy TLS certificate password field is scrubbed during migration'
+        $protectedCredentialPath = Join-Path $migrationDir '.credentials\tls-client-certificate-password.bin'
+        $protectedCredentialWasWritten = Test-Path -LiteralPath $protectedCredentialPath -PathType Leaf
+        $legacyCredentialWasScrubbed =
+            -not $migratedJson.Contains('legacy-audit-secret') -and
+            -not $migratedJson.Contains('tcpClientSslClientCertPassword')
+        $legacyCredentialWasRetainedForRetry =
+            $migratedJson.Contains('"tcpClientSslClientCertPassword":"legacy-audit-secret"')
+        Test-Condition (
+            ($protectedCredentialWasWritten -and $legacyCredentialWasScrubbed) -or
+            (-not $protectedCredentialWasWritten -and $legacyCredentialWasRetainedForRetry)
+        ) 'Legacy TLS password is scrubbed after DPAPI migration or retained intact for retry'
+        Test-Condition (
+            $settingsType.GetProperty('tcpClientSslClientCertPassword').GetValue($migratedSettings, $null) -eq
+                'legacy-audit-secret'
+        ) 'Legacy TLS password remains available in memory after migration'
     }
     finally {
         if ($migrationDir.StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) {
@@ -886,13 +1053,73 @@ if ($Configuration -eq 'Release') {
         $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
         try {
             Test-Condition ($null -ne $zip.GetEntry('llcom plus.exe')) 'Release ZIP contains the application'
+            Test-Condition ($null -ne $zip.GetEntry('serial_monitor.dll')) 'Release ZIP contains the native serial monitor'
             Test-Condition ($null -ne $zip.GetEntry('llcom-plus-taskbar-v2.ico')) 'Release ZIP contains the dedicated taskbar icon'
             Test-Condition ($null -ne $zip.GetEntry('OpenSSL/openssl.exe')) 'Release ZIP contains OpenSSL'
             Test-Condition ($null -eq $zip.GetEntry('settings.json')) 'Release ZIP excludes settings.json'
             Test-Condition ($null -eq $zip.GetEntry('circular_send.json')) 'Release ZIP excludes circular_send.json'
+            $containsCredentialSidecar = @($zip.Entries | Where-Object {
+                $_.FullName -like '.credentials/*' -or $_.FullName -like '*/.credentials/*'
+            }).Count -gt 0
+            Test-Condition (-not $containsCredentialSidecar) 'Release ZIP excludes DPAPI credential sidecars'
+
+            $configuredPublicKey = Join-Path $projectDir 'Resources\UpdateSigningPublicKey.xml'
+            if (Test-Path -LiteralPath $configuredPublicKey -PathType Leaf) {
+                Test-Condition ($null -ne $zip.GetEntry('UpdateSigningPublicKey.xml')) 'Configured update-signing public key is included'
+            } else {
+                Test-Condition ($null -eq $zip.GetEntry('UpdateSigningPublicKey.xml')) 'Unconfigured update-signing key remains fail-closed and absent'
+            }
         }
         finally {
             $zip.Dispose()
+        }
+
+        $signaturePath = $zipPath + '.sig'
+        Test-Condition (Test-Path -LiteralPath $signaturePath -PathType Leaf) 'Release ZIP has an independent detached signature'
+        if (Test-Path -LiteralPath $signaturePath -PathType Leaf) {
+            $validateTrustedPackage = $assembly.GetType('llcom_plus.Tools.GitHubReleaseUpdater', $true).GetMethod(
+                'ValidateTrustedUpdatePackage',
+                [Reflection.BindingFlags]'NonPublic,Static',
+                $null,
+                [Type[]]@(
+                    [string],
+                    [string],
+                    [Version],
+                    [string],
+                    [string],
+                    [Threading.CancellationToken]),
+                $null)
+            $signatureValidated = $false
+            $signatureValidationError = ''
+            $appPathField = $assembly.GetType('llcom_plus.Tools.Global', $true).GetField(
+                '_appPath',
+                [Reflection.BindingFlags]'NonPublic,Static')
+            $originalAppPath = $appPathField.GetValue($null)
+            try {
+                $appPathField.SetValue($null, [string]$outputDir)
+                $validationArguments = New-Object object[] 6
+                $validationArguments.SetValue([string]$zipPath, 0)
+                $validationArguments.SetValue([string]$signaturePath, 1)
+                $validationArguments.SetValue([Version]::Parse([string]$version), 2)
+                $validationArguments.SetValue([string][IO.Path]::GetFileName([string]$zipPath), 3)
+                $validationArguments.SetValue([string]::Empty, 4)
+                $validationArguments.SetValue([Threading.CancellationToken]::None, 5)
+                $signatureValidated = $null -ne $validateTrustedPackage.Invoke($null, $validationArguments)
+            }
+            catch {
+                $signatureValidated = $false
+                $signatureException = $_.Exception
+                while ($null -ne $signatureException.InnerException) {
+                    $signatureException = $signatureException.InnerException
+                }
+                $signatureValidationError = $signatureException.GetType().Name + ': ' + $signatureException.Message
+            }
+            finally {
+                $appPathField.SetValue($null, $originalAppPath)
+            }
+            Test-Condition $signatureValidated (
+                'Detached signature validates against the packaged public key and ZIP contents' +
+                $(if ([string]::IsNullOrWhiteSpace($signatureValidationError)) { '' } else { ' (' + $signatureValidationError + ')' }))
         }
     }
 }

@@ -16,6 +16,7 @@ namespace llcom_plus.Model
     class UartPortProfile
     {
         public int baudRate { get; set; } = 115200;
+        public bool autoReconnect { get; set; } = true;
         public int showHexFormat { get; set; } = 0;
         public bool hexSend { get; set; } = false;
         public bool showSend { get; set; } = true;
@@ -40,11 +41,57 @@ namespace llcom_plus.Model
         public bool dtr { get; set; } = false;
     }
 
+    sealed class QuickSendItemSnapshot
+    {
+        public QuickSendItemSnapshot(ToSendData source)
+        {
+            source = source ?? new ToSendData();
+            Id = source.id;
+            Text = source.text ?? string.Empty;
+            Hex = source.hex;
+            Commit = source.commit ?? string.Empty;
+            ReceiveScriptPath = source.recvScriptPath ?? string.Empty;
+            ReceiveScriptParameter = source.recvScriptPara ?? string.Empty;
+            AppendCrlf = source.appendCrlf;
+            DisableSuggestion = source.disableSuggestion;
+        }
+
+        public int Id { get; }
+        public string Text { get; }
+        public bool Hex { get; }
+        public string Commit { get; }
+        public string ReceiveScriptPath { get; }
+        public string ReceiveScriptParameter { get; }
+        public bool AppendCrlf { get; }
+        public bool DisableSuggestion { get; }
+    }
+
     [PropertyChanged.AddINotifyPropertyChangedInterface]
     class Settings
     {
         private const int DefaultQuickSendRows = 10;
         private const int CurrentUartProfileSchemaVersion = 2;
+        private const string MqttPasswordCredentialName = "mqtt-password";
+        private const string MqttClientCertificatePasswordCredentialName = "mqtt-client-certificate-password";
+        private const string TlsClientCertificatePasswordCredentialName = "tls-client-certificate-password";
+        private static readonly byte[] CredentialEntropy = Encoding.UTF8.GetBytes("llcom-plus/settings-credentials/v1");
+        private static readonly object saveLock = new object();
+        private static readonly object credentialLock = new object();
+        [JsonIgnore] private readonly object quickSendStateLock = new object();
+        [JsonIgnore] private bool legacyCredentialScrubRequired;
+        [JsonIgnore] private bool legacyMqttPasswordCaptured;
+        [JsonIgnore] private bool legacyMqttClientCertificatePasswordCaptured;
+        [JsonIgnore] private bool legacyTlsClientCertificatePasswordCaptured;
+        internal event EventHandler UartProcessingSettingsChanged;
+
+        // These migration fields consume legacy plaintext JSON once. OnDeserialized
+        // immediately transfers and clears them; null values are never serialized.
+        [JsonProperty("mqttPassword", NullValueHandling = NullValueHandling.Ignore)]
+        private string legacyMqttPassword;
+        [JsonProperty("mqttTLSCertClientPassword", NullValueHandling = NullValueHandling.Ignore)]
+        private string legacyMqttClientCertificatePassword;
+        [JsonProperty("tcpClientSslClientCertPassword", NullValueHandling = NullValueHandling.Ignore)]
+        private string legacyTlsClientCertificatePassword;
         public event EventHandler MainWindowTop;
         private string _dataToSend = "uart data";
         private int _baudRate = 115200;
@@ -65,8 +112,32 @@ namespace llcom_plus.Model
         private string _recvScript = "default";
         private string _runScript = "example";
         private bool _topmost = false;
+        [JsonIgnore]
         public List<List<ToSendData>> quickSendList = new List<List<ToSendData>>();
+        [JsonIgnore]
         public List<string> quickListNames = new List<string>();
+
+        [JsonProperty("quickSendList")]
+        private List<List<ToSendData>> SerializedQuickSendList
+        {
+            get { return GetAllQuickSendLists(); }
+            set
+            {
+                lock (quickSendStateLock)
+                    quickSendList = CopyQuickSendLists(value);
+            }
+        }
+
+        [JsonProperty("quickListNames")]
+        private List<string> SerializedQuickListNames
+        {
+            get { return GetAllQuickListNames(); }
+            set
+            {
+                lock (quickSendStateLock)
+                    quickListNames = value == null ? new List<string>() : new List<string>(value);
+            }
+        }
         private int _quickSendSelect = -1;
         private bool _bitDelay = true;
         private uint _maxLength = 10240;
@@ -86,8 +157,12 @@ namespace llcom_plus.Model
         public Dictionary<string, UartPortProfile> uartProfiles = new Dictionary<string, UartPortProfile>(StringComparer.OrdinalIgnoreCase);
         public int uartProfileSchemaVersion { get; set; } = 0;
         [JsonIgnore] private string _activeUartProfileName = "";
+        [JsonIgnore] private bool _activeUartProfileUsesMainUart = true;
         [JsonIgnore] private bool _suspendSave = false;
         [JsonIgnore] private readonly HashSet<string> _uartProfilesPendingWrite = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private bool ControlsGlobalUart =>
+            _activeUartProfileUsesMainUart && ReferenceEquals(this, Tools.Global.setting);
 
         [OnDeserializing]
         internal void OnDeserializing(StreamingContext context)
@@ -98,6 +173,28 @@ namespace llcom_plus.Model
         [OnDeserialized]
         internal void OnDeserialized(StreamingContext context)
         {
+            if (legacyMqttPassword != null)
+            {
+                _mqttPassword = legacyMqttPassword;
+                legacyMqttPassword = null;
+                legacyMqttPasswordCaptured = true;
+                legacyCredentialScrubRequired = true;
+            }
+            if (legacyMqttClientCertificatePassword != null)
+            {
+                _mqttTLSCertClientPassword = legacyMqttClientCertificatePassword;
+                legacyMqttClientCertificatePassword = null;
+                legacyMqttClientCertificatePasswordCaptured = true;
+                legacyCredentialScrubRequired = true;
+            }
+            if (legacyTlsClientCertificatePassword != null)
+            {
+                _tcpClientSslClientCertPassword = legacyTlsClientCertificatePassword;
+                legacyTlsClientCertificatePassword = null;
+                legacyTlsClientCertificatePasswordCaptured = true;
+                legacyCredentialScrubRequired = true;
+            }
+
             _suspendSave = false;
             EnsureUartProfiles();
         }
@@ -120,50 +217,83 @@ namespace llcom_plus.Model
         /// </summary>
         private void Save(bool copyCurrentToActiveProfile = true)
         {
-            if (_suspendSave)
-                return;
-
-            if (copyCurrentToActiveProfile)
-                CopyCurrentToActiveUartProfile(true);
-
-            var settingsPath = Path.Combine(Tools.Global.ProfilePath, "settings.json");
-            var tempPath = settingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            var mutexName = @"Local\llcom_plus_settings_" + GetProfileMutexKey(Tools.Global.ProfilePath);
-            var hasLock = false;
-
-            using (var mutex = new Mutex(false, mutexName))
+            lock (saveLock)
             {
-                try
+                if (_suspendSave)
+                    return;
+
+                if (copyCurrentToActiveProfile)
+                    CopyCurrentToActiveUartProfile(true);
+
+                var settingsPath = Path.Combine(Tools.Global.ProfilePath, "settings.json");
+                var transactionId = Guid.NewGuid().ToString("N");
+                var tempPath = settingsPath + "." + transactionId + ".tmp";
+                var backupPath = settingsPath + "." + transactionId + ".bak";
+                var mutexName = @"Local\llcom_plus_settings_" + GetProfileMutexKey(Tools.Global.ProfilePath);
+                var hasLock = false;
+                var settingsCommitted = false;
+
+                using (var mutex = new Mutex(false, mutexName))
                 {
                     try
                     {
-                        hasLock = mutex.WaitOne(TimeSpan.FromSeconds(5));
-                    }
-                    catch (AbandonedMutexException)
-                    {
-                        hasLock = true;
-                    }
+                        try
+                        {
+                            hasLock = mutex.WaitOne(TimeSpan.FromSeconds(5));
+                        }
+                        catch (AbandonedMutexException)
+                        {
+                            hasLock = true;
+                        }
 
-                    if (!hasLock)
-                        throw new IOException("等待配置文件写入锁超时");
+                        if (!hasLock)
+                            throw new IOException("等待配置文件写入锁超时");
 
-                    var data = JObject.FromObject(this);
-                    MergeUartProfilesForSave(settingsPath, data);
-                    File.WriteAllText(tempPath, data.ToString(Formatting.None));
-                    File.Copy(tempPath, settingsPath, true);
-                    _uartProfilesPendingWrite.Clear();
-                }
-                finally
-                {
-                    if (hasLock)
-                        mutex.ReleaseMutex();
-                    try
-                    {
-                        if (File.Exists(tempPath))
-                            File.Delete(tempPath);
+                        var data = JObject.FromObject(this);
+                        GetQuickSendStateSnapshot(out var quickSendListsSnapshot, out var quickListNamesSnapshot);
+                        data["quickSendList"] = JToken.FromObject(quickSendListsSnapshot);
+                        data["quickListNames"] = JToken.FromObject(quickListNamesSnapshot);
+                        MergeUartProfilesForSave(settingsPath, data);
+                        using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        {
+                            using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true))
+                            {
+                                writer.Write(data.ToString(Formatting.None));
+                            }
+                            stream.Flush(true);
+                        }
+
+                        if (File.Exists(settingsPath))
+                            File.Replace(tempPath, settingsPath, backupPath);
+                        else
+                            File.Move(tempPath, settingsPath);
+
+                        settingsCommitted = true;
+                        _uartProfilesPendingWrite.Clear();
                     }
-                    catch
+                    finally
                     {
+                        if (hasLock)
+                            mutex.ReleaseMutex();
+                        try
+                        {
+                            if (File.Exists(tempPath))
+                                File.Delete(tempPath);
+                        }
+                        catch
+                        {
+                        }
+                        if (settingsCommitted)
+                        {
+                            try
+                            {
+                                if (File.Exists(backupPath))
+                                    File.Delete(backupPath);
+                            }
+                            catch
+                            {
+                            }
+                        }
                     }
                 }
             }
@@ -222,7 +352,166 @@ namespace llcom_plus.Model
         {
             EnsureUartProfiles();
             EnsureQuickSendListState();
+            LoadProtectedCredentials();
+            MigrateLegacyCredentials();
             MigrateUartProfiles();
+        }
+
+        private void LoadProtectedCredentials()
+        {
+            if (!legacyMqttPasswordCaptured)
+                _mqttPassword = ReadProtectedCredential(MqttPasswordCredentialName) ?? _mqttPassword;
+            if (!legacyMqttClientCertificatePasswordCaptured)
+                _mqttTLSCertClientPassword = ReadProtectedCredential(MqttClientCertificatePasswordCredentialName) ?? _mqttTLSCertClientPassword;
+            if (!legacyTlsClientCertificatePasswordCaptured)
+                _tcpClientSslClientCertPassword = ReadProtectedCredential(TlsClientCertificatePasswordCredentialName) ?? _tcpClientSslClientCertPassword;
+        }
+
+        private void MigrateLegacyCredentials()
+        {
+            if (!legacyCredentialScrubRequired)
+                return;
+
+            var mqttPasswordMigrated = !legacyMqttPasswordCaptured ||
+                WriteProtectedCredential(MqttPasswordCredentialName, _mqttPassword);
+            var mqttCertificatePasswordMigrated = !legacyMqttClientCertificatePasswordCaptured ||
+                WriteProtectedCredential(MqttClientCertificatePasswordCredentialName, _mqttTLSCertClientPassword);
+            var tlsCertificatePasswordMigrated = !legacyTlsClientCertificatePasswordCaptured ||
+                WriteProtectedCredential(TlsClientCertificatePasswordCredentialName, _tcpClientSslClientCertPassword);
+
+            if (!mqttPasswordMigrated ||
+                !mqttCertificatePasswordMigrated ||
+                !tlsCertificatePasswordMigrated)
+            {
+                // Keep only the values that could not be protected in their legacy JSON
+                // fields. A later unrelated settings save must not silently erase the
+                // user's last recoverable copy; the next process start retries migration.
+                legacyMqttPassword = mqttPasswordMigrated ? null : _mqttPassword;
+                legacyMqttClientCertificatePassword = mqttCertificatePasswordMigrated
+                    ? null
+                    : _mqttTLSCertClientPassword;
+                legacyTlsClientCertificatePassword = tlsCertificatePasswordMigrated
+                    ? null
+                    : _tcpClientSslClientCertPassword;
+                return;
+            }
+
+            legacyCredentialScrubRequired = false;
+            legacyMqttPasswordCaptured = false;
+            legacyMqttClientCertificatePasswordCaptured = false;
+            legacyTlsClientCertificatePasswordCaptured = false;
+            Save(false);
+        }
+
+        private static string GetCredentialDirectory()
+        {
+            return Path.Combine(Tools.Global.ProfilePath ?? string.Empty, ".credentials");
+        }
+
+        private static string GetCredentialPath(string credentialName)
+        {
+            return Path.Combine(GetCredentialDirectory(), credentialName + ".bin");
+        }
+
+        private static string ReadProtectedCredential(string credentialName)
+        {
+            lock (credentialLock)
+            {
+                try
+                {
+                    var path = GetCredentialPath(credentialName);
+                    if (!File.Exists(path))
+                        return null;
+
+                    var protectedBytes = File.ReadAllBytes(path);
+                    if (protectedBytes.Length == 0 || protectedBytes.Length > 64 * 1024)
+                        return null;
+                    var clearBytes = ProtectedData.Unprotect(
+                        protectedBytes,
+                        CredentialEntropy,
+                        DataProtectionScope.CurrentUser);
+                    try
+                    {
+                        return Encoding.UTF8.GetString(clearBytes);
+                    }
+                    finally
+                    {
+                        Array.Clear(clearBytes, 0, clearBytes.Length);
+                    }
+                }
+                catch
+                {
+                    // A missing profile, a moved DPAPI blob, or a locked-down account
+                    // must never cause a plaintext fallback. The secret remains empty/in memory.
+                    return null;
+                }
+            }
+        }
+
+        private static bool WriteProtectedCredential(string credentialName, string value)
+        {
+            lock (credentialLock)
+            {
+                var path = GetCredentialPath(credentialName);
+                try
+                {
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        if (File.Exists(path))
+                            File.Delete(path);
+                        return true;
+                    }
+
+                    var directory = Path.GetDirectoryName(path);
+                    if (string.IsNullOrWhiteSpace(directory))
+                        return false;
+                    Directory.CreateDirectory(directory);
+
+                    var clearBytes = Encoding.UTF8.GetBytes(value);
+                    byte[] protectedBytes = null;
+                    try
+                    {
+                        protectedBytes = ProtectedData.Protect(
+                            clearBytes,
+                            CredentialEntropy,
+                            DataProtectionScope.CurrentUser);
+                        var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                        try
+                        {
+                            using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                            {
+                                stream.Write(protectedBytes, 0, protectedBytes.Length);
+                                stream.Flush(true);
+                            }
+                            if (File.Exists(path))
+                                File.Replace(tempPath, path, null);
+                            else
+                                File.Move(tempPath, path);
+                            return true;
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                if (File.Exists(tempPath))
+                                    File.Delete(tempPath);
+                            }
+                            catch { }
+                        }
+                    }
+                    finally
+                    {
+                        Array.Clear(clearBytes, 0, clearBytes.Length);
+                        if (protectedBytes != null)
+                            Array.Clear(protectedBytes, 0, protectedBytes.Length);
+                    }
+                }
+                catch
+                {
+                    // Best effort only: retain the value in memory, never write plaintext.
+                    return false;
+                }
+            }
         }
 
         private void MigrateUartProfiles()
@@ -246,7 +535,7 @@ namespace llcom_plus.Model
             Save(false);
         }
 
-        public void SetActiveUartProfile(string portName)
+        public void SetActiveUartProfile(string portName, bool usesMainUart = true)
         {
             var normalizedPortName = NormalizePortName(portName);
             if (string.IsNullOrWhiteSpace(normalizedPortName))
@@ -255,17 +544,31 @@ namespace llcom_plus.Model
             EnsureUartProfiles();
             if (string.Equals(_activeUartProfileName, normalizedPortName, StringComparison.OrdinalIgnoreCase))
             {
+                var roleChanged = _activeUartProfileUsesMainUart != usesMainUart;
+                if (roleChanged && ControlsGlobalUart && !usesMainUart)
+                    Tools.Global.uart?.SetRuntimeProfileOverride(GetCurrentUartProfileSnapshot());
                 CopyCurrentToActiveUartProfile(true);
+                _activeUartProfileUsesMainUart = usesMainUart;
+                if (roleChanged && uartProfiles.TryGetValue(normalizedPortName, out var currentProfile))
+                    ApplyUartProfile(currentProfile);
+                if (roleChanged && usesMainUart && ReferenceEquals(this, Tools.Global.setting))
+                    Tools.Global.uart?.ClearRuntimeProfileOverride();
                 Save();
+                Tools.Global.NotifyUartProfileChanged();
                 return;
             }
 
+            if (ControlsGlobalUart && !usesMainUart)
+                Tools.Global.uart?.SetRuntimeProfileOverride(GetCurrentUartProfileSnapshot());
             CopyCurrentToActiveUartProfile(true);
             _activeUartProfileName = normalizedPortName;
+            _activeUartProfileUsesMainUart = usesMainUart;
             if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
                 uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
 
             ApplyUartProfile(uartProfiles[normalizedPortName]);
+            if (usesMainUart && ReferenceEquals(this, Tools.Global.setting))
+                Tools.Global.uart?.ClearRuntimeProfileOverride();
             _uartProfilesPendingWrite.Add(normalizedPortName);
             Save();
             Tools.Global.NotifyUartProfileChanged();
@@ -277,36 +580,90 @@ namespace llcom_plus.Model
             Save();
         }
 
-        public UartPortProfile GetUartProfileForPort(string portName)
+        public UartPortProfile GetUartProfileSnapshot(string portName)
         {
             var normalizedPortName = NormalizePortName(portName);
             if (string.IsNullOrWhiteSpace(normalizedPortName))
                 return null;
 
-            EnsureUartProfiles();
-            if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
-                uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
+            lock (saveLock)
+            {
+                EnsureUartProfiles();
+                if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
+                    uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
 
-            return uartProfiles[normalizedPortName];
+                return CreateNormalizedUartProfileSnapshot(uartProfiles[normalizedPortName]);
+            }
+        }
+
+        public void SaveUartProfileSnapshot(string portName, UartPortProfile profile)
+        {
+            var normalizedPortName = NormalizePortName(portName);
+            if (string.IsNullOrWhiteSpace(normalizedPortName) || profile == null)
+                return;
+
+            lock (saveLock)
+            {
+                EnsureUartProfiles();
+                uartProfiles[normalizedPortName] = CreateNormalizedUartProfileSnapshot(profile);
+                _uartProfilesPendingWrite.Add(normalizedPortName);
+                Save(false);
+            }
+        }
+
+        public UartPortProfile GetUartProfileForPort(string portName)
+        {
+            return GetUartProfileSnapshot(portName);
         }
 
         public void SaveUartProfileForPort(string portName, int baudRate, bool hexSend, bool rts, bool dtr)
         {
-            var normalizedPortName = NormalizePortName(portName);
-            if (string.IsNullOrWhiteSpace(normalizedPortName))
-                return;
+            lock (saveLock)
+            {
+                var profile = GetUartProfileSnapshot(portName);
+                if (profile == null)
+                    return;
 
-            EnsureUartProfiles();
-            if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
-                uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
+                profile.baudRate = baudRate;
+                profile.hexSend = hexSend;
+                profile.rts = rts;
+                profile.dtr = dtr;
+                SaveUartProfileSnapshot(portName, profile);
+            }
+        }
 
-            var profile = uartProfiles[normalizedPortName];
-            profile.baudRate = baudRate > 0 ? baudRate : 115200;
-            profile.hexSend = hexSend;
-            profile.rts = rts;
-            profile.dtr = dtr;
-            _uartProfilesPendingWrite.Add(normalizedPortName);
-            Save(false);
+        internal static UartPortProfile CreateNormalizedUartProfileSnapshot(UartPortProfile profile)
+        {
+            profile = profile ?? new UartPortProfile();
+            var packetSize = Math.Max(0, profile.sendThrottlePacketSize);
+
+            return new UartPortProfile
+            {
+                baudRate = profile.baudRate > 0 ? profile.baudRate : 115200,
+                autoReconnect = profile.autoReconnect,
+                showHexFormat = profile.showHexFormat < 0 || profile.showHexFormat > 2 ? 0 : profile.showHexFormat,
+                hexSend = profile.hexSend,
+                showSend = profile.showSend,
+                showSendRaw = profile.showSendRaw,
+                parity = profile.parity < 0 || profile.parity > 4 ? 0 : profile.parity,
+                timeout = profile.timeout,
+                dataBits = profile.dataBits < 5 || profile.dataBits > 8 ? 8 : profile.dataBits,
+                stopBit = profile.stopBit < 1 || profile.stopBit > 3 ? 1 : profile.stopBit,
+                flowControl = profile.flowControl < 0 || profile.flowControl > 2 ? 0 : profile.flowControl,
+                sendThrottlePacketSize = packetSize,
+                sendThrottleDelayMs = packetSize == 0 ? 0 : Math.Min(10000, Math.Max(0, profile.sendThrottleDelayMs)),
+                bitDelay = profile.bitDelay,
+                maxLength = profile.maxLength == 0 ? 10240 : profile.maxLength,
+                sendScript = string.IsNullOrWhiteSpace(profile.sendScript) ? "default" : profile.sendScript,
+                recvScript = string.IsNullOrWhiteSpace(profile.recvScript) ? "default" : profile.recvScript,
+                terminal = profile.terminal,
+                encoding = profile.encoding > 0 ? profile.encoding : 65001,
+                extraEnter = profile.extraEnter,
+                enterSend = profile.enterSend,
+                enableSymbol = profile.enableSymbol,
+                rts = profile.rts,
+                dtr = profile.dtr
+            };
         }
 
         private static string NormalizePortName(string portName)
@@ -338,16 +695,32 @@ namespace llcom_plus.Model
                 return;
 
             EnsureUartProfiles();
-            uartProfiles[portName] = CreateUartProfileFromCurrent();
+            if (_activeUartProfileUsesMainUart ||
+                !uartProfiles.TryGetValue(portName, out var existingProfile) ||
+                existingProfile == null)
+            {
+                uartProfiles[portName] = CreateUartProfileFromCurrent();
+            }
+            else
+            {
+                // More Settings belongs to the active direct split COM, while baud,
+                // HEX-send and control-line switches remain owned by that pane.
+                uartProfiles[portName] = MergeCurrentUartProcessingSettings(existingProfile);
+            }
             if (markPendingWrite)
                 _uartProfilesPendingWrite.Add(portName);
         }
 
         private UartPortProfile CreateUartProfileFromCurrent()
         {
+            UartPortProfile storedActiveProfile = null;
+            if (!_activeUartProfileUsesMainUart && !string.IsNullOrWhiteSpace(_activeUartProfileName))
+                uartProfiles?.TryGetValue(_activeUartProfileName, out storedActiveProfile);
+
             return new UartPortProfile
             {
                 baudRate = _baudRate,
+                autoReconnect = _autoReconnect,
                 showHexFormat = _showHexFormat,
                 hexSend = _hexSend,
                 showSend = _showSend,
@@ -368,9 +741,15 @@ namespace llcom_plus.Model
                 extraEnter = _extraEnter,
                 enterSend = _enterSend,
                 enableSymbol = _enableSymbol,
-                rts = Tools.Global.uart?.Rts ?? false,
-                dtr = Tools.Global.uart?.Dtr ?? false
+                rts = storedActiveProfile?.rts ?? Tools.Global.uart?.Rts ?? false,
+                dtr = storedActiveProfile?.dtr ?? Tools.Global.uart?.Dtr ?? false
             };
+        }
+
+        internal UartPortProfile GetCurrentUartProfileSnapshot()
+        {
+            lock (saveLock)
+                return CreateNormalizedUartProfileSnapshot(CreateUartProfileFromCurrent());
         }
 
         private void ApplyUartProfile(UartPortProfile profile)
@@ -382,6 +761,7 @@ namespace llcom_plus.Model
             try
             {
                 baudRate = profile.baudRate > 0 ? profile.baudRate : 115200;
+                autoReconnect = profile.autoReconnect;
                 showHexFormat = profile.showHexFormat < 0 || profile.showHexFormat > 2 ? 0 : profile.showHexFormat;
                 hexSend = profile.hexSend;
                 showSend = profile.showSend;
@@ -402,7 +782,7 @@ namespace llcom_plus.Model
                 extraEnter = profile.extraEnter;
                 enterSend = profile.enterSend;
                 EnableSymbol = profile.enableSymbol;
-                if (Tools.Global.uart != null)
+                if (ControlsGlobalUart && Tools.Global.uart != null)
                 {
                     Tools.Global.uart.Rts = profile.rts;
                     Tools.Global.uart.Dtr = profile.dtr;
@@ -413,6 +793,44 @@ namespace llcom_plus.Model
             {
                 _suspendSave = false;
             }
+        }
+
+        internal UartPortProfile MergeCurrentUartProcessingSettings(UartPortProfile target)
+        {
+            lock (saveLock)
+            {
+                var merged = CreateNormalizedUartProfileSnapshot(target);
+                merged.autoReconnect = _autoReconnect;
+                merged.showHexFormat = _showHexFormat;
+                merged.showSend = _showSend;
+                merged.showSendRaw = _showSendRaw;
+                merged.parity = _parity;
+                merged.timeout = _timeout;
+                merged.dataBits = _dataBits;
+                merged.stopBit = _stopBit;
+                merged.flowControl = _flowControl;
+                merged.sendThrottlePacketSize = _sendThrottlePacketSize;
+                merged.sendThrottleDelayMs = _sendThrottleDelayMs;
+                merged.bitDelay = _bitDelay;
+                merged.maxLength = _maxLength;
+                merged.sendScript = _sendScript;
+                merged.recvScript = _recvScript;
+                merged.terminal = _terminal;
+                merged.encoding = _encoding;
+                merged.extraEnter = _extraEnter;
+                merged.enterSend = _enterSend;
+                merged.enableSymbol = _enableSymbol;
+                return CreateNormalizedUartProfileSnapshot(merged);
+            }
+        }
+
+        private void SaveUartProcessingSetting()
+        {
+            if (_suspendSave)
+                return;
+
+            Save();
+            UartProcessingSettingsChanged?.Invoke(this, EventArgs.Empty);
         }
 
         /// <summary>
@@ -427,7 +845,7 @@ namespace llcom_plus.Model
             set
             {
                 _maxLength = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -439,34 +857,67 @@ namespace llcom_plus.Model
         {
             get
             {
-                EnsureQuickSendListState();
-                return quickSendList[_quickSendSelect];
+                lock (quickSendStateLock)
+                {
+                    EnsureQuickSendListStateUnsafe();
+                    return new List<ToSendData>(quickSendList[_quickSendSelect]);
+                }
             }
             set
             {
-                EnsureQuickSendListState();
-                quickSendList[_quickSendSelect] = value ?? CreateDefaultQuickSendRows();
-                NormalizeQuickSendListRows();
+                lock (quickSendStateLock)
+                {
+                    EnsureQuickSendListStateUnsafe();
+                    quickSendList[_quickSendSelect] = value == null
+                        ? CreateDefaultQuickSendRows()
+                        : new List<ToSendData>(value);
+                    NormalizeQuickSendListRowsUnsafe();
+                }
                 Save();
             }
         }
 
+        public IReadOnlyList<QuickSendItemSnapshot> GetQuickSendSnapshot()
+        {
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                var source = quickSendList[_quickSendSelect];
+                var snapshot = new QuickSendItemSnapshot[source.Count];
+                for (int i = 0; i < source.Count; i++)
+                    snapshot[i] = new QuickSendItemSnapshot(source[i]);
+                return Array.AsReadOnly(snapshot);
+            }
+        }
+
         private void EnsureQuickSendListState()
+        {
+            lock (quickSendStateLock)
+                EnsureQuickSendListStateUnsafe();
+        }
+
+        private void EnsureQuickSendListStateUnsafe()
         {
             if (quickSendList == null)
                 quickSendList = new List<List<ToSendData>>();
             if (quickSendList.Count == 0)
                 quickSendList.Add(CreateDefaultQuickSendRows());
 
-            EnsureQuickListNames();
+            EnsureQuickListNamesUnsafe();
 
             if (_quickSendSelect < 0 || _quickSendSelect >= quickSendList.Count)
                 _quickSendSelect = 0;
 
-            NormalizeQuickSendListRows();
+            NormalizeQuickSendListRowsUnsafe();
         }
 
         private void NormalizeQuickSendListRows()
+        {
+            lock (quickSendStateLock)
+                NormalizeQuickSendListRowsUnsafe();
+        }
+
+        private void NormalizeQuickSendListRowsUnsafe()
         {
             for (int i = 0; i < quickSendList.Count; i++)
             {
@@ -479,16 +930,16 @@ namespace llcom_plus.Model
 
                 var blankRows = 0;
                 var normalized = new List<ToSendData>();
-                foreach (var item in list.Where(item => item != null))
+                foreach (var item in list)
                 {
+                    if (item == null)
+                        continue;
                     if (IsBlankQuickSendRow(item))
                     {
                         if (blankRows >= DefaultQuickSendRows)
                             continue;
-
                         blankRows++;
                     }
-
                     normalized.Add(item);
                 }
 
@@ -505,7 +956,7 @@ namespace llcom_plus.Model
                     string.IsNullOrWhiteSpace(item.recvScriptPara));
         }
 
-        private void EnsureQuickListNames()
+        private void EnsureQuickListNamesUnsafe()
         {
             if (quickListNames == null)
                 quickListNames = new List<string>();
@@ -523,6 +974,20 @@ namespace llcom_plus.Model
             {
                 if (string.IsNullOrWhiteSpace(quickListNames[i]))
                     quickListNames[i] = GetDefaultQuickListName(i);
+            }
+        }
+
+        private void GetQuickSendStateSnapshot(
+            out List<List<ToSendData>> lists,
+            out List<string> names)
+        {
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                lists = new List<List<ToSendData>>(quickSendList.Count);
+                foreach (var list in quickSendList)
+                    lists.Add(new List<ToSendData>(list));
+                names = new List<string>(quickListNames.GetRange(0, quickSendList.Count));
             }
         }
 
@@ -550,45 +1015,92 @@ namespace llcom_plus.Model
 
         public List<List<ToSendData>> GetAllQuickSendLists()
         {
-            EnsureQuickSendListState();
-            return quickSendList;
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                var snapshot = new List<List<ToSendData>>(quickSendList.Count);
+                foreach (var list in quickSendList)
+                    snapshot.Add(new List<ToSendData>(list));
+                return snapshot;
+            }
         }
 
         public void SetAllQuickSendLists(List<List<ToSendData>> data)
         {
-            quickSendList = data ?? new List<List<ToSendData>>();
-            EnsureQuickSendListState();
+            lock (quickSendStateLock)
+            {
+                quickSendList = CopyQuickSendLists(data);
+                EnsureQuickSendListStateUnsafe();
+            }
             Save();
         }
 
         public List<string> GetAllQuickListNames()
         {
-            EnsureQuickSendListState();
-            return quickListNames.Take(quickSendList.Count).ToList();
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                return new List<string>(quickListNames.GetRange(0, quickSendList.Count));
+            }
         }
 
         public void SetAllQuickListNames(IList<string> names)
         {
-            if (names != null)
-                quickListNames = names.ToList();
-            EnsureQuickSendListState();
+            lock (quickSendStateLock)
+            {
+                if (names != null)
+                    quickListNames = new List<string>(names);
+                EnsureQuickSendListStateUnsafe();
+            }
             Save();
+        }
+
+        public void SetAllQuickSendState(
+            List<List<ToSendData>> data,
+            IList<string> names)
+        {
+            lock (quickSendStateLock)
+            {
+                quickSendList = CopyQuickSendLists(data);
+                quickListNames = names == null ? new List<string>() : new List<string>(names);
+                EnsureQuickSendListStateUnsafe();
+            }
+            Save();
+        }
+
+        private static List<List<ToSendData>> CopyQuickSendLists(List<List<ToSendData>> data)
+        {
+            var copy = new List<List<ToSendData>>();
+            if (data == null)
+                return copy;
+
+            foreach (var list in data)
+                copy.Add(list == null ? null : new List<ToSendData>(list));
+            return copy;
         }
 
         public int GetQuickSendListCount()
         {
-            EnsureQuickSendListState();
-            return quickSendList.Count;
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                return quickSendList.Count;
+            }
         }
 
         public int AddQuickSendPage()
         {
-            EnsureQuickSendListState();
-            quickSendList.Add(CreateDefaultQuickSendRows());
-            quickListNames.Add(GetDefaultQuickListName(quickSendList.Count - 1));
-            _quickSendSelect = quickSendList.Count - 1;
+            int selectedIndex;
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                quickSendList.Add(CreateDefaultQuickSendRows());
+                quickListNames.Add(GetDefaultQuickListName(quickSendList.Count - 1));
+                _quickSendSelect = quickSendList.Count - 1;
+                selectedIndex = _quickSendSelect;
+            }
             Save();
-            return _quickSendSelect;
+            return selectedIndex;
         }
 
         private List<ToSendData> CreateDefaultQuickSendRows()
@@ -610,17 +1122,20 @@ namespace llcom_plus.Model
 
         public bool RemoveQuickSendPage(int index)
         {
-            EnsureQuickSendListState();
-            if (quickSendList.Count <= 1 || index < 0 || index >= quickSendList.Count)
-                return false;
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                if (quickSendList.Count <= 1 || index < 0 || index >= quickSendList.Count)
+                    return false;
 
-            quickSendList.RemoveAt(index);
-            if (index < quickListNames.Count)
-                quickListNames.RemoveAt(index);
-            if (_quickSendSelect >= quickSendList.Count)
-                _quickSendSelect = quickSendList.Count - 1;
-            if (_quickSendSelect < 0)
-                _quickSendSelect = 0;
+                quickSendList.RemoveAt(index);
+                if (index < quickListNames.Count)
+                    quickListNames.RemoveAt(index);
+                if (_quickSendSelect >= quickSendList.Count)
+                    _quickSendSelect = quickSendList.Count - 1;
+                if (_quickSendSelect < 0)
+                    _quickSendSelect = 0;
+            }
             Save();
             return true;
         }
@@ -632,12 +1147,19 @@ namespace llcom_plus.Model
         {
             get
             {
-                return _quickSendSelect;
+                lock (quickSendStateLock)
+                {
+                    EnsureQuickSendListStateUnsafe();
+                    return _quickSendSelect;
+                }
             }
             set
             {
-                EnsureQuickSendListState();
-                _quickSendSelect = value < 0 || value >= quickSendList.Count ? 0 : value;
+                lock (quickSendStateLock)
+                {
+                    EnsureQuickSendListStateUnsafe();
+                    _quickSendSelect = value < 0 || value >= quickSendList.Count ? 0 : value;
+                }
                 Save();
             }
         }
@@ -651,7 +1173,7 @@ namespace llcom_plus.Model
             set
             {
                 _bitDelay = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -669,8 +1191,9 @@ namespace llcom_plus.Model
                 try
                 {
                     _flowControl = value < 0 || value > 2 ? 0 : value;
-                    Tools.Global.uart.ApplyFlowControl();
-                    Save();
+                    if (ControlsGlobalUart)
+                        Tools.Global.uart.ApplyFlowControl();
+                    SaveUartProcessingSetting();
                 }
                 catch (Exception e)
                 {
@@ -690,7 +1213,7 @@ namespace llcom_plus.Model
                 _sendThrottlePacketSize = value < 0 ? 0 : value;
                 if (_sendThrottlePacketSize == 0 && _sendThrottleDelayMs != 0)
                     sendThrottleDelayMs = 0;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -709,7 +1232,7 @@ namespace llcom_plus.Model
                 if (value > 10000)
                     value = 10000;
                 _sendThrottleDelayMs = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -735,7 +1258,8 @@ namespace llcom_plus.Model
             {
                 try
                 {
-                    Tools.Global.uart.SetBaudRate(value);
+                    if (ControlsGlobalUart)
+                        Tools.Global.uart.SetBaudRate(value);
                     _baudRate = value;
                     Save();
                 }
@@ -755,7 +1279,7 @@ namespace llcom_plus.Model
             set
             {
                 _autoReconnect = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -787,7 +1311,7 @@ namespace llcom_plus.Model
             set
             {
                 _showHexFormat = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -816,7 +1340,7 @@ namespace llcom_plus.Model
             set
             {
                 _showSend = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -859,7 +1383,7 @@ namespace llcom_plus.Model
             set
             {
                 _showSendRaw = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -874,8 +1398,9 @@ namespace llcom_plus.Model
                 try
                 {
                     _parity = value;
-                    Tools.Global.uart.SetParity((Parity)value);
-                    Save();
+                    if (ControlsGlobalUart)
+                        Tools.Global.uart.SetParity((Parity)value);
+                    SaveUartProcessingSetting();
                 }
                 catch (Exception e)
                 {
@@ -893,7 +1418,7 @@ namespace llcom_plus.Model
             set
             {
                 _timeout = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -908,8 +1433,9 @@ namespace llcom_plus.Model
                 try
                 {
                     _dataBits = value;
-                    Tools.Global.uart.SetDataBits(value);
-                    Save();
+                    if (ControlsGlobalUart)
+                        Tools.Global.uart.SetDataBits(value);
+                    SaveUartProcessingSetting();
                 }
                 catch (Exception e)
                 {
@@ -929,8 +1455,9 @@ namespace llcom_plus.Model
                 try
                 {
                     _stopBit = value;
-                    Tools.Global.uart.SetStopBits((StopBits)value);
-                    Save();
+                    if (ControlsGlobalUart)
+                        Tools.Global.uart.SetStopBits((StopBits)value);
+                    SaveUartProcessingSetting();
                 }
                 catch (Exception e)
                 {
@@ -948,7 +1475,7 @@ namespace llcom_plus.Model
             set
             {
                 _sendScript = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -961,7 +1488,7 @@ namespace llcom_plus.Model
             set
             {
                 _recvScript = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -1005,7 +1532,7 @@ namespace llcom_plus.Model
             set
             {
                 _terminal = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -1035,7 +1562,7 @@ namespace llcom_plus.Model
                 {
                     Encoding.GetEncoding(value);
                     _encoding = value;
-                    Save();
+                    SaveUartProcessingSetting();
                 }
                 catch { }//获取出错说明编码不对
             }
@@ -1050,7 +1577,7 @@ namespace llcom_plus.Model
             set
             {
                 _extraEnter = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -1063,7 +1590,7 @@ namespace llcom_plus.Model
             set
             {
                 _enterSend = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -1085,7 +1612,7 @@ namespace llcom_plus.Model
             set
             {
                 _enableSymbol = value;
-                Save();
+                SaveUartProcessingSetting();
             }
         }
 
@@ -1124,13 +1651,16 @@ namespace llcom_plus.Model
         private string _mqttClientID = Guid.NewGuid().ToString();
         private bool _mqttTLS = false;
         private bool _mqttTLSCert = false;
+        private bool _mqttTLSCheckRevocation = true;
         private string _mqttTLSCertCaPath = "";
         private string _mqttTLSCertClientPath = "";
+        [JsonIgnore]
         private string _mqttTLSCertClientPassword = "";
         private bool _mqttWs = false;
         private string _mqttWsPath = "/mqtt";
         private string _mqttUser = "user";
-        private string _mqttPassword = "password";
+        [JsonIgnore]
+        private string _mqttPassword = "";
         private int _mqttKeepAlive = 120;
         private bool _mqttCleanSession = false;
         private string _mqttPublishTopic = "your/publish/topic";
@@ -1140,13 +1670,34 @@ namespace llcom_plus.Model
         public string mqttClientID { get { return _mqttClientID; } set { _mqttClientID = value; Save(); } }
         public bool mqttTLS { get { return _mqttTLS; } set { _mqttTLS = value; Save(); } }
         public bool mqttTLSCert { get { return _mqttTLSCert; } set { _mqttTLSCert = value; Save(); } }
+        public bool mqttTLSCheckRevocation { get { return _mqttTLSCheckRevocation; } set { _mqttTLSCheckRevocation = value; Save(); } }
         public string mqttTLSCertCaPath { get { return _mqttTLSCertCaPath; } set { _mqttTLSCertCaPath = value; Save(); } }
         public string mqttTLSCertClientPath { get { return _mqttTLSCertClientPath; } set { _mqttTLSCertClientPath = value; Save(); } }
-        public string mqttTLSCertClientPassword { get { return _mqttTLSCertClientPassword; } set { _mqttTLSCertClientPassword = value; Save(); } }
+        [JsonIgnore]
+        public string mqttTLSCertClientPassword
+        {
+            get { return _mqttTLSCertClientPassword; }
+            set
+            {
+                _mqttTLSCertClientPassword = value ?? "";
+                if (!_suspendSave)
+                    WriteProtectedCredential(MqttClientCertificatePasswordCredentialName, _mqttTLSCertClientPassword);
+            }
+        }
         public bool mqttWs { get { return _mqttWs; } set { _mqttWs = value; Save(); } }
         public string mqttWsPath { get { return _mqttWsPath; } set { _mqttWsPath = value; Save(); } }
         public string mqttUser { get { return _mqttUser; } set { _mqttUser = value; Save(); } }
-        public string mqttPassword { get { return _mqttPassword; } set { _mqttPassword = value; Save(); } }
+        [JsonIgnore]
+        public string mqttPassword
+        {
+            get { return _mqttPassword; }
+            set
+            {
+                _mqttPassword = value ?? "";
+                if (!_suspendSave)
+                    WriteProtectedCredential(MqttPasswordCredentialName, _mqttPassword);
+            }
+        }
         public int mqttKeepAlive { get { return _mqttKeepAlive; } set { _mqttKeepAlive = value; Save(); } }
         public bool mqttCleanSession { get { return _mqttCleanSession; } set { _mqttCleanSession = value; Save(); } }
         public string mqttPublishTopic { get { return _mqttPublishTopic; } set { _mqttPublishTopic = value; Save(); } }
@@ -1185,14 +1736,22 @@ namespace llcom_plus.Model
 
         public string GetQuickListNameNow()
         {
-            EnsureQuickSendListState();
-            return quickListNames[_quickSendSelect];
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                return quickListNames[_quickSendSelect];
+            }
         }
 
         public void SetQuickListNameNow(string name)
         {
-            EnsureQuickSendListState();
-            quickListNames[_quickSendSelect] = string.IsNullOrWhiteSpace(name) ? GetDefaultQuickListName(_quickSendSelect) : name;
+            lock (quickSendStateLock)
+            {
+                EnsureQuickSendListStateUnsafe();
+                quickListNames[_quickSendSelect] = string.IsNullOrWhiteSpace(name)
+                    ? GetDefaultQuickListName(_quickSendSelect)
+                    : name;
+            }
             Save();
         }
 
@@ -1235,7 +1794,7 @@ namespace llcom_plus.Model
             }
         }
 
-        private int _tcpClientSslAuthMode = 0;
+        private int _tcpClientSslAuthMode = 1;
         private int _tcpClientSslProtocolType = 0;
         private string _tcpClientSslTargetHost = "";
         private string _tcpClientSslCaCertPath = "";
@@ -1243,7 +1802,7 @@ namespace llcom_plus.Model
         [JsonIgnore]
         private string _tcpClientSslClientCertPassword = "";
         private string _tcpClientSslCipherSuites = "";
-        private bool _tcpClientSslCheckRevocation = false;
+        private bool _tcpClientSslCheckRevocation = true;
         private bool _tcpClientSslPrintDetails = true;
         public int tcpClientSslAuthMode { get { return _tcpClientSslAuthMode; } set { _tcpClientSslAuthMode = value; Save(); } }
         public int tcpClientSslProtocolType { get { return _tcpClientSslProtocolType; } set { _tcpClientSslProtocolType = value; Save(); } }
@@ -1251,14 +1810,24 @@ namespace llcom_plus.Model
         public string tcpClientSslCaCertPath { get { return _tcpClientSslCaCertPath; } set { _tcpClientSslCaCertPath = value; Save(); } }
         public string tcpClientSslClientCertPath { get { return _tcpClientSslClientCertPath; } set { _tcpClientSslClientCertPath = value; Save(); } }
         [JsonIgnore]
-        public string tcpClientSslClientCertPassword { get { return _tcpClientSslClientCertPassword; } set { _tcpClientSslClientCertPassword = value ?? ""; } }
+        public string tcpClientSslClientCertPassword
+        {
+            get { return _tcpClientSslClientCertPassword; }
+            set
+            {
+                _tcpClientSslClientCertPassword = value ?? "";
+                if (!_suspendSave)
+                    WriteProtectedCredential(TlsClientCertificatePasswordCredentialName, _tcpClientSslClientCertPassword);
+            }
+        }
         public string tcpClientSslCipherSuites { get { return _tcpClientSslCipherSuites; } set { _tcpClientSslCipherSuites = value; Save(); } }
         public bool tcpClientSslCheckRevocation { get { return _tcpClientSslCheckRevocation; } set { _tcpClientSslCheckRevocation = value; Save(); } }
         public bool tcpClientSslPrintDetails { get { return _tcpClientSslPrintDetails; } set { _tcpClientSslPrintDetails = value; Save(); } }
 
         internal void RemovePersistedTlsPassword()
         {
-            _tcpClientSslClientCertPassword = "";
+            if (!string.IsNullOrEmpty(_tcpClientSslClientCertPassword))
+                WriteProtectedCredential(TlsClientCertificatePasswordCredentialName, _tcpClientSslClientCertPassword);
             Save(false);
         }
         private string _tcpClientSslClientKeyPath = "";
