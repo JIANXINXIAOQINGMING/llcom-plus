@@ -227,7 +227,7 @@ namespace llcom_plus.Tools
 
             var packageInfo = TryParseLocalPackage(zipPath);
             if (packageInfo == null || NormalizeVersion(packageInfo.Version) != NormalizeVersion(release.Version))
-                throw new InvalidDataException("在线更新包文件名必须包含与发布版本一致的版本号和当前架构，例如：llcom plus_1.2.2_x64.zip。");
+                throw new InvalidDataException("在线更新包文件名必须包含与发布版本一致的版本号和当前架构，例如：llcom.plus_1.2.12_x64.zip。");
 
             TryDeleteFile(downloadPath);
             TryDeleteFile(signatureDownloadPath);
@@ -484,7 +484,7 @@ namespace llcom_plus.Tools
 
             var package = TryParseLocalPackage(zipPath);
             if (package == null)
-                throw new InvalidDataException("本地更新包命名不正确，应类似 llcom plus_1.2.2_x64.zip。");
+                throw new InvalidDataException("本地更新包命名不正确，应类似 llcom.plus_1.2.12_x64.zip。");
             var currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
             if (NormalizeVersion(package.Version) <= NormalizeVersion(currentVersion))
                 throw new InvalidOperationException($"本地更新包版本 {package.DisplayVersion} 不高于当前版本。");

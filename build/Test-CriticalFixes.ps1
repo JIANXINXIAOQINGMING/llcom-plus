@@ -2352,7 +2352,7 @@ public static class LlcomRuntimeWorkerLifecycleProbe
 
         $releaseType = Get-RequiredType $assembly 'llcom_plus.Tools.GitHubReleaseInfo'
         $release = [Activator]::CreateInstance($releaseType, $true)
-        $releaseType.GetProperty('AssetName').SetValue($release, 'llcom plus_99.0.0_x64.zip', $null)
+        $releaseType.GetProperty('AssetName').SetValue($release, 'llcom.plus_99.0.0_x64.zip', $null)
         $trustErrorMethod = Get-RequiredMethod `
             $updaterType `
             'GetAutomaticUpdateTrustError' `

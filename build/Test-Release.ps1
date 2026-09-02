@@ -1046,7 +1046,7 @@ Test-Condition (
 if ($Configuration -eq 'Release') {
     $versionProps = [xml](Get-Content -LiteralPath (Join-Path $root 'Version.props'))
     $version = $versionProps.Project.PropertyGroup.AppVersion
-    $zipPath = Join-Path $root "artifacts\release\llcom plus_${version}_${Platform}.zip"
+    $zipPath = Join-Path $root "artifacts\release\llcom.plus_${version}_${Platform}.zip"
     Test-Condition (Test-Path -LiteralPath $zipPath) 'Release ZIP exists'
     if (Test-Path -LiteralPath $zipPath) {
         Add-Type -AssemblyName System.IO.Compression.FileSystem

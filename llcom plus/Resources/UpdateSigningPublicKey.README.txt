@@ -25,7 +25,7 @@ The UTF-8 JSON format is:
 
 {
   "schema": "llcom-plus-update-signature-v1",
-  "asset": "llcom plus_1.2.11_x64.zip",
+  "asset": "llcom.plus_1.2.12_x64.zip",
   "version": "1.2.11.0",
   "architecture": "x64",
   "sha256": "UPPERCASE_64_HEX_SHA256_OF_ZIP",

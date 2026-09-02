@@ -592,12 +592,13 @@
       <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>
       <ReleasePackagePlatform Condition="'$(ReleasePackagePlatform)' == ''">$(Platform)</ReleasePackagePlatform>
       <ReleasePackageRoot>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)release_package\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform)</ReleasePackageRoot>
-      <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
+      <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
       <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir).credentials\**\*;$(TargetDir)circular_send.json;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
       <ReleasePackageFile Include="$(TargetDir)UpdateSigningPublicKey.xml" Condition="Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
       <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
+      <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
     </ItemGroup>
     <MakeDir Directories="$(MSBuildProjectDirectory)\..\artifacts\release" />
     <RemoveDir Directories="$(ReleasePackageRoot)" Condition="Exists('$(ReleasePackageRoot)')" />
