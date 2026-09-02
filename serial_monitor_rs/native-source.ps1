@@ -14,6 +14,20 @@ function Get-NativeSourceFiles {
     )
 }
 
+function Get-Sha256FileDigest {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '')
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-NativeSourceDigest {
     param([Parameter(Mandatory = $true)][string]$SourceRoot)
 
@@ -22,7 +36,7 @@ function Get-NativeSourceDigest {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Native source file is missing: $path"
         }
-        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $hash = Get-Sha256FileDigest -Path $path
         '{0}:{1}' -f $relative.Replace('\', '/'), $hash
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes(($manifest -join "`n"))

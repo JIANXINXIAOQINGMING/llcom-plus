@@ -32,7 +32,7 @@ $expectedTarget = if ($Architecture -eq 'x64') {
     'i686-pc-windows-msvc'
 }
 $sourceHash = Get-NativeSourceDigest -SourceRoot $scriptDir
-$runtimeHash = (Get-FileHash -LiteralPath $RuntimeDll -Algorithm SHA256).Hash
+$runtimeHash = Get-Sha256FileDigest -Path $RuntimeDll
 
 if ([int]$stamp.schemaVersion -ne 1 -or
     [string]$stamp.architecture -cne $Architecture -or

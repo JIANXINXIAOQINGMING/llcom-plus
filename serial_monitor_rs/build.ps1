@@ -53,8 +53,8 @@ function Build-For {
     $destination = Join-Path $destinationDir 'serial_monitor.dll'
     Copy-Item -LiteralPath $hostDll -Destination $destination -Force
 
-    $builtHash = (Get-FileHash -LiteralPath $hostDll -Algorithm SHA256).Hash
-    $copiedHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+    $builtHash = Get-Sha256FileDigest -Path $hostDll
+    $copiedHash = Get-Sha256FileDigest -Path $destination
     if ($builtHash -ne $copiedHash) {
         throw "Copied native DLL hash mismatch for $DestinationArchitecture"
     }
@@ -67,7 +67,7 @@ function Build-For {
         rustToolchain = $RustToolchain
         sourceSha256 = Get-NativeSourceDigest -SourceRoot $scriptDir
         hostDllSha256 = $builtHash
-        hookDllSha256 = (Get-FileHash -LiteralPath $hookDll -Algorithm SHA256).Hash
+        hookDllSha256 = Get-Sha256FileDigest -Path $hookDll
     }
     $stampPath = Join-Path $scriptDir "target\native-build-$DestinationArchitecture.json"
     $stamp | ConvertTo-Json | Set-Content -LiteralPath $stampPath -Encoding UTF8
