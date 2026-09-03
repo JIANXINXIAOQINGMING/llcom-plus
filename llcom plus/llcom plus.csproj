@@ -282,6 +282,7 @@
     <Compile Include="Core\Tools\DataCalcResult.cs" />
     <Compile Include="Core\Tools\CipherSuitePicker.cs" />
     <Compile Include="Core\Tools\GitHubReleaseUpdater.cs" />
+    <Compile Include="Core\Tools\QuickSendBackupService.cs" />
     <Compile Include="Core\Tools\OpenSslCli.cs" />
     <Compile Include="Core\Tools\OpenSslMessageExplainer.cs" />
     <Compile Include="Core\Tools\EditorTheme.cs" />
@@ -304,6 +305,9 @@
     </Compile>
     <Compile Include="UI\View\HttpToolWindow.xaml.cs">
       <DependentUpon>HttpToolWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\View\QuickSendBackupWindow.xaml.cs">
+      <DependentUpon>QuickSendBackupWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="Core\ScriptEnv\ScriptApis.cs" />
     <Compile Include="Core\ScriptEnv\JavaScriptLoader.cs" />
@@ -396,6 +400,10 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="UI\View\HttpToolWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\View\QuickSendBackupWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -595,7 +603,7 @@
       <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
-      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir).credentials\**\*;$(TargetDir)circular_send.json;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir).credentials\**\*;$(TargetDir)quick-send-backups\**\*;$(TargetDir)circular_send.json;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
       <ReleasePackageFile Include="$(TargetDir)UpdateSigningPublicKey.xml" Condition="Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
       <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
       <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />

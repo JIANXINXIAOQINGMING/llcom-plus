@@ -468,6 +468,17 @@ try {
         [void]$appType.GetMethod('InitializeComponent').Invoke($app, $null)
         $windowType = $assembly.GetType('llcom_plus.MainWindow', $true)
         $window = [Activator]::CreateInstance($windowType)
+        $quickSendBackupWindowType = $assembly.GetType('llcom_plus.QuickSendBackupWindow', $true)
+        $quickSendBackupWindow = [Activator]::CreateInstance($quickSendBackupWindowType)
+        try {
+            Test-Condition (
+                $null -ne $quickSendBackupWindow.FindName('SnapshotsGrid') -and
+                $null -ne $quickSendBackupWindow.FindName('EmptyMessage')
+            ) 'Quick-send backup and restore window loads its snapshot list UI'
+        }
+        finally {
+            $quickSendBackupWindow.Close()
+        }
         $serialPortComboBox = $window.FindName('serialPortsListComboBox')
         $serialPortDropDownHandler = $windowType.GetMethod(
             'SerialPortsListComboBox_DropDownOpened',
@@ -1057,6 +1068,9 @@ if ($Configuration -eq 'Release') {
             Test-Condition ($null -ne $zip.GetEntry('llcom-plus-taskbar-v2.ico')) 'Release ZIP contains the dedicated taskbar icon'
             Test-Condition ($null -ne $zip.GetEntry('OpenSSL/openssl.exe')) 'Release ZIP contains OpenSSL'
             Test-Condition ($null -eq $zip.GetEntry('settings.json')) 'Release ZIP excludes settings.json'
+            Test-Condition (
+                @($zip.Entries | Where-Object { $_.FullName -like 'quick-send-backups/*' }).Count -eq 0
+            ) 'Release ZIP excludes user quick-send snapshots'
             Test-Condition ($null -eq $zip.GetEntry('circular_send.json')) 'Release ZIP excludes circular_send.json'
             $containsCredentialSidecar = @($zip.Entries | Where-Object {
                 $_.FullName -like '.credentials/*' -or $_.FullName -like '*/.credentials/*'

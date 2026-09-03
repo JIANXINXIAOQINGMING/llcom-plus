@@ -315,9 +315,24 @@ namespace llcom_plus
                         canSaveSendList = false;
                         if (Global.setting.quickSendSelect == -1)
                             Global.setting.quickSendSelect = 0;
-                        ToSendData.DataChanged += SaveSendList;
                         LoadQuickSendList();
+                        // Loading normalizes legacy/default labels and raises DataChanged.
+                        // Subscribe only after the in-memory view is complete so startup
+                        // can never overwrite a valid settings.json with partial UI state.
+                        ToSendData.DataChanged += SaveSendList;
                         canSaveSendList = true;
+                        if (Tools.Global.TryConsumeQuickSendLegacyRecoveryCandidate(out var candidate))
+                        {
+                            Dispatcher.BeginInvoke(new Action(() =>
+                                OfferLegacyQuickSendRecovery(candidate)));
+                        }
+                        if (Tools.Global.ConsumeQuickSendLegacyRecoveryNotice())
+                        {
+                            Dispatcher.BeginInvoke(new Action(() =>
+                                Tools.MessageBox.Show(
+                                    TryFindResource("QuickSendBackupRecoveredLegacy") as string ??
+                                    "Quick send data was restored from a legacy backup.")));
+                        }
                     });
 
                     StartupProfiler.Measure("Loaded title and events", () =>
@@ -2116,6 +2131,8 @@ namespace llcom_plus
             Tools.Global.ThemeChanged -= Global_ThemeChanged;
             Tools.Global.SerialPinStatusChangedEvent -= Global_SerialPinStatusChangedEvent;
             Tools.Global.AppNotificationEvent -= Global_AppNotificationEvent;
+            Tools.QuickSendBackupService.FlushPending();
+            Tools.QuickSendBackupService.Shutdown();
             Tools.Global.isMainWindowsClosed = true;
             Tools.GitHubReleaseUpdater.TryStartPendingInstallOnExit();
             foreach (Window win in App.Current.Windows.Cast<Window>().Where(win => win != this).ToList())
@@ -3258,6 +3275,7 @@ namespace llcom_plus
             if (item == null)
                 return;
 
+            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
             ExitQuickSendKeyboardNavigation();
             if (toSendListItems.Count <= 1)
             {
@@ -4814,6 +4832,7 @@ namespace llcom_plus
                 return;
             if (ret.Item2.Trim().Length == 0)//留空删除该项目
             {
+                Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
                 if (toSendListItems.Count <= 1)
                     ClearQuickSendItem(data, 1);
                 else
@@ -4905,6 +4924,8 @@ namespace llcom_plus
                     return;
             }
 
+            SaveSendList(null, EventArgs.Empty);
+            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-page");
             canSaveSendList = false;
             toSendListItems.Clear();
             Global.setting.RemoveQuickSendPage(Global.setting.quickSendSelect);
@@ -5048,9 +5069,11 @@ namespace llcom_plus
                 }
 
                 List<string> names = null;
-                if (root is JObject package && package["quickSendListNames"] != null)
+                if (root is JObject package &&
+                    (package["quickSendListNames"] != null || package["quickListNames"] != null))
                 {
-                    if (!(package["quickSendListNames"] is JArray namesArray) ||
+                    var namesToken = package["quickSendListNames"] ?? package["quickListNames"];
+                    if (!(namesToken is JArray namesArray) ||
                         namesArray.Count != pages.Count ||
                         namesArray.Any(value => value.Type != JTokenType.String))
                     {
@@ -5208,6 +5231,8 @@ namespace llcom_plus
             if (result?.Pages == null || result.Pages.Count == 0)
                 throw QuickSendImportError("解析结果为空。");
 
+            SaveSendList(null, EventArgs.Empty);
+            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-import");
             var previousCanSave = canSaveSendList;
             canSaveSendList = false;
             try
@@ -5390,6 +5415,95 @@ namespace llcom_plus
         private void QuickSendExportAllButton_Click(object sender, RoutedEventArgs e)
         {
             ExportQuickSend(true);
+        }
+
+        private void QuickSendBackupButton_Click(object sender, RoutedEventArgs e)
+        {
+            SaveSendList(null, EventArgs.Empty);
+            Tools.QuickSendBackupService.FlushPending();
+
+            var backupWindow = new QuickSendBackupWindow { Owner = this };
+            if (backupWindow.ShowDialog() != true || backupWindow.SelectedSnapshot == null)
+                return;
+
+            if (!Tools.QuickSendBackupService.TryLoad(
+                    backupWindow.SelectedSnapshot,
+                    out var state,
+                    out var error))
+            {
+                Tools.MessageBox.Show(error);
+                return;
+            }
+
+            var answer = System.Windows.MessageBox.Show(
+                this,
+                TryFindResource("QuickSendBackupRestoreConfirm") as string ??
+                    "Restoring replaces all current quick send pages. Continue?",
+                TryFindResource("QuickSendBackupWindowTitle") as string ??
+                    "Quick send backup and restore",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-restore");
+            var previousCanSave = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                Tools.Global.setting.SetAllQuickSendState(
+                    state.CreateModelLists(),
+                    state.Names,
+                    state.SelectedIndex);
+                toSendListItems.Clear();
+                LoadQuickSendList();
+            }
+            finally
+            {
+                canSaveSendList = previousCanSave;
+            }
+
+            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "restore");
+            Tools.MessageBox.Show(
+                TryFindResource("QuickSendBackupRestoreDone") as string ??
+                "Quick send data was restored from the snapshot.");
+        }
+
+        private void OfferLegacyQuickSendRecovery(Tools.QuickSendBackupState candidate)
+        {
+            if (candidate == null || windowIsClosing)
+                return;
+            var answer = System.Windows.MessageBox.Show(
+                this,
+                TryFindResource("QuickSendBackupLegacyCandidatePrompt") as string ??
+                    "The current quick send data is empty, but an older backup still contains data. Restore it now?",
+                TryFindResource("QuickSendBackupWindowTitle") as string ??
+                    "Quick send backup and restore",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-legacy-recovery");
+            var previousCanSave = canSaveSendList;
+            canSaveSendList = false;
+            try
+            {
+                Tools.Global.setting.SetAllQuickSendState(
+                    candidate.CreateModelLists(),
+                    candidate.Names,
+                    candidate.SelectedIndex);
+                toSendListItems.Clear();
+                LoadQuickSendList();
+            }
+            finally
+            {
+                canSaveSendList = previousCanSave;
+            }
+            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "legacy-recovery");
+            Tools.MessageBox.Show(
+                TryFindResource("QuickSendBackupRecoveredLegacy") as string ??
+                "Quick send data was restored from the legacy backup.");
         }
 
         private void ExportQuickSend(bool exportAll)

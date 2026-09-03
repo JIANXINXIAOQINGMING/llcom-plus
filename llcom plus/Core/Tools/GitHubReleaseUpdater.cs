@@ -472,6 +472,9 @@ namespace llcom_plus.Tools
 
         public static void StartInstallAfterExit(string zipPath, bool restartAfterInstall = true)
         {
+            // Best effort and fail-open for the updater itself: the snapshot service
+            // validates and atomically stores the user's current quick-send data.
+            QuickSendBackupService.CreateNow(Global.setting, "pre-upgrade");
             if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath))
                 throw new FileNotFoundException("Update package is missing.", zipPath);
 

@@ -1210,6 +1210,11 @@
                                 Click="DeleteQuickSendPageButton_Click"
                                 Content="{DynamicResource QuickSendDeletePage}" />
                             </Grid>
+                            <Button
+                                Name="QuickSendBackupButton"
+                                Margin="3"
+                                Click="QuickSendBackupButton_Click"
+                                Content="{DynamicResource QuickSendBackupManage}" />
 
                         </StackPanel>
                     </Grid>

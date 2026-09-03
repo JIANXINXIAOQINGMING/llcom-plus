@@ -177,6 +177,8 @@ namespace llcom_plus.Tools
         }
         //给全局使用的设置参数项
         public static Model.Settings setting;
+        private static bool quickSendLegacyRecoveryNotice;
+        private static QuickSendBackupState quickSendLegacyRecoveryCandidate;
         public static Model.Uart uart = new Model.Uart();
 
         //软件文件名
@@ -738,6 +740,9 @@ namespace llcom_plus.Tools
                         setting = JsonConvert.DeserializeObject<Model.Settings>(settingsText);
                         if (setting == null)
                             throw new Exception("settings.json is empty");
+                        QuickSendBackupService.Initialize(setting);
+                        QuickSendBackupService.CreateNow(setting, "startup");
+                        TryRecoverEmptyQuickSendFromLegacyBackup(setting);
                         setting.EnsureRuntimeState();
                         if (hadPersistedTlsPassword)
                             setting.RemovePersistedTlsPassword();
@@ -747,10 +752,13 @@ namespace llcom_plus.Tools
                     }
                     catch
                     {
-                        Tools.MessageBox.Show($"配置文件加载失败！\r\n" +
-                            $"如果是配置文件损坏，可前往{ProfilePath}settings.json.bakup查找备份文件\r\n" +
-                            $"并使用该文件替换{ProfilePath}settings.json文件恢复配置");
-                        Environment.Exit(1);
+                        if (!TryRecoverSettingsAfterLoadFailure(out setting))
+                        {
+                            Tools.MessageBox.Show($"配置文件加载失败！\r\n" +
+                                $"如果是配置文件损坏，可前往{ProfilePath}settings.json.bakup查找备份文件\r\n" +
+                                $"并使用该文件替换{ProfilePath}settings.json文件恢复配置");
+                            Environment.Exit(1);
+                        }
                     }
                 });
             }
@@ -760,8 +768,13 @@ namespace llcom_plus.Tools
                 {
                     setting = new Model.Settings();
                     setting.EnsureRuntimeState();
+                    QuickSendBackupService.Initialize(setting);
+                    QuickSendBackupService.CreateNow(setting, "startup");
                 });
             }
+            setting.SentCount = 0;
+            setting.ReceivedCount = 0;
+            setting.DisableLog = false;
             StartupProfiler.Measure("Global.LoadSetting language", () => LoadLanguageFile(setting.language));
             StartupProfiler.Measure("Global.LoadSetting theme", () =>
             {
@@ -775,6 +788,162 @@ namespace llcom_plus.Tools
                 }
             });
             StartupProfiler.Mark("Global.LoadSetting exit");
+        }
+
+        internal static bool ConsumeQuickSendLegacyRecoveryNotice()
+        {
+            if (!quickSendLegacyRecoveryNotice)
+                return false;
+            quickSendLegacyRecoveryNotice = false;
+            return true;
+        }
+
+        internal static bool TryConsumeQuickSendLegacyRecoveryCandidate(
+            out QuickSendBackupState candidate)
+        {
+            candidate = quickSendLegacyRecoveryCandidate;
+            quickSendLegacyRecoveryCandidate = null;
+            return candidate != null;
+        }
+
+        private static void TryRecoverEmptyQuickSendFromLegacyBackup(Model.Settings current)
+        {
+            if (current == null || GetQuickSendRecoveryScore(current) > 0)
+                return;
+
+            Model.Settings best = null;
+            var bestScore = 0;
+            foreach (var path in EnumerateLegacySettingsBackupPaths())
+            {
+                try
+                {
+                    var candidate = JsonConvert.DeserializeObject<Model.Settings>(File.ReadAllText(path));
+                    var score = GetQuickSendRecoveryScore(candidate);
+                    if (score <= bestScore)
+                        continue;
+                    best = candidate;
+                    bestScore = score;
+                }
+                catch
+                {
+                }
+            }
+
+            if (best == null || bestScore <= 0)
+                return;
+
+            var preserved = QuickSendBackupService.CreateNow(best, "legacy-backup-candidate");
+            if (preserved.Succeeded &&
+                QuickSendBackupService.TryReadSnapshot(
+                    preserved.FilePath,
+                    out var recoveryState,
+                    out _))
+                quickSendLegacyRecoveryCandidate = recoveryState;
+        }
+
+        private static bool TryRecoverSettingsAfterLoadFailure(out Model.Settings recovered)
+        {
+            recovered = null;
+            foreach (var path in EnumerateLegacySettingsBackupPaths())
+            {
+                try
+                {
+                    recovered = JsonConvert.DeserializeObject<Model.Settings>(File.ReadAllText(path));
+                    if (recovered == null)
+                        continue;
+                    QuickSendBackupService.Initialize(recovered);
+                    QuickSendBackupService.CreateNow(recovered, "legacy-settings-recovery");
+                    recovered.EnsureRuntimeState();
+                    quickSendLegacyRecoveryNotice = true;
+                    return true;
+                }
+                catch
+                {
+                    recovered = null;
+                }
+            }
+
+            QuickSendBackupService.Initialize();
+            var latest = QuickSendBackupService.GetSnapshots().FirstOrDefault();
+            if (latest == null ||
+                !QuickSendBackupService.TryLoad(latest, out var state, out _))
+                return false;
+
+            recovered = new Model.Settings();
+            recovered.EnsureRuntimeState();
+            recovered.SetAllQuickSendState(
+                state.CreateModelLists(),
+                state.Names,
+                state.SelectedIndex);
+            QuickSendBackupService.CreateNow(recovered, "snapshot-recovery");
+            quickSendLegacyRecoveryNotice = true;
+            return true;
+        }
+
+        private static IEnumerable<string> EnumerateLegacySettingsBackupPaths()
+        {
+            var paths = new List<string>();
+            var conventional = Path.Combine(ProfilePath, "settings.json.bakup");
+            if (File.Exists(conventional))
+                paths.Add(conventional);
+            try
+            {
+                paths.AddRange(Directory.EnumerateFiles(
+                    ProfilePath,
+                    "settings.json.*.bak",
+                    SearchOption.TopDirectoryOnly));
+            }
+            catch
+            {
+            }
+            return paths
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(path =>
+                {
+                    try { return File.GetLastWriteTimeUtc(path); }
+                    catch { return DateTime.MinValue; }
+                });
+        }
+
+        private static int GetQuickSendRecoveryScore(Model.Settings value)
+        {
+            if (value == null)
+                return 0;
+            try
+            {
+                var pages = value.GetAllQuickSendLists();
+                var names = value.GetAllQuickListNames();
+                var score = Math.Max(0, pages.Count - 1) * 1000;
+                for (var index = 0; index < names.Count; index++)
+                {
+                    var name = (names[index] ?? string.Empty).Trim();
+                    if (name.Length > 0 &&
+                        !name.Equals("未命名" + index, StringComparison.OrdinalIgnoreCase) &&
+                        !name.Equals("Untitled " + index, StringComparison.OrdinalIgnoreCase) &&
+                        !name.Equals("Untitled" + index, StringComparison.OrdinalIgnoreCase))
+                        score += 100;
+                }
+                foreach (var item in pages.Where(page => page != null).SelectMany(page => page))
+                {
+                    if (item == null)
+                        continue;
+                    var button = (item.commit ?? string.Empty).Trim();
+                    var customButton = button.Length > 0 &&
+                        !button.Equals("发送", StringComparison.OrdinalIgnoreCase) &&
+                        !button.Equals("Send", StringComparison.OrdinalIgnoreCase) &&
+                        !button.Equals("?!", StringComparison.OrdinalIgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(item.text) || item.hex || customButton ||
+                        !string.IsNullOrWhiteSpace(item.recvScriptPath) ||
+                        !string.IsNullOrWhiteSpace(item.recvScriptPara) ||
+                        item.disableSuggestion)
+                        score += 10;
+                }
+                return score;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         /// <summary>

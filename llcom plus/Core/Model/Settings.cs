@@ -117,7 +117,7 @@ namespace llcom_plus.Model
         [JsonIgnore]
         public List<string> quickListNames = new List<string>();
 
-        [JsonProperty("quickSendList")]
+        [JsonProperty("quickSendList", ObjectCreationHandling = ObjectCreationHandling.Replace)]
         private List<List<ToSendData>> SerializedQuickSendList
         {
             get { return GetAllQuickSendLists(); }
@@ -128,7 +128,7 @@ namespace llcom_plus.Model
             }
         }
 
-        [JsonProperty("quickListNames")]
+        [JsonProperty("quickListNames", ObjectCreationHandling = ObjectCreationHandling.Replace)]
         private List<string> SerializedQuickListNames
         {
             get { return GetAllQuickListNames(); }
@@ -297,6 +297,10 @@ namespace llcom_plus.Model
                     }
                 }
             }
+
+            // Run outside saveLock. The service coalesces bursts and de-duplicates by
+            // content, so every quick-send change gets history without blocking settings.
+            Tools.QuickSendBackupService.ScheduleAutoSnapshot(this, "auto");
         }
 
         private void MergeUartProfilesForSave(string settingsPath, JObject data)
@@ -952,8 +956,20 @@ namespace llcom_plus.Model
             return item == null ||
                    (string.IsNullOrWhiteSpace(item.text) &&
                     !item.hex &&
+                    IsDefaultQuickSendButton(item.commit) &&
                     string.IsNullOrWhiteSpace(item.recvScriptPath) &&
-                    string.IsNullOrWhiteSpace(item.recvScriptPara));
+                    string.IsNullOrWhiteSpace(item.recvScriptPara) &&
+                    item.appendCrlf &&
+                    !item.disableSuggestion);
+        }
+
+        private static bool IsDefaultQuickSendButton(string value)
+        {
+            var button = (value ?? string.Empty).Trim();
+            return button.Length == 0 ||
+                   button.Equals("发送", StringComparison.OrdinalIgnoreCase) ||
+                   button.Equals("Send", StringComparison.OrdinalIgnoreCase) ||
+                   button.Equals("?!", StringComparison.OrdinalIgnoreCase);
         }
 
         private void EnsureQuickListNamesUnsafe()
@@ -1063,6 +1079,21 @@ namespace llcom_plus.Model
             {
                 quickSendList = CopyQuickSendLists(data);
                 quickListNames = names == null ? new List<string>() : new List<string>(names);
+                EnsureQuickSendListStateUnsafe();
+            }
+            Save();
+        }
+
+        public void SetAllQuickSendState(
+            List<List<ToSendData>> data,
+            IList<string> names,
+            int selectedIndex)
+        {
+            lock (quickSendStateLock)
+            {
+                quickSendList = CopyQuickSendLists(data);
+                quickListNames = names == null ? new List<string>() : new List<string>(names);
+                _quickSendSelect = selectedIndex;
                 EnsureQuickSendListStateUnsafe();
             }
             Save();

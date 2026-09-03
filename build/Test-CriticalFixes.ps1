@@ -5,10 +5,10 @@ param(
     [ValidateSet('x64', 'x86')]
     [string]$Platform = 'x64',
     [switch]$SkipBuild,
-    [ValidateRange(1, 24)]
+    [ValidateRange(1, 26)]
     [int]$CheckFrom = 1,
-    [ValidateRange(1, 24)]
-    [int]$CheckThrough = 24
+    [ValidateRange(1, 26)]
+    [int]$CheckThrough = 26
 )
 
 $ErrorActionPreference = 'Stop'
@@ -2605,6 +2605,344 @@ public static class LlcomRuntimeWorkerLifecycleProbe
             $managedQueueSafe,
             $winUsbSingleGate,
             $pinnedAndBuiltFirst)
+    }
+
+    Invoke-CriticalCheck 25 'Quick-send settings preserve 1.2.11 JSON, round-trip all fields, and never write while deserializing' {
+        $quickSendPersistenceRoot = Join-Path $tempRoot 'quick-send-settings-persistence'
+        [void][IO.Directory]::CreateDirectory($quickSendPersistenceRoot)
+        $settingsPath = Join-Path $quickSendPersistenceRoot 'settings.json'
+        $legacyJson = @'
+{
+  "quickSendList": [
+    [
+      {
+        "id": 7,
+        "text": "AT+CSQ?",
+        "hex": false,
+        "commit": "Check signal",
+        "recvScriptPath": "alpha",
+        "recvScriptPara": "p=1",
+        "appendCrlf": true,
+        "disableSuggestion": false
+      },
+      {
+        "id": 8,
+        "text": "A1 B2 0D 0A",
+        "hex": true,
+        "commit": "Send hex",
+        "recvScriptPath": "beta",
+        "recvScriptPara": "mode=hex",
+        "appendCrlf": false,
+        "disableSuggestion": true
+      }
+    ],
+    [
+      {
+        "id": 42,
+        "text": "AT+RESET",
+        "hex": false,
+        "commit": "Reset",
+        "recvScriptPath": "gamma",
+        "recvScriptPara": "delay=5",
+        "appendCrlf": true,
+        "disableSuggestion": true
+      }
+    ]
+  ],
+  "quickListNames": ["Field commands", "Maintenance commands"],
+  "quickSendSelect": 1,
+  "uartProfileSchemaVersion": 2
+}
+'@
+        [IO.File]::WriteAllText(
+            $settingsPath,
+            $legacyJson,
+            (New-Object Text.UTF8Encoding($false)))
+        $fixedWriteTime = [DateTime]::SpecifyKind(
+            [DateTime]::ParseExact(
+                '2024-01-02 03:04:05',
+                'yyyy-MM-dd HH:mm:ss',
+                [Globalization.CultureInfo]::InvariantCulture),
+            [DateTimeKind]::Utc)
+        [IO.File]::SetLastWriteTimeUtc($settingsPath, $fixedWriteTime)
+        $beforeHash = (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash
+        $beforeLength = ([IO.FileInfo]$settingsPath).Length
+        $beforeWriteTime = [IO.File]::GetLastWriteTimeUtc($settingsPath)
+
+        $getAllQuickSendLists = Get-RequiredMethod `
+            $settingsType `
+            'GetAllQuickSendLists' `
+            ([Reflection.BindingFlags]'Public,Instance') `
+            ([Type[]]@())
+        $getAllQuickListNames = Get-RequiredMethod `
+            $settingsType `
+            'GetAllQuickListNames' `
+            ([Reflection.BindingFlags]'Public,Instance') `
+            ([Type[]]@())
+        $quickSendSelectProperty = $settingsType.GetProperty(
+            'quickSendSelect',
+            [Reflection.BindingFlags]'Public,Instance')
+        Assert-CriticalCondition (
+            $null -ne $quickSendSelectProperty
+        ) 'Settings.quickSendSelect was not found.'
+
+        $assertExpectedQuickSendState = {
+            param(
+                [object]$Settings,
+                [string]$Phase
+            )
+
+            $lists = [Collections.IList]$getAllQuickSendLists.Invoke($Settings, $null)
+            $names = [Collections.IList]$getAllQuickListNames.Invoke($Settings, $null)
+            $selected = [int]$quickSendSelectProperty.GetValue($Settings, $null)
+            Assert-CriticalCondition (
+                $lists.Count -eq 2 -and
+                ([Collections.IList]$lists[0]).Count -eq 2 -and
+                ([Collections.IList]$lists[1]).Count -eq 1 -and
+                $names.Count -eq 2 -and
+                ([string]$names[0]) -ceq 'Field commands' -and
+                ([string]$names[1]) -ceq 'Maintenance commands' -and
+                $selected -eq 1
+            ) "$Phase quick-send page structure, names, or selected page changed."
+
+            $first = ([Collections.IList]$lists[0])[0]
+            $second = ([Collections.IList]$lists[0])[1]
+            $third = ([Collections.IList]$lists[1])[0]
+            Assert-CriticalCondition (
+                $first.id -eq 7 -and
+                ([string]$first.text) -ceq 'AT+CSQ?' -and
+                -not $first.hex -and
+                ([string]$first.commit) -ceq 'Check signal' -and
+                ([string]$first.recvScriptPath) -ceq 'alpha' -and
+                ([string]$first.recvScriptPara) -ceq 'p=1' -and
+                $first.appendCrlf -and
+                -not $first.disableSuggestion -and
+                $second.id -eq 8 -and
+                ([string]$second.text) -ceq 'A1 B2 0D 0A' -and
+                $second.hex -and
+                ([string]$second.commit) -ceq 'Send hex' -and
+                ([string]$second.recvScriptPath) -ceq 'beta' -and
+                ([string]$second.recvScriptPara) -ceq 'mode=hex' -and
+                -not $second.appendCrlf -and
+                $second.disableSuggestion -and
+                $third.id -eq 42 -and
+                ([string]$third.text) -ceq 'AT+RESET' -and
+                -not $third.hex -and
+                ([string]$third.commit) -ceq 'Reset' -and
+                ([string]$third.recvScriptPath) -ceq 'gamma' -and
+                ([string]$third.recvScriptPara) -ceq 'delay=5' -and
+                $third.appendCrlf -and
+                $third.disableSuggestion
+            ) "$Phase quick-send item fields changed."
+        }
+
+        $profilePathBeforeCheck = $globalProfilePathField.GetValue($null)
+        try {
+            $globalProfilePathField.SetValue(
+                $null,
+                $quickSendPersistenceRoot + [IO.Path]::DirectorySeparatorChar)
+            $settingsText = [IO.File]::ReadAllText($settingsPath, [Text.Encoding]::UTF8)
+            $legacySettings = [Newtonsoft.Json.JsonConvert]::DeserializeObject(
+                $settingsText,
+                $settingsType)
+            Assert-CriticalCondition ($null -ne $legacySettings) 'The 1.2.11-shaped settings JSON deserialized to null.'
+            & $assertExpectedQuickSendState $legacySettings 'Legacy JSON'
+
+            $afterHash = (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash
+            $afterLength = ([IO.FileInfo]$settingsPath).Length
+            $afterWriteTime = [IO.File]::GetLastWriteTimeUtc($settingsPath)
+            Assert-CriticalCondition (
+                $afterHash -ceq $beforeHash -and
+                $afterLength -eq $beforeLength -and
+                $afterWriteTime -eq $beforeWriteTime
+            ) 'Deserializing settings modified the source settings.json file.'
+
+            $currentJson = [Newtonsoft.Json.JsonConvert]::SerializeObject($legacySettings)
+            $currentToken = [Newtonsoft.Json.Linq.JObject]::Parse($currentJson)
+            Assert-CriticalCondition (
+                $currentToken['quickSendList'] -is [Newtonsoft.Json.Linq.JArray] -and
+                $currentToken['quickSendList'].Count -eq 2 -and
+                $currentToken['quickListNames'] -is [Newtonsoft.Json.Linq.JArray] -and
+                $currentToken['quickListNames'].Count -eq 2
+            ) 'Current Settings serialization omitted or changed the canonical quick-send properties.'
+
+            $roundTrippedSettings = [Newtonsoft.Json.JsonConvert]::DeserializeObject(
+                $currentJson,
+                $settingsType)
+            Assert-CriticalCondition ($null -ne $roundTrippedSettings) 'Current Settings JSON round-trip deserialized to null.'
+            & $assertExpectedQuickSendState $roundTrippedSettings 'Current round-trip'
+
+            Assert-CriticalCondition (
+                (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash -ceq $beforeHash -and
+                ([IO.FileInfo]$settingsPath).Length -eq $beforeLength -and
+                ([IO.File]::GetLastWriteTimeUtc($settingsPath)) -eq $beforeWriteTime
+            ) 'Settings round-trip unexpectedly wrote to the source settings.json file.'
+
+            # Simulate an affected 1.2.12 profile: the current object is empty, while
+            # the conventional pre-existing backup still contains the user's pages.
+            $legacyBackupPath = Join-Path $quickSendPersistenceRoot 'settings.json.bakup'
+            [IO.File]::WriteAllText(
+                $legacyBackupPath,
+                $legacyJson,
+                (New-Object Text.UTF8Encoding($false)))
+            $emptySettings = [Activator]::CreateInstance($settingsType)
+            $recoverLegacyQuickSend = Get-RequiredMethod `
+                $globalType `
+                'TryRecoverEmptyQuickSendFromLegacyBackup' `
+                ([Reflection.BindingFlags]'NonPublic,Static') `
+                ([Type[]]@($settingsType))
+            [void]$recoverLegacyQuickSend.Invoke($null, [object[]]@($emptySettings))
+            $stillEmptyLists = [Collections.IList]$getAllQuickSendLists.Invoke($emptySettings, $null)
+            Assert-CriticalCondition (
+                $stillEmptyLists.Count -eq 1 -and
+                ([Collections.IList]$stillEmptyLists[0]).Count -eq 10
+            ) 'Legacy backup discovery silently overwrote valid current settings instead of asking the user.'
+
+            $candidateField = $globalType.GetField(
+                'quickSendLegacyRecoveryCandidate',
+                [Reflection.BindingFlags]'NonPublic,Static')
+            $candidate = $candidateField.GetValue($null)
+            Assert-CriticalCondition ($null -ne $candidate) 'Legacy backup data was not staged as a recovery candidate.'
+            $candidateType = $candidate.GetType()
+            $candidateLists = $candidateType.GetMethod(
+                'CreateModelLists',
+                [Reflection.BindingFlags]'NonPublic,Instance').Invoke($candidate, $null)
+            $candidateNames = $candidateType.GetProperty(
+                'Names',
+                [Reflection.BindingFlags]'NonPublic,Instance').GetValue($candidate, $null)
+            $candidateSelected = $candidateType.GetProperty(
+                'SelectedIndex',
+                [Reflection.BindingFlags]'NonPublic,Instance').GetValue($candidate, $null)
+            $setAllQuickSendState = @($settingsType.GetMethods(
+                [Reflection.BindingFlags]'Public,Instance') | Where-Object {
+                    $_.Name -eq 'SetAllQuickSendState' -and $_.GetParameters().Count -eq 3
+                })[0]
+            [void]$setAllQuickSendState.Invoke(
+                $emptySettings,
+                [object[]]@($candidateLists, $candidateNames, $candidateSelected))
+            & $assertExpectedQuickSendState $emptySettings 'Legacy backup recovery'
+        }
+        finally {
+            $globalProfilePathField.SetValue($null, $profilePathBeforeCheck)
+        }
+    }
+
+    Invoke-CriticalCheck 26 'Quick-send snapshot store deduplicates, skips corrupt files, and retains at most fifteen valid backups' {
+        $backupType = Get-RequiredType $assembly 'llcom_plus.Tools.QuickSendBackupService'
+        $initializeBackup = Get-RequiredMethod `
+            $backupType `
+            'Initialize' `
+            ([Reflection.BindingFlags]'NonPublic,Static') `
+            ([Type[]]@($settingsType))
+        $createBackup = Get-RequiredMethod `
+            $backupType `
+            'CreateNow' `
+            ([Reflection.BindingFlags]'NonPublic,Static') `
+            ([Type[]]@($settingsType, [string]))
+        $getBackups = Get-RequiredMethod `
+            $backupType `
+            'GetSnapshots' `
+            ([Reflection.BindingFlags]'NonPublic,Static') `
+            ([Type[]]@())
+        $shutdownBackup = Get-RequiredMethod `
+            $backupType `
+            'Shutdown' `
+            ([Reflection.BindingFlags]'NonPublic,Static') `
+            ([Type[]]@())
+        $backupDirectoryProperty = $backupType.GetProperty(
+            'BackupDirectory',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        $maximumSnapshotField = $backupType.GetField(
+            'MaximumSnapshotCount',
+            [Reflection.BindingFlags]'NonPublic,Static')
+        Assert-CriticalCondition (
+            $null -ne $backupDirectoryProperty -and
+            $null -ne $maximumSnapshotField
+        ) 'Quick-send snapshot directory or retention constant was not found.'
+        $maximumSnapshotCount = [int]$maximumSnapshotField.GetRawConstantValue()
+        Assert-CriticalCondition (
+            $maximumSnapshotCount -eq 15
+        ) 'Quick-send snapshot retention is not capped at fifteen files.'
+
+        $snapshotProfileRoot = Join-Path $tempRoot 'quick-send-snapshot-store'
+        [void][IO.Directory]::CreateDirectory($snapshotProfileRoot)
+        $profilePathBeforeSnapshotCheck = $globalProfilePathField.GetValue($null)
+        try {
+            $globalProfilePathField.SetValue(
+                $null,
+                $snapshotProfileRoot + [IO.Path]::DirectorySeparatorChar)
+            $seedJson = '{"quickSendList":[[{"id":1,"text":"snapshot-0","hex":false,"commit":"Send","recvScriptPath":"","recvScriptPara":"","appendCrlf":true,"disableSuggestion":false}]],"quickListNames":["Snapshots"],"quickSendSelect":0,"uartProfileSchemaVersion":2}'
+            $seedSettings = [Newtonsoft.Json.JsonConvert]::DeserializeObject($seedJson, $settingsType)
+            Assert-CriticalCondition ($null -ne $seedSettings) 'Snapshot seed settings deserialized to null.'
+            Assert-CriticalCondition (
+                [bool]$initializeBackup.Invoke($null, [object[]]@($seedSettings))
+            ) 'Quick-send snapshot store failed to initialize.'
+
+            $firstResult = $createBackup.Invoke(
+                $null,
+                [object[]]@($seedSettings, 'test-initial'))
+            $firstStatusProperty = $firstResult.GetType().GetProperty(
+                'Status',
+                [Reflection.BindingFlags]'Public,NonPublic,Instance')
+            Assert-CriticalCondition (
+                $null -ne $firstStatusProperty -and
+                $firstStatusProperty.GetValue($firstResult, $null).ToString() -ceq 'Created'
+            ) 'The first quick-send snapshot was not created.'
+            $afterFirst = [Collections.IList]$getBackups.Invoke($null, $null)
+            Assert-CriticalCondition ($afterFirst.Count -eq 1) 'The first quick-send snapshot was not enumerable.'
+
+            $duplicateResult = $createBackup.Invoke(
+                $null,
+                [object[]]@($seedSettings, 'test-duplicate'))
+            Assert-CriticalCondition (
+                $firstStatusProperty.GetValue($duplicateResult, $null).ToString() -ceq 'Deduplicated' -and
+                ([Collections.IList]$getBackups.Invoke($null, $null)).Count -eq 1
+            ) 'Content-identical quick-send data created a duplicate snapshot file.'
+
+            for ($snapshotIndex = 1; $snapshotIndex -lt 20; $snapshotIndex++) {
+                $uniqueJson = '{"quickSendList":[[{"id":1,"text":"snapshot-' +
+                    $snapshotIndex.ToString([Globalization.CultureInfo]::InvariantCulture) +
+                    '","hex":false,"commit":"Send","recvScriptPath":"","recvScriptPara":"","appendCrlf":true,"disableSuggestion":false}]],"quickListNames":["Snapshots"],"quickSendSelect":0,"uartProfileSchemaVersion":2}'
+                $uniqueSettings = [Newtonsoft.Json.JsonConvert]::DeserializeObject(
+                    $uniqueJson,
+                    $settingsType)
+                $uniqueResult = $createBackup.Invoke(
+                    $null,
+                    [object[]]@($uniqueSettings, 'test-retention'))
+                Assert-CriticalCondition (
+                    $firstStatusProperty.GetValue($uniqueResult, $null).ToString() -ceq 'Created'
+                ) "Unique quick-send snapshot $snapshotIndex was not created."
+            }
+
+            $retained = [Collections.IList]$getBackups.Invoke($null, $null)
+            Assert-CriticalCondition (
+                $retained.Count -eq $maximumSnapshotCount
+            ) "Snapshot retention kept $($retained.Count) valid files instead of $maximumSnapshotCount."
+
+            $backupDirectory = [string]$backupDirectoryProperty.GetValue($null, $null)
+            Assert-CriticalCondition (
+                -not [string]::IsNullOrWhiteSpace($backupDirectory) -and
+                [IO.Directory]::Exists($backupDirectory)
+            ) 'Quick-send snapshot directory was not created beneath the profile.'
+            $corruptPath = Join-Path $backupDirectory 'quick-send_corrupt.json'
+            [IO.File]::WriteAllText(
+                $corruptPath,
+                '{"schemaVersion":1,"contentSha256":"tampered"',
+                (New-Object Text.UTF8Encoding($false)))
+            $afterCorrupt = [Collections.IList]$getBackups.Invoke($null, $null)
+            Assert-CriticalCondition (
+                [IO.File]::Exists($corruptPath) -and
+                $afterCorrupt.Count -eq $maximumSnapshotCount
+            ) 'A corrupt quick-send snapshot hid valid history or was treated as valid.'
+        }
+        finally {
+            try {
+                [void]$shutdownBackup.Invoke($null, $null)
+            }
+            finally {
+                $globalProfilePathField.SetValue($null, $profilePathBeforeSnapshotCheck)
+            }
+        }
     }
 }
 catch {
