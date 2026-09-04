@@ -309,6 +309,60 @@ try {
 
     $updateControllerSource = [IO.File]::ReadAllText(
         (Join-Path $projectDir 'UI\View\UpdateCheckController.cs'))
+    $notificationRegistrationIndex = $mainWindowSource.IndexOf(
+        'Tools.Global.AppNotificationEvent += Global_AppNotificationEvent;',
+        [StringComparison]::Ordinal)
+    $startupUpdateCheckIndex = $mainWindowSource.IndexOf(
+        'updateCheckController.CheckOnStartupAsync()',
+        [StringComparison]::Ordinal)
+    Test-Condition (
+        $notificationRegistrationIndex -ge 0 -and
+        $startupUpdateCheckIndex -gt $notificationRegistrationIndex -and
+        $mainWindowSource.Contains('DispatcherPriority.ApplicationIdle')
+    ) 'Startup update detection runs at idle after notification-center registration'
+
+    $startupCheckMethodStart = $updateControllerSource.IndexOf(
+        'public async Task CheckOnStartupAsync()',
+        [StringComparison]::Ordinal)
+    $interactiveCheckMethodStart = $updateControllerSource.IndexOf(
+        'public async Task CheckAsync()',
+        [StringComparison]::Ordinal)
+    $startupCheckMethodSource = if (
+        $startupCheckMethodStart -ge 0 -and
+        $interactiveCheckMethodStart -gt $startupCheckMethodStart
+    ) {
+        $updateControllerSource.Substring(
+            $startupCheckMethodStart,
+            $interactiveCheckMethodStart - $startupCheckMethodStart)
+    }
+    else {
+        ''
+    }
+    $startupCheckForbiddenTokens = @(
+        'MessageBox',
+        'InputDialog',
+        'Process.Start',
+        'DownloadUpdate',
+        'StartLocalUpdateAndShutdown',
+        'FindLatestLocalUpdatePackage',
+        '.Wait(',
+        '.Result',
+        'GetAwaiter().GetResult()'
+    )
+    $startupCheckIsSilent = @(
+        $startupCheckForbiddenTokens | Where-Object {
+            $startupCheckMethodSource.Contains($_)
+        }
+    ).Count -eq 0
+    Test-Condition (
+        $startupCheckMethodSource.Contains('GetLatestReleaseAsync(forceRefresh: false)') -and
+        $startupCheckMethodSource.Contains('ApplyUpdateAvailability') -and
+        $startupCheckIsSilent
+    ) 'Startup update detection is asynchronous and cannot prompt, download, or install'
+    Test-Condition (
+        $updateControllerSource.Contains('GetLatestReleaseAsync(forceRefresh: true)') -and
+        $updateControllerSource.Contains('checkTask = activeOnlineCheckTask;')
+    ) 'Manual update checks bypass completed startup cache while sharing an in-flight request'
     Test-Condition (
         $updateControllerSource.Contains('SetResourceReference(StyleProperty, "AppGlassWindowStyle")') -and
         $updateControllerSource.Contains('SetResourceReference(BackgroundProperty, "AppWindowBackgroundBrush")') -and
@@ -533,13 +587,15 @@ try {
             $window.FindName('NotificationCenterButton').ToolTip -eq 'Notification center' -and
             $window.FindName('ThemeToggleMenuItem').ToolTip -eq 'Dark mode' -and
             $window.FindName('LanguageMenuButton').ToolTip -eq 'Language' -and
-            $window.FindName('CheckUpdateButton').ToolTip -eq 'Check updates'
+            $window.FindName('CheckUpdateButton').ToolTip -eq 'Check updates' -and
+            ([string]$app.TryFindResource('AboutUpdateAvailableTooltipFormat')).Contains('{0}')
         ) 'The complete top-right toolbar has valid English tooltips'
         [void]$loadLanguage.Invoke($null, [object[]]@('zh-CN'))
         [void]$updateThemeToggleMenu.Invoke($window, $null)
 
         $checkUpdateButton = $window.FindName('CheckUpdateButton')
         $checkUpdateIcon = $window.FindName('CheckUpdateIcon')
+        $updateAvailableBadge = $window.FindName('UpdateAvailableBadge')
         Test-Condition (
             $null -eq $window.FindName('AboutTab')
         ) 'The obsolete About tab is removed from the main navigation'
@@ -548,6 +604,14 @@ try {
             $null -ne $checkUpdateIcon -and
             $checkUpdateIcon.Icon.ToString() -eq 'Refresh'
         ) 'The top-right toolbar exposes a refresh-style update button'
+        Test-Condition (
+            $null -ne $updateAvailableBadge -and
+            $updateAvailableBadge.Visibility -eq [Windows.Visibility]::Collapsed -and
+            -not $updateAvailableBadge.IsHitTestVisible -and
+            [object]::ReferenceEquals($updateAvailableBadge.Parent, $checkUpdateIcon.Parent) -and
+            $updateAvailableBadge.Background.ToString() -eq
+                $app.TryFindResource('AppDangerBrush').ToString()
+        ) 'The update button has a non-interactive hidden danger badge for new versions'
         $topRightButtonPanel = $checkUpdateButton.Parent
         Test-Condition (
             $null -ne $topRightButtonPanel -and
@@ -560,6 +624,70 @@ try {
                 'CheckUpdateButton_Click',
                 [Reflection.BindingFlags]'NonPublic,Instance')
         ) 'The top-right update button keeps the complete update workflow'
+
+        $updateControllerField = $windowType.GetField(
+            'updateCheckController',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $updateController = $updateControllerField.GetValue($window)
+        $updateControllerType = $updateController.GetType()
+        $releaseStateType = $assembly.GetType('llcom_plus.Tools.GitHubReleaseInfo', $true)
+        $applyUpdateAvailability = $updateControllerType.GetMethod(
+            'ApplyUpdateAvailability',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $newerRelease = [Activator]::CreateInstance($releaseStateType, $true)
+        $releaseStateType.GetProperty('Version').SetValue(
+            $newerRelease,
+            [Version]'99.0.0',
+            $null)
+        $releaseStateType.GetProperty('CurrentVersion').SetValue(
+            $newerRelease,
+            $assembly.GetName().Version,
+            $null)
+        [void]$applyUpdateAvailability.Invoke(
+            $updateController,
+            [object[]]@($newerRelease, $false))
+        Test-Condition (
+            [bool]$globalType.GetProperty('HasNewVersion').GetValue($null, $null) -and
+            $updateAvailableBadge.Visibility -eq [Windows.Visibility]::Visible -and
+            ([string]$checkUpdateButton.ToolTip).Contains('99.0.0')
+        ) 'A newer release marks the update icon and exposes its version in the tooltip'
+
+        $currentRelease = [Activator]::CreateInstance($releaseStateType, $true)
+        $releaseStateType.GetProperty('Version').SetValue(
+            $currentRelease,
+            $assembly.GetName().Version,
+            $null)
+        $releaseStateType.GetProperty('CurrentVersion').SetValue(
+            $currentRelease,
+            $assembly.GetName().Version,
+            $null)
+        [void]$applyUpdateAvailability.Invoke(
+            $updateController,
+            [object[]]@($currentRelease, $false))
+        Test-Condition (
+            -not [bool]$globalType.GetProperty('HasNewVersion').GetValue($null, $null) -and
+            $updateAvailableBadge.Visibility -eq [Windows.Visibility]::Collapsed -and
+            $checkUpdateButton.ToolTip -eq $app.TryFindResource('AboutReleaseButton')
+        ) 'A current release clears the update badge and restores the localized tooltip'
+
+        $tryMarkUpdateNotification = $updateControllerType.GetMethod(
+            'TryMarkUpdateNotification',
+            [Reflection.BindingFlags]'NonPublic,Instance')
+        $firstVersionNotification = [bool]$tryMarkUpdateNotification.Invoke(
+            $updateController,
+            [object[]]@([Version]'99.0.0'))
+        $duplicateVersionNotification = [bool]$tryMarkUpdateNotification.Invoke(
+            $updateController,
+            [object[]]@([Version]'99.0.0'))
+        $nextVersionNotification = [bool]$tryMarkUpdateNotification.Invoke(
+            $updateController,
+            [object[]]@([Version]'100.0.0'))
+        Test-Condition (
+            $firstVersionNotification -and
+            -not $duplicateVersionNotification -and
+            $nextVersionNotification -and
+            $updateControllerSource.Contains('category: Tools.AppNotificationCategory.Update')
+        ) 'Update notifications are emitted at most once per version in each app session'
         $createDefaultQuickSendRows = $settingsType.GetMethod(
             'CreateDefaultQuickSendRows',
             [Reflection.BindingFlags]'NonPublic,Instance')

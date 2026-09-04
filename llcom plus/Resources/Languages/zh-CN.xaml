@@ -140,6 +140,7 @@
     <system:String x:Key="ScriptExist">该文件已存在！</system:String>
     <system:String x:Key="ScriptCreateFail">新建失败，请检查！</system:String>
     <system:String x:Key="AboutReleaseButton">检查更新</system:String>
+    <system:String x:Key="AboutUpdateAvailableTooltipFormat">发现新版本 {0}，点击查看并更新</system:String>
     <system:String x:Key="AboutUpdateChecking">正在检查...</system:String>
     <system:String x:Key="AboutUpdateCheckingLocal">网页端无可用更新，正在检查安装目录中的本地更新包...</system:String>
     <system:String x:Key="AboutUpdateInstallingLocal">发现本地更新 {0}，正在校验并准备安装...</system:String>
@@ -544,7 +545,7 @@
     <system:String x:Key="NotificationFileSendSource">文件发送</system:String>
     <system:String x:Key="NotificationCircularSendSource">循环发送配置</system:String>
     <system:String x:Key="NotificationUpdateAvailableTitleFormat">发现新版本 {0}</system:String>
-    <system:String x:Key="NotificationUpdateAvailableMessageFormat">当前版本：{0}</system:String>
+    <system:String x:Key="NotificationUpdateAvailableMessageFormat">当前版本：{0}。点击右上角更新按钮查看并更新。</system:String>
     <system:String x:Key="NotificationUpdateDownloadedTitle">更新包已下载</system:String>
     <system:String x:Key="NotificationMqttSource">MQTT</system:String>
     <system:String x:Key="NotificationWinUsbSource">WinUSB</system:String>

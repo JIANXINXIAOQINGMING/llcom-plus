@@ -11,17 +11,54 @@ namespace llcom_plus
     {
         private const string ProjectUrl = "https://github.com/JIANXINXIAOQINGMING/llcom-plus";
         private const string ReleasesUrl = ProjectUrl + "/releases";
+        private static readonly TimeSpan OnlineCheckCacheDuration = TimeSpan.FromMinutes(5);
 
         private readonly Window owner;
         private readonly Button updateButton;
         private readonly FontAwesomeControl updateIcon;
+        private readonly FrameworkElement updateBadge;
+        private readonly object onlineCheckSync = new object();
+        private Task<Tools.GitHubReleaseInfo> activeOnlineCheckTask;
+        private Tools.GitHubReleaseInfo cachedOnlineRelease;
+        private DateTime cachedOnlineReleaseUtc = DateTime.MinValue;
         private bool checkingUpdate;
+        private bool startupCheckRequested;
+        private string lastNotifiedVersion = string.Empty;
 
-        public UpdateCheckController(Window owner, Button updateButton, FontAwesomeControl updateIcon)
+        public UpdateCheckController(
+            Window owner,
+            Button updateButton,
+            FontAwesomeControl updateIcon,
+            FrameworkElement updateBadge)
         {
             this.owner = owner ?? throw new ArgumentNullException(nameof(owner));
             this.updateButton = updateButton ?? throw new ArgumentNullException(nameof(updateButton));
             this.updateIcon = updateIcon ?? throw new ArgumentNullException(nameof(updateIcon));
+            this.updateBadge = updateBadge ?? throw new ArgumentNullException(nameof(updateBadge));
+        }
+
+        /// <summary>
+        /// Checks GitHub once after the main window becomes interactive. This path is
+        /// deliberately silent unless an update exists: it never opens a dialog,
+        /// starts a download, launches a browser, or installs a local package.
+        /// </summary>
+        public async Task CheckOnStartupAsync()
+        {
+            if (startupCheckRequested)
+                return;
+
+            startupCheckRequested = true;
+            try
+            {
+                var release = await GetLatestReleaseAsync(forceRefresh: false);
+                ApplyUpdateAvailability(release, publishNotification: true);
+            }
+            catch (Exception ex)
+            {
+                ApplyCachedUpdateAvailabilityAfterFailure();
+                Tools.Logger.AddUartLogDebug(
+                    $"[Update] startup check failed: {ex.GetBaseException().Message}");
+            }
         }
 
         public async Task CheckAsync()
@@ -50,27 +87,20 @@ namespace llcom_plus
                 Exception onlineError = null;
                 try
                 {
-                    release = await Tools.GitHubReleaseUpdater.CheckLatestAsync();
-                    Tools.Global.HasNewVersion = release.HasUpdate;
+                    // A deliberate button click must re-query GitHub even when the
+                    // startup result is still fresh. If that startup request is still
+                    // in flight, both paths continue to share the same task.
+                    release = await GetLatestReleaseAsync(forceRefresh: true);
+                    ApplyUpdateAvailability(release, publishNotification: true);
                 }
                 catch (Exception ex)
                 {
                     onlineError = ex;
-                    Tools.Global.HasNewVersion = false;
+                    ApplyCachedUpdateAvailabilityAfterFailure();
                 }
 
                 if (release?.HasUpdate == true)
                 {
-                    Tools.Global.PublishNotification(
-                        string.Format(
-                            ResourceText("NotificationUpdateAvailableTitleFormat", "Version {0} is available"),
-                            release.Version),
-                        string.Format(
-                            ResourceText("NotificationUpdateAvailableMessageFormat", "Current version: {0}"),
-                            Tools.AppInfo.DisplayVersion),
-                        Tools.AppNotificationLevel.Info,
-                        category: Tools.AppNotificationCategory.Update);
-
                     if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl))
                     {
                         var localFallback = Tools.GitHubReleaseUpdater.FindLatestLocalUpdatePackage();
@@ -202,11 +232,127 @@ namespace llcom_plus
                 if (!shouldShutdown)
                 {
                     updateIcon.Spin = false;
-                    updateButton.SetResourceReference(FrameworkElement.ToolTipProperty, "AboutReleaseButton");
+                    ApplyUpdateIndicator(cachedOnlineRelease);
                     updateButton.IsEnabled = true;
                     checkingUpdate = false;
                 }
             }
+        }
+
+        public void RefreshIndicatorText()
+        {
+            ApplyUpdateIndicator(cachedOnlineRelease);
+        }
+
+        private Task<Tools.GitHubReleaseInfo> GetLatestReleaseAsync(bool forceRefresh)
+        {
+            Task<Tools.GitHubReleaseInfo> checkTask;
+            lock (onlineCheckSync)
+            {
+                checkTask = activeOnlineCheckTask;
+                if (checkTask == null &&
+                    !forceRefresh &&
+                    cachedOnlineRelease != null &&
+                    DateTime.UtcNow - cachedOnlineReleaseUtc < OnlineCheckCacheDuration)
+                {
+                    return Task.FromResult(cachedOnlineRelease);
+                }
+
+                if (checkTask == null)
+                {
+                    checkTask = Tools.GitHubReleaseUpdater.CheckLatestAsync();
+                    activeOnlineCheckTask = checkTask;
+                }
+            }
+
+            return AwaitAndCacheLatestReleaseAsync(checkTask);
+        }
+
+        private async Task<Tools.GitHubReleaseInfo> AwaitAndCacheLatestReleaseAsync(
+            Task<Tools.GitHubReleaseInfo> checkTask)
+        {
+            try
+            {
+                var release = await checkTask;
+                lock (onlineCheckSync)
+                {
+                    cachedOnlineRelease = release;
+                    cachedOnlineReleaseUtc = DateTime.UtcNow;
+                }
+                return release;
+            }
+            finally
+            {
+                lock (onlineCheckSync)
+                {
+                    if (ReferenceEquals(activeOnlineCheckTask, checkTask))
+                        activeOnlineCheckTask = null;
+                }
+            }
+        }
+
+        private void ApplyCachedUpdateAvailabilityAfterFailure()
+        {
+            Tools.GitHubReleaseInfo cachedRelease;
+            lock (onlineCheckSync)
+                cachedRelease = cachedOnlineRelease;
+
+            ApplyUpdateAvailability(cachedRelease, publishNotification: false);
+        }
+
+        private void ApplyUpdateAvailability(
+            Tools.GitHubReleaseInfo release,
+            bool publishNotification)
+        {
+            var hasUpdate = release?.HasUpdate == true;
+            Tools.Global.HasNewVersion = hasUpdate;
+            ApplyUpdateIndicator(release);
+
+            if (!hasUpdate || !publishNotification)
+                return;
+
+            if (!TryMarkUpdateNotification(release.Version))
+                return;
+
+            Tools.Global.PublishNotification(
+                string.Format(
+                    ResourceText("NotificationUpdateAvailableTitleFormat", "Version {0} is available"),
+                    release.Version),
+                string.Format(
+                    ResourceText("NotificationUpdateAvailableMessageFormat", "Current version: {0}"),
+                    Tools.AppInfo.DisplayVersion),
+                Tools.AppNotificationLevel.Info,
+                category: Tools.AppNotificationCategory.Update);
+        }
+
+        private bool TryMarkUpdateNotification(Version version)
+        {
+            if (version == null)
+                return false;
+
+            var versionText = version.ToString();
+            if (string.Equals(lastNotifiedVersion, versionText, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            lastNotifiedVersion = versionText;
+            return true;
+        }
+
+        private void ApplyUpdateIndicator(Tools.GitHubReleaseInfo release)
+        {
+            if (release?.HasUpdate == true)
+            {
+                updateBadge.Visibility = Visibility.Visible;
+                updateButton.ToolTip = string.Format(
+                    ResourceText(
+                        "AboutUpdateAvailableTooltipFormat",
+                        "Version {0} is available. Click to update."),
+                    release.Version);
+                return;
+            }
+
+            updateBadge.Visibility = Visibility.Collapsed;
+            updateButton.SetResourceReference(FrameworkElement.ToolTipProperty, "AboutReleaseButton");
         }
 
         private void SetStatus(string resourceKey, string fallback, params object[] arguments)

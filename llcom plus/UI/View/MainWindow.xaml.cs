@@ -66,7 +66,11 @@ namespace llcom_plus
         {
             StartupProfiler.Mark("MainWindow ctor enter");
             StartupProfiler.Measure("MainWindow.InitializeComponent", InitializeComponent);
-            updateCheckController = new UpdateCheckController(this, CheckUpdateButton, CheckUpdateIcon);
+            updateCheckController = new UpdateCheckController(
+                this,
+                CheckUpdateButton,
+                CheckUpdateIcon,
+                UpdateAvailableBadge);
             notificationView = CollectionViewSource.GetDefaultView(notificationItems);
             notificationView.Filter = FilterNotification;
             NotificationListBox.ItemsSource = notificationView;
@@ -362,6 +366,9 @@ namespace llcom_plus
                     lazyLoadReady = true;
                     MainGrid.IsEnabled = true;
                     StartupProfiler.Mark("MainWindow interactive");
+                    Dispatcher.BeginInvoke(
+                        new Action(() => _ = updateCheckController.CheckOnStartupAsync()),
+                        System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                     StartupProfiler.Mark("MainWindow.Loaded dispatcher block exit");
                 }));
                 StartupProfiler.Mark("MainWindow.Loaded dispatcher task finished");
@@ -4205,6 +4212,7 @@ namespace llcom_plus
             SetRightToolsCollapsed(rightToolsCollapsed);
             UpdateMainSendTargetUi();
             UpdateThemeToggleMenu();
+            updateCheckController.RefreshIndicatorText();
             RefreshNotificationFilterOptions();
         }
 

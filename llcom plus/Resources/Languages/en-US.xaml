@@ -140,6 +140,7 @@
     <system:String x:Key="ScriptExist">File is exist!</system:String>
     <system:String x:Key="ScriptCreateFail">Create file failed, please check.</system:String>
     <system:String x:Key="AboutReleaseButton">Check updates</system:String>
+    <system:String x:Key="AboutUpdateAvailableTooltipFormat">Version {0} is available. Click to view and update.</system:String>
     <system:String x:Key="AboutUpdateChecking">Checking...</system:String>
     <system:String x:Key="AboutUpdateCheckingLocal">No online update is available; checking the installation directory...</system:String>
     <system:String x:Key="AboutUpdateInstallingLocal">Found local update {0}; validating and preparing installation...</system:String>
@@ -544,7 +545,7 @@
     <system:String x:Key="NotificationFileSendSource">File transfer</system:String>
     <system:String x:Key="NotificationCircularSendSource">Circular-send configuration</system:String>
     <system:String x:Key="NotificationUpdateAvailableTitleFormat">Version {0} is available</system:String>
-    <system:String x:Key="NotificationUpdateAvailableMessageFormat">Current version: {0}</system:String>
+    <system:String x:Key="NotificationUpdateAvailableMessageFormat">Current version: {0}. Click the update button in the top-right corner to view and update.</system:String>
     <system:String x:Key="NotificationUpdateDownloadedTitle">Update package downloaded</system:String>
     <system:String x:Key="NotificationMqttSource">MQTT</system:String>
     <system:String x:Key="NotificationWinUsbSource">WinUSB</system:String>
