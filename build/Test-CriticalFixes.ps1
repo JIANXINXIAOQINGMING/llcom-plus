@@ -2360,6 +2360,96 @@ public static class LlcomRuntimeWorkerLifecycleProbe
             ([Type[]]@($releaseType))
         $trustError = [string]$trustErrorMethod.Invoke($null, [object[]]@($release))
 
+        # Exercise the no-network GitHub HTML fallback. This is the path used
+        # when api.github.com is unavailable or rate-limited, and it must bind
+        # the exact ZIP to a real sibling .zip.sig asset without weakening RSA
+        # verification.
+        $fallbackVersion = [Version]'99.1.2'
+        $fallbackTag = '99.1.2'
+        $fallbackArchitecture = if ([Environment]::Is64BitProcess) { 'x64' } else { 'x86' }
+        $otherArchitecture = if ($fallbackArchitecture -eq 'x64') { 'x86' } else { 'x64' }
+        $fallbackZipName = "llcom.plus_99.1.2_${fallbackArchitecture}.zip"
+        $otherZipName = "llcom.plus_99.1.2_${otherArchitecture}.zip"
+        $releaseAssetRoot = "/JIANXINXIAOQINGMING/llcom-plus/releases/download/$fallbackTag/"
+        $fallbackHtml = @"
+<a href="$releaseAssetRoot$otherZipName">other zip</a>
+<a href="$releaseAssetRoot$otherZipName.sig">other signature</a>
+<a href="https://evil.invalid/JIANXINXIAOQINGMING/llcom-plus/releases/download/$fallbackTag/$fallbackZipName">evil host</a>
+<a href="/someone-else/llcom-plus/releases/download/$fallbackTag/$fallbackZipName">wrong repository</a>
+<a href="/JIANXINXIAOQINGMING/llcom-plus/releases/download/99.1.1/$fallbackZipName.sig">wrong tag</a>
+<a href="$releaseAssetRoot$fallbackZipName.sig.bak">signature lookalike</a>
+<a href="$releaseAssetRoot$fallbackZipName">selected zip</a>
+<a href="$releaseAssetRoot$fallbackZipName.sig">selected signature</a>
+<a href="$releaseAssetRoot$fallbackZipName">duplicate selected zip</a>
+"@
+        $selectFallbackAsset = Get-RequiredMethod `
+            $updaterType `
+            'SelectReleaseAssetFromHtml' `
+            $staticFlags `
+            ([Type[]]@([string], [string], [Version]))
+        $selectFallbackSignature = Get-RequiredMethod `
+            $updaterType `
+            'SelectSignatureAssetFromHtml' `
+            $staticFlags `
+            ([Type[]]@([string], [string], [string]))
+        $selectedFallbackAsset = $selectFallbackAsset.Invoke(
+            $null,
+            [object[]]@($fallbackHtml, $fallbackTag, $fallbackVersion))
+        $selectedFallbackSignature = $selectFallbackSignature.Invoke(
+            $null,
+            [object[]]@($fallbackHtml, $fallbackTag, $fallbackZipName))
+        Assert-CriticalCondition ($null -ne $selectedFallbackAsset) 'Fallback did not select the exact current-architecture ZIP.'
+        Assert-CriticalCondition ($null -ne $selectedFallbackSignature) 'Fallback did not select the ZIP sibling signature.'
+
+        $fourPartVersion = [Version]'99.1.2.0'
+        $fourPartTag = '99.1.2.0'
+        $fourPartZipName = "llcom.plus_99.1.2.0_${fallbackArchitecture}.zip"
+        $fourPartRoot = "/JIANXINXIAOQINGMING/llcom-plus/releases/download/$fourPartTag/"
+        $fourPartHtml = "<a href=`"$fourPartRoot$fourPartZipName`">four-part zip</a>"
+        $selectedFourPartAsset = $selectFallbackAsset.Invoke(
+            $null,
+            [object[]]@($fourPartHtml, $fourPartTag, $fourPartVersion))
+
+        $missingSignatureHtml = @"
+<a href="$releaseAssetRoot$fallbackZipName">selected zip</a>
+<a href="$releaseAssetRoot$otherZipName.sig">wrong architecture signature</a>
+<a href="$releaseAssetRoot${fallbackZipName}.sig?download=1">query-bearing signature</a>
+<a href="//$([Uri]::EscapeDataString('evil.invalid'))/JIANXINXIAOQINGMING/llcom-plus/releases/download/$fallbackTag/${fallbackZipName}.sig">protocol-relative signature</a>
+"@
+        $missingFallbackSignature = $selectFallbackSignature.Invoke(
+            $null,
+            [object[]]@($missingSignatureHtml, $fallbackTag, $fallbackZipName))
+
+        $decoyOnlyHtml = @"
+<a href="$releaseAssetRoot/not-$fallbackZipName">name prefix decoy</a>
+<a href="$releaseAssetRoot$($fallbackZipName.Replace('.zip', '-debug.zip'))">debug decoy</a>
+<a href="/JIANXINXIAOQINGMING/llcom-plus/releases/download/99.1.1/$fallbackZipName">wrong tag</a>
+<a href="$releaseAssetRoot$otherZipName">wrong architecture</a>
+<a href="$releaseAssetRoot${fallbackZipName}?download=1">query-bearing zip</a>
+"@
+        $decoyFallbackAsset = $selectFallbackAsset.Invoke(
+            $null,
+            [object[]]@($decoyOnlyHtml, $fallbackTag, $fallbackVersion))
+
+        $validFallbackTrustError = 'not-tested'
+        $appPathField = $globalType.GetField('_appPath', [Reflection.BindingFlags]'NonPublic,Static')
+        Assert-CriticalCondition ($null -ne $appPathField) 'Global._appPath was not found.'
+        $originalAppPath = $appPathField.GetValue($null)
+        try {
+            $appPathField.SetValue($null, $outputDir + [IO.Path]::DirectorySeparatorChar)
+            $trustedFallbackRelease = [Activator]::CreateInstance($releaseType, $true)
+            $releaseType.GetProperty('AssetName').SetValue($trustedFallbackRelease, $selectedFallbackAsset.Name, $null)
+            $releaseType.GetProperty('AssetDownloadUrl').SetValue($trustedFallbackRelease, $selectedFallbackAsset.DownloadUrl, $null)
+            $releaseType.GetProperty('SignatureAssetName').SetValue($trustedFallbackRelease, $selectedFallbackSignature.Name, $null)
+            $releaseType.GetProperty('SignatureDownloadUrl').SetValue($trustedFallbackRelease, $selectedFallbackSignature.DownloadUrl, $null)
+            $validFallbackTrustError = [string]$trustErrorMethod.Invoke(
+                $null,
+                [object[]]@($trustedFallbackRelease))
+        }
+        finally {
+            $appPathField.SetValue($null, $originalAppPath)
+        }
+
         $updaterSource = [IO.File]::ReadAllText((Join-Path $projectDir 'Core\Tools\GitHubReleaseUpdater.cs'))
         $updateControllerSource = [IO.File]::ReadAllText((Join-Path $projectDir 'UI\View\UpdateCheckController.cs'))
         $projectSource = [IO.File]::ReadAllText((Join-Path $projectDir 'llcom plus.csproj'))
@@ -2394,6 +2484,21 @@ public static class LlcomRuntimeWorkerLifecycleProbe
             $maxSignature -gt 0 -and
             $oversizedRejected -and
             -not [string]::IsNullOrWhiteSpace($trustError) -and
+            $null -ne $selectedFallbackAsset -and
+            $selectedFallbackAsset.Name -ceq $fallbackZipName -and
+            $selectedFallbackAsset.DownloadUrl -ceq "https://github.com$releaseAssetRoot$fallbackZipName" -and
+            $null -ne $selectedFallbackSignature -and
+            $selectedFallbackSignature.Name -ceq "$fallbackZipName.sig" -and
+            $selectedFallbackSignature.DownloadUrl -ceq "https://github.com$releaseAssetRoot$fallbackZipName.sig" -and
+            $null -ne $selectedFourPartAsset -and
+            $selectedFourPartAsset.Name -ceq $fourPartZipName -and
+            $null -eq $missingFallbackSignature -and
+            $null -eq $decoyFallbackAsset -and
+            [string]::IsNullOrWhiteSpace($validFallbackTrustError) -and
+            $updaterSource.Contains('SelectSignatureAssetFromHtml(expandedAssetsHtml, tag, asset?.Name)') -and
+            $updaterSource.Contains('CancelAfter(ReleaseMetadataTotalTimeout)') -and
+            $updaterSource.Contains('CancelAfter(ReleaseMetadataIdleTimeout)') -and
+            $updaterSource.Contains('timeoutCts.CancelAfter(ReleaseMetadataTotalTimeout)') -and
             $updaterSource.Contains('if (!HasDetachedSignature(zipPath, signaturePath))') -and
             $updaterSource.Contains('.Where(package => IsValidUpdatePackage(package.Path, package.Version))') -and
             $updaterSource.Contains('CancelAfter(DownloadTotalTimeout)') -and

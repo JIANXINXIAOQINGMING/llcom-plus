@@ -28,11 +28,14 @@ namespace llcom_plus.Tools
         private const string TrustedPublicKeyFileName = "UpdateSigningPublicKey.xml";
         internal const long MaximumUpdateDownloadBytes = 512L * 1024L * 1024L;
         internal const long MaximumSignatureBytes = 64L * 1024L;
+        internal const long MaximumReleaseMetadataBytes = 2L * 1024L * 1024L;
         internal const int MaximumUpdateResponseHeaderKilobytes = 64;
         internal const int MaximumDownloadRedirects = 5;
         private const long MinimumFreeDiskReserveBytes = 64L * 1024L * 1024L;
         private static readonly TimeSpan DownloadTotalTimeout = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan DownloadIdleTimeout = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan ReleaseMetadataTotalTimeout = TimeSpan.FromSeconds(20);
+        private static readonly TimeSpan ReleaseMetadataIdleTimeout = TimeSpan.FromSeconds(10);
         private const int MaximumUpdateEntryCount = 10000;
         private const long MaximumExpandedUpdateBytes = 2L * 1024 * 1024 * 1024;
         private static bool installScheduled;
@@ -78,18 +81,24 @@ namespace llcom_plus.Tools
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("llcom-plus-updater");
                 client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 
-                var json = await client.GetStringAsync(LatestReleaseApi).ConfigureAwait(false);
+                string json;
+                using (var response = await client.GetAsync(
+                    LatestReleaseApi,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).ConfigureAwait(false))
+                {
+                    response.EnsureSuccessStatusCode();
+                    json = await ReadMetadataContentAsync(response, cancellationToken).ConfigureAwait(false);
+                }
                 var root = JObject.Parse(json);
                 var tag = root["tag_name"]?.ToString() ?? "";
-                var name = root["name"]?.ToString() ?? tag;
-                var version = ParseVersion(tag) ?? ParseVersion(name);
-                if (version == null)
-                    throw new InvalidOperationException("Cannot parse release version from GitHub latest release.");
+                if (!TryParseReleaseTag(tag, out var version))
+                    throw new InvalidOperationException("GitHub latest release has an invalid version tag.");
 
                 var currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
                 cancellationToken.ThrowIfCancellationRequested();
                 var assets = root["assets"] as JArray;
-                var asset = SelectReleaseAsset(assets);
+                var asset = SelectReleaseAsset(assets, version);
                 var signatureAsset = SelectSignatureAsset(assets, asset?.Name);
                 return new GitHubReleaseInfo
                 {
@@ -115,28 +124,43 @@ namespace llcom_plus.Tools
                 client.Timeout = TimeSpan.FromSeconds(20);
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("llcom-plus-updater");
 
-                using (var response = await client.GetAsync(LatestReleasePage).ConfigureAwait(false))
+                using (var response = await client.GetAsync(
+                    LatestReleasePage,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).ConfigureAwait(false))
                 {
                     response.EnsureSuccessStatusCode();
-                    var releaseUri = response.RequestMessage?.RequestUri?.ToString() ?? LatestReleasePage;
-                    var tag = GetTagFromReleaseUrl(releaseUri);
-                    var version = ParseVersion(tag);
-                    if (version == null)
-                        throw new InvalidOperationException("Cannot parse release version from GitHub latest release.");
+                    var releaseUri = response.RequestMessage?.RequestUri;
+                    if (!TryGetReleaseTagFromUri(releaseUri, out var tag, out var version))
+                        throw new InvalidOperationException("GitHub latest release redirected to an invalid release URL.");
 
                     var expandedAssetsUrl = "https://github.com/" + Repository + "/releases/expanded_assets/" +
                                             Uri.EscapeDataString(tag);
-                    var expandedAssetsHtml = await client.GetStringAsync(expandedAssetsUrl).ConfigureAwait(false);
-                    var asset = SelectReleaseAssetFromHtml(expandedAssetsHtml);
+                    string expandedAssetsHtml;
+                    using (var assetsResponse = await client.GetAsync(
+                        expandedAssetsUrl,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        cancellationToken).ConfigureAwait(false))
+                    {
+                        assetsResponse.EnsureSuccessStatusCode();
+                        if (!IsExpectedExpandedAssetsUri(assetsResponse.RequestMessage?.RequestUri, tag))
+                            throw new InvalidOperationException("GitHub expanded-assets request redirected outside the expected release.");
+                        expandedAssetsHtml = await ReadMetadataContentAsync(assetsResponse, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var asset = SelectReleaseAssetFromHtml(expandedAssetsHtml, tag, version);
+                    var signatureAsset = SelectSignatureAssetFromHtml(expandedAssetsHtml, tag, asset?.Name);
                     return new GitHubReleaseInfo
                     {
                         Version = version,
                         CurrentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0),
                         TagName = tag,
-                        ReleaseUrl = releaseUri,
+                        ReleaseUrl = releaseUri.AbsoluteUri,
                         AssetName = asset?.Name,
                         AssetDownloadUrl = asset?.DownloadUrl,
                         AssetSizeBytes = asset?.SizeBytes ?? 0,
+                        SignatureAssetName = signatureAsset?.Name,
+                        SignatureDownloadUrl = signatureAsset?.DownloadUrl,
                     };
                 }
             }
@@ -166,7 +190,7 @@ namespace llcom_plus.Tools
                 return "Automatic update is disabled: this release has no independent detached signature (.zip.sig). " +
                        "The GitHub digest alone is not an independent trust source; download manually from the release page.";
             }
-            if (!string.Equals(release.SignatureAssetName, (release.AssetName ?? string.Empty) + ".sig", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(release.SignatureAssetName, (release.AssetName ?? string.Empty) + ".sig", StringComparison.Ordinal))
                 return "Automatic update is disabled: the detached signature asset does not match the ZIP name.";
             return null;
         }
@@ -532,13 +556,13 @@ namespace llcom_plus.Tools
             }
         }
 
-        private static GitHubReleaseAsset SelectReleaseAsset(JArray assets)
+        private static GitHubReleaseAsset SelectReleaseAsset(JArray assets, Version version)
         {
-            if (assets == null || assets.Count == 0)
+            if (assets == null || assets.Count == 0 || version == null)
                 return null;
 
-            var arch = Environment.Is64BitProcess ? "x64" : "x86";
-            var zipAssets = assets
+            var expectedName = GetExpectedReleaseAssetName(version);
+            var matches = assets
                 .OfType<JObject>()
                 .Select(asset => new GitHubReleaseAsset
                 {
@@ -547,11 +571,15 @@ namespace llcom_plus.Tools
                     SizeBytes = asset["size"]?.ToObject<long?>() ?? 0,
                     Digest = asset["digest"]?.ToString(),
                 })
-                .Where(asset => !string.IsNullOrWhiteSpace(asset.DownloadUrl) &&
-                                (asset.Name ?? "").EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                .Where(asset =>
+                    string.Equals(asset.Name, expectedName, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(asset.DownloadUrl) &&
+                    asset.SizeBytes >= 0 &&
+                    asset.SizeBytes <= MaximumUpdateDownloadBytes)
+                .Take(2)
                 .ToList();
 
-            return zipAssets.FirstOrDefault(asset => (asset.Name ?? "").IndexOf(arch, StringComparison.OrdinalIgnoreCase) >= 0);
+            return matches.Count == 1 ? matches[0] : null;
         }
 
         private static GitHubReleaseAsset SelectSignatureAsset(JArray assets, string zipAssetName)
@@ -560,7 +588,7 @@ namespace llcom_plus.Tools
                 return null;
 
             var expectedName = zipAssetName + ".sig";
-            return assets
+            var matches = assets
                 .OfType<JObject>()
                 .Select(asset => new GitHubReleaseAsset
                 {
@@ -569,41 +597,304 @@ namespace llcom_plus.Tools
                     SizeBytes = asset["size"]?.ToObject<long?>() ?? 0,
                     Digest = asset["digest"]?.ToString(),
                 })
-                .FirstOrDefault(asset =>
-                    string.Equals(asset.Name, expectedName, StringComparison.OrdinalIgnoreCase) &&
+                .Where(asset =>
+                    string.Equals(asset.Name, expectedName, StringComparison.Ordinal) &&
                     !string.IsNullOrWhiteSpace(asset.DownloadUrl) &&
                     asset.SizeBytes >= 0 &&
-                    asset.SizeBytes <= MaximumSignatureBytes);
-        }
-
-        private static GitHubReleaseAsset SelectReleaseAssetFromHtml(string html)
-        {
-            if (string.IsNullOrWhiteSpace(html))
-                return null;
-
-            var assets = Regex.Matches(html, "href=\"(?<url>[^\"]+/releases/download/[^\"]+?\\.zip(?:\\?[^\"]*)?)\"", RegexOptions.IgnoreCase)
-                .Cast<Match>()
-                .Select(match => WebUtility.HtmlDecode(match.Groups["url"].Value))
-                .Where(url => !string.IsNullOrWhiteSpace(url))
-                .Select(url =>
-                {
-                    var cleanUrl = url.Split('?')[0];
-                    if (cleanUrl.StartsWith("/", StringComparison.Ordinal))
-                        cleanUrl = "https://github.com" + cleanUrl;
-
-                    var name = Uri.UnescapeDataString(cleanUrl.Substring(cleanUrl.LastIndexOf('/') + 1));
-                    return new GitHubReleaseAsset
-                    {
-                        Name = name,
-                        DownloadUrl = cleanUrl,
-                    };
-                })
-                .GroupBy(asset => asset.DownloadUrl, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
+                    asset.SizeBytes <= MaximumSignatureBytes)
+                .Take(2)
                 .ToList();
 
-            var arch = Environment.Is64BitProcess ? "x64" : "x86";
-            return assets.FirstOrDefault(asset => (asset.Name ?? "").IndexOf(arch, StringComparison.OrdinalIgnoreCase) >= 0);
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        private static GitHubReleaseAsset SelectReleaseAssetFromHtml(
+            string html,
+            string expectedTag,
+            Version version)
+        {
+            if (version == null)
+                return null;
+
+            var expectedName = GetExpectedReleaseAssetName(version);
+            var matches = ParseReleaseAssetsFromHtml(html, expectedTag)
+                .Where(asset => string.Equals(asset.Name, expectedName, StringComparison.Ordinal))
+                .Take(2)
+                .ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        private static GitHubReleaseAsset SelectSignatureAssetFromHtml(
+            string html,
+            string expectedTag,
+            string zipAssetName)
+        {
+            if (string.IsNullOrWhiteSpace(zipAssetName))
+                return null;
+
+            var expectedName = zipAssetName + ".sig";
+            var matches = ParseReleaseAssetsFromHtml(html, expectedTag)
+                .Where(asset => string.Equals(asset.Name, expectedName, StringComparison.Ordinal))
+                .Take(2)
+                .ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        private static List<GitHubReleaseAsset> ParseReleaseAssetsFromHtml(string html, string expectedTag)
+        {
+            var assets = new List<GitHubReleaseAsset>();
+            if (string.IsNullOrWhiteSpace(html) || string.IsNullOrWhiteSpace(expectedTag))
+                return assets;
+
+            foreach (Match match in Regex.Matches(
+                html,
+                "href\\s*=\\s*\"(?<url>[^\"]+)\"",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                var rawUrl = WebUtility.HtmlDecode(match.Groups["url"].Value);
+                if (!TryNormalizeGitHubReleaseAssetUrl(rawUrl, expectedTag, out var name, out var downloadUrl))
+                    continue;
+                if (!name.EndsWith(".zip", StringComparison.Ordinal) &&
+                    !name.EndsWith(".zip.sig", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (assets.Any(asset => string.Equals(asset.DownloadUrl, downloadUrl, StringComparison.Ordinal)))
+                    continue;
+
+                assets.Add(new GitHubReleaseAsset
+                {
+                    Name = name,
+                    DownloadUrl = downloadUrl,
+                });
+            }
+
+            return assets;
+        }
+
+        private static bool TryNormalizeGitHubReleaseAssetUrl(
+            string rawUrl,
+            string expectedTag,
+            out string assetName,
+            out string downloadUrl)
+        {
+            assetName = null;
+            downloadUrl = null;
+            if (string.IsNullOrWhiteSpace(rawUrl) || string.IsNullOrWhiteSpace(expectedTag))
+                return false;
+
+            var candidate = rawUrl.Trim();
+            if (candidate.StartsWith("/", StringComparison.Ordinal) &&
+                !candidate.StartsWith("//", StringComparison.Ordinal))
+            {
+                candidate = "https://github.com" + candidate;
+            }
+
+            if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri) ||
+                !IsTrustedGitHubMetadataUri(uri) ||
+                !string.IsNullOrEmpty(uri.Query) ||
+                !string.IsNullOrEmpty(uri.Fragment))
+            {
+                return false;
+            }
+
+            var segments = uri.AbsolutePath.Split('/');
+            var repositoryParts = Repository.Split('/');
+            if (repositoryParts.Length != 2 ||
+                segments.Length != 7 ||
+                !string.Equals(segments[1], repositoryParts[0], StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(segments[2], repositoryParts[1], StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(segments[3], "releases", StringComparison.Ordinal) ||
+                !string.Equals(segments[4], "download", StringComparison.Ordinal) ||
+                !TryDecodeSinglePathSegment(segments[5], out var assetTag) ||
+                !string.Equals(assetTag, expectedTag, StringComparison.Ordinal) ||
+                !TryDecodeSinglePathSegment(segments[6], out assetName) ||
+                !Regex.IsMatch(assetName, @"^[A-Za-z0-9._-]+$", RegexOptions.CultureInvariant) ||
+                assetName == "." ||
+                assetName == "..")
+            {
+                assetName = null;
+                return false;
+            }
+
+            downloadUrl = "https://github.com/" + Repository + "/releases/download/" +
+                          Uri.EscapeDataString(expectedTag) + "/" + Uri.EscapeDataString(assetName);
+            return true;
+        }
+
+        private static bool TryGetReleaseTagFromUri(Uri releaseUri, out string tag, out Version version)
+        {
+            tag = null;
+            version = null;
+            if (!IsTrustedGitHubMetadataUri(releaseUri) ||
+                !string.IsNullOrEmpty(releaseUri.Query) ||
+                !string.IsNullOrEmpty(releaseUri.Fragment))
+            {
+                return false;
+            }
+
+            var segments = releaseUri.AbsolutePath.Split('/');
+            var repositoryParts = Repository.Split('/');
+            if (repositoryParts.Length != 2 ||
+                segments.Length != 6 ||
+                !string.Equals(segments[1], repositoryParts[0], StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(segments[2], repositoryParts[1], StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(segments[3], "releases", StringComparison.Ordinal) ||
+                !string.Equals(segments[4], "tag", StringComparison.Ordinal) ||
+                !TryDecodeSinglePathSegment(segments[5], out tag))
+            {
+                tag = null;
+                return false;
+            }
+
+            if (!TryParseReleaseTag(tag, out version))
+            {
+                tag = null;
+                version = null;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryParseReleaseTag(string tag, out Version version)
+        {
+            version = null;
+            if (string.IsNullOrWhiteSpace(tag))
+                return false;
+
+            var match = Regex.Match(
+                tag,
+                @"^v?(?<version>\d+\.\d+\.\d+(?:\.\d+)?)$",
+                RegexOptions.CultureInvariant);
+            return match.Success && Version.TryParse(match.Groups["version"].Value, out version);
+        }
+
+        private static bool IsExpectedExpandedAssetsUri(Uri uri, string expectedTag)
+        {
+            if (!IsTrustedGitHubMetadataUri(uri) ||
+                string.IsNullOrWhiteSpace(expectedTag) ||
+                !string.IsNullOrEmpty(uri.Query) ||
+                !string.IsNullOrEmpty(uri.Fragment))
+            {
+                return false;
+            }
+
+            var segments = uri.AbsolutePath.Split('/');
+            var repositoryParts = Repository.Split('/');
+            return repositoryParts.Length == 2 &&
+                   segments.Length == 6 &&
+                   string.Equals(segments[1], repositoryParts[0], StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(segments[2], repositoryParts[1], StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(segments[3], "releases", StringComparison.Ordinal) &&
+                   string.Equals(segments[4], "expanded_assets", StringComparison.Ordinal) &&
+                   TryDecodeSinglePathSegment(segments[5], out var tag) &&
+                   string.Equals(tag, expectedTag, StringComparison.Ordinal);
+        }
+
+        private static bool IsTrustedGitHubMetadataUri(Uri uri)
+        {
+            return uri != null &&
+                   uri.IsAbsoluteUri &&
+                   string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) &&
+                   uri.IsDefaultPort &&
+                   string.IsNullOrEmpty(uri.UserInfo);
+        }
+
+        private static bool TryDecodeSinglePathSegment(string escapedSegment, out string value)
+        {
+            value = null;
+            if (string.IsNullOrWhiteSpace(escapedSegment))
+                return false;
+
+            try
+            {
+                value = Uri.UnescapeDataString(escapedSegment);
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(value) || value == "." || value == "..")
+                return false;
+            return value.All(character =>
+                character != '/' &&
+                character != '\\' &&
+                !char.IsControl(character));
+        }
+
+        private static string GetExpectedReleaseAssetName(Version version)
+        {
+            if (version == null)
+                return null;
+
+            var build = Math.Max(0, version.Build);
+            var versionText = $"{version.Major}.{version.Minor}.{build}";
+            if (version.Revision >= 0)
+                versionText += "." + version.Revision;
+            var architecture = Environment.Is64BitProcess ? "x64" : "x86";
+            return $"llcom.plus_{versionText}_{architecture}.zip";
+        }
+
+        private static async Task<string> ReadMetadataContentAsync(
+            HttpResponseMessage response,
+            CancellationToken cancellationToken)
+        {
+            if (response == null || response.Content == null)
+                throw new InvalidDataException("GitHub release metadata response is empty.");
+
+            var contentLength = response.Content.Headers.ContentLength;
+            if (contentLength.HasValue)
+                ValidateDownloadLength(contentLength.Value, MaximumReleaseMetadataBytes, "GitHub release metadata");
+
+            using (var totalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                totalCts.CancelAfter(ReleaseMetadataTotalTimeout);
+                try
+                {
+                    using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    using (var output = new MemoryStream())
+                    {
+                        var buffer = new byte[16 * 1024];
+                        while (true)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            int read;
+                            using (var idleCts = CancellationTokenSource.CreateLinkedTokenSource(totalCts.Token))
+                            {
+                                idleCts.CancelAfter(ReleaseMetadataIdleTimeout);
+                                try
+                                {
+                                    read = await input.ReadAsync(
+                                        buffer,
+                                        0,
+                                        buffer.Length,
+                                        idleCts.Token).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                                {
+                                    if (totalCts.IsCancellationRequested)
+                                        throw new TimeoutException("GitHub release metadata exceeded the total timeout.");
+                                    throw new TimeoutException("GitHub release metadata stopped responding.");
+                                }
+                            }
+
+                            if (read <= 0)
+                                break;
+                            if (output.Length + read > MaximumReleaseMetadataBytes)
+                                throw new InvalidDataException("GitHub release metadata exceeded the allowed size.");
+                            output.Write(buffer, 0, read);
+                        }
+                        return Encoding.UTF8.GetString(output.ToArray());
+                    }
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new TimeoutException("GitHub release metadata exceeded the total timeout.");
+                }
+            }
         }
 
         public static GitHubLocalUpdatePackage FindLatestLocalUpdatePackage()
@@ -679,15 +970,6 @@ namespace llcom_plus.Tools
             return match.Success && Version.TryParse(match.Groups["version"].Value, out var version) ? version : null;
         }
 
-        private static string GetTagFromReleaseUrl(string releaseUrl)
-        {
-            if (string.IsNullOrWhiteSpace(releaseUrl))
-                return "";
-
-            var match = Regex.Match(releaseUrl, @"/releases/tag/(?<tag>[^/?#]+)", RegexOptions.IgnoreCase);
-            return match.Success ? Uri.UnescapeDataString(match.Groups["tag"].Value) : "";
-        }
-
         private static string NormalizeVersionText(Version version)
         {
             if (version == null)
@@ -705,11 +987,13 @@ namespace llcom_plus.Tools
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
                 using (var client = CreateUpdateHttpClient())
                 using (var request = new HttpRequestMessage(HttpMethod.Head, url))
+                using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
                 {
+                    timeoutCts.CancelAfter(ReleaseMetadataTotalTimeout);
                     using (var response = await client.SendAsync(
                         request,
                         HttpCompletionOption.ResponseHeadersRead,
-                        cancellationToken).ConfigureAwait(false))
+                        timeoutCts.Token).ConfigureAwait(false))
                     {
                         return response.IsSuccessStatusCode ? response.Content.Headers.ContentLength ?? 0 : 0;
                     }
