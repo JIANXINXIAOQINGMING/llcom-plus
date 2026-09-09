@@ -103,7 +103,8 @@ namespace llcom_plus
         }
         ObservableCollection<ToSendData> toSendListItems = new ObservableCollection<ToSendData>();
         private const int QuickSendNavigationFirstColumn = 0;
-        private const int QuickSendNavigationLastColumn = 4;
+        private const int QuickSendNavigationLastColumn = 2;
+        private FrameworkElement quickSendSettingsAnchor;
         private bool quickSendKeyboardNavigationMode = false;
         private bool quickSendExplicitEditMode = false;
         private int quickSendNavigationRowIndex = -1;
@@ -119,8 +120,6 @@ namespace llcom_plus
         private CancellationTokenSource quickSendImportCts = null;
         private long nextQuickSendImportRunId = 0;
         private long activeQuickSendImportRunId = 0;
-        private readonly object sessionSendStringLock = new object();
-        private readonly Queue<string> sessionSendStringOverrides = new Queue<string>();
         private readonly object receiveScriptContextLock = new object();
         private ReceiveScriptContext currentReceiveScriptContext = new ReceiveScriptContext();
         private readonly List<ToolModule> toolModules = new List<ToolModule>();
@@ -256,6 +255,7 @@ namespace llcom_plus
                         Tools.Global.uart.UartDataSent += Uart_UartDataSent;
                         Tools.Global.SendRawDataRequest += Global_SendRawDataRequest;
                         Tools.Global.SendDataRequest += Global_SendDataRequest;
+                        Tools.Global.SendDataAsyncRequest = Global_SendDataRequestAsync;
                         Tools.Global.MainSendTargetChangedEvent += Global_MainSendTargetChangedEvent;
                         Tools.Global.ThemeChanged += Global_ThemeChanged;
                         Tools.Global.UartPortClosedEvent += Global_UartPortClosedEvent;
@@ -389,7 +389,10 @@ namespace llcom_plus
                 return;
 
             if (MainTabControl.SelectedItem != QuickSendTab)
+            {
+                CloseQuickSendItemSettings();
                 ExitQuickSendKeyboardNavigation();
+            }
 
             if (MainTabControl.SelectedItem == ScriptTab)
                 EnsureScriptEditorInitialized();
@@ -1316,6 +1319,7 @@ namespace llcom_plus
 
         private void LoadQuickSendList()
         {
+            CloseQuickSendItemSettings();
             ExitQuickSendKeyboardNavigation();
             NormalizeQuickSendRows();
             toSendListItems.Clear();
@@ -1383,7 +1387,8 @@ namespace llcom_plus
                     QuickListNameTextBox.Text = GetLocalizedQuickSendPageName(
                         Global.setting.GetQuickListNameNow(),
                         Global.setting.quickSendSelect);
-                DeleteQuickSendPageButton.IsEnabled = Global.setting.GetQuickSendListCount() > 1;
+                // The dropdown footer is not part of ItemsSource or the page indices.
+                QuickListSelectComboBox.Tag = Global.setting.GetQuickSendListCount() > 1;
             }
             finally
             {
@@ -1468,11 +1473,13 @@ namespace llcom_plus
 
         private void Uart_UartDataSent(object sender, EventArgs e)
         {
-            Tools.Logger.ShowData(sender as byte[], true, DequeueSessionSendStringOverride());
+            Tools.Logger.ShowData(sender as byte[], true, (e as UartSendEventArgs)?.SessionStringLogOverride);
         }
 
         private void Uart_UartDataRecived(object sender, EventArgs e)
         {
+            if (e is UartReceiveEventArgs received && !received.IsCurrent)
+                return;
             var data = sender as byte[];
             Tools.Logger.ShowData(data, false, null, GetReceiveScriptContext());
             if (!IsSerialSplitModeActive() ||
@@ -1482,11 +1489,15 @@ namespace llcom_plus
 
         private void Global_SendRawDataRequest(byte[] data)
         {
-            Dispatcher.Invoke(new Action(delegate
+            var pendingSend = Dispatcher.Invoke(new Func<Task>(() =>
             {
                 SetReceiveScriptContext(recvScriptBackup, "", data);
-                sendUartData(data, true, false);
+                return sendUartData(data, true, false);
             }));
+            // Background callers retain their synchronous request contract. The UI
+            // dispatcher remains available during wake delays and driver writes.
+            if (!Dispatcher.CheckAccess())
+                pendingSend.GetAwaiter().GetResult();
         }
 
         private void Global_SendDataRequest(Tools.UartSendRequest request)
@@ -1494,15 +1505,50 @@ namespace llcom_plus
             if (request?.Data == null)
                 return;
 
-            Dispatcher.Invoke(new Action(delegate
+            var pendingSend = Dispatcher.Invoke(new Func<Task>(() =>
             {
                 SetReceiveScriptContext(recvScriptBackup, "", request.Data);
-                sendUartData(
+                return sendUartData(
                     request.Data,
                     request.IsHex,
                     request.ApplySendProcessing,
-                    request.SessionStringLogOverride);
+                    request.SessionStringLogOverride,
+                    sourceText: request.SourceText);
             }));
+            if (!Dispatcher.CheckAccess())
+                pendingSend.GetAwaiter().GetResult();
+        }
+
+        private async Task<bool> Global_SendDataRequestAsync(
+            Tools.UartSendRequest request,
+            CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            if (request?.Data == null || windowIsClosing || Tools.Global.isMainWindowsClosed)
+                return false;
+
+            var pendingSend = Dispatcher.Invoke(new Func<Task>(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                if (windowIsClosing || Tools.Global.isMainWindowsClosed)
+                    throw new OperationCanceledException("The serial window is closing.", token);
+
+                SetReceiveScriptContext(recvScriptBackup, "", request.Data);
+                // Resolve the target and profile on the UI thread before enqueueing;
+                // later selection changes must not redirect this request.
+                return sendUartData(
+                    request.Data,
+                    request.IsHex,
+                    request.ApplySendProcessing,
+                    request.SessionStringLogOverride,
+                    sourceText: request.SourceText,
+                    cancellationToken: token,
+                    propagateErrors: true,
+                    autoOpen: false);
+            }));
+            await pendingSend.ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            return true;
         }
 
         private void Global_MainSendTargetChangedEvent(object sender, EventArgs e)
@@ -1587,18 +1633,6 @@ namespace llcom_plus
                 UpdateMainSerialConnectionStatus();
                 refreshPortList(string.IsNullOrWhiteSpace(portName) ? null : portName);
             }));
-        }
-
-        private void EnqueueSessionSendStringOverride(string value)
-        {
-            lock (sessionSendStringLock)
-                sessionSendStringOverrides.Enqueue(value);
-        }
-
-        private string DequeueSessionSendStringOverride()
-        {
-            lock (sessionSendStringLock)
-                return sessionSendStringOverrides.Count > 0 ? sessionSendStringOverrides.Dequeue() : null;
         }
 
         private void SetReceiveScriptContext(string scriptName, object parameter, byte[] sendRaw)
@@ -2126,6 +2160,7 @@ namespace llcom_plus
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             windowIsClosing = true;
+            CloseQuickSendItemSettings();
             CancelQuickSendImport();
             Tools.Global.setting.windowLeft = this.Left;
             Tools.Global.setting.windowTop = this.Top;
@@ -2182,6 +2217,7 @@ namespace llcom_plus
 
         private void MainWindow_PlacementChanged(object sender, EventArgs e)
         {
+            CloseQuickSendItemSettings();
             if (WindowState == WindowState.Minimized)
                 return;
             CloseNotificationPopup();
@@ -2650,28 +2686,34 @@ namespace llcom_plus
         /// 发串口数据
         /// </summary>
         /// <param name="data"></param>
-        private void sendUartData(
+        private Task sendUartData(
             byte[] data,
             bool? is_hex = null,
             bool applySendProcessing = true,
             string sessionStringLogOverride = null,
             bool? extraEnterOverride = null,
-            string sourceText = null)
+            string sourceText = null,
+            CancellationToken cancellationToken = default(CancellationToken),
+            bool propagateErrors = false,
+            bool autoOpen = true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (data == null)
-                return;
+                return Task.CompletedTask;
 
             if (IsSerialSplitModeActive())
             {
                 if (IsAllSerialTargetsSelected())
                 {
-                    _ = SendToAllSplitSlotsAsync(
+                    return SendToAllSplitSlotsAsync(
                         data,
                         is_hex,
                         applySendProcessing,
                         extraEnterOverride,
-                        sourceText);
-                    return;
+                        sourceText,
+                        cancellationToken,
+                        propagateErrors,
+                        autoOpen);
                 }
 
                 var targetSlot = GetSelectedSerialSplitSlot();
@@ -2684,23 +2726,27 @@ namespace llcom_plus
                     targetHexMode,
                     extraEnterOverride,
                     targetProfile,
-                    sourceText);
+                    sourceText,
+                    propagateErrors);
                 if (splitData == null || splitData.Length == 0)
-                    return;
+                    return Task.CompletedTask;
 
-                _ = SendToSelectedSplitSlotAsync(
-                    splitData);
-                return;
+                return SendToSelectedSplitSlotAsync(
+                    splitData, autoOpen, cancellationToken, propagateErrors, targetSlot);
             }
 
             if (IsMainSerialPortSwitchPending())
             {
+                if (propagateErrors)
+                    throw new InvalidOperationException("The selected serial port has changed; reopen it before sending.");
                 ShowSerialPortSwitchRequiredBeforeSend();
-                return;
+                return Task.CompletedTask;
             }
 
             if (!IsSelectedMainSerialPortOpen())
             {
+                if (!autoOpen)
+                    throw new InvalidOperationException(TryFindResource("CircularSendPortNotOpen") as string ?? "请先打开串口");
                 toSendData = (byte[])data.Clone();//带发送数据缓存起来，连上串口后发出去
                 toSendDataIsHex = is_hex;
                 toSendDataApplySendProcessing = applySendProcessing;
@@ -2708,41 +2754,61 @@ namespace llcom_plus
                 toSendDataExtraEnterOverride = extraEnterOverride;
                 toSendDataSourceText = sourceText;
                 openPort();
-                return;
+                return Task.CompletedTask;
             }
 
             if (Tools.Global.uart.IsOpen())
             {
+                var connection = Tools.Global.uart.CaptureConnectionLease();
                 byte[] dataConvert = PrepareUartSendData(
                     data,
                     is_hex,
                     applySendProcessing,
                     null,
                     extraEnterOverride,
-                    null,
-                    sourceText);
+                    connection.Profile,
+                    sourceText,
+                    propagateErrors);
                 if (dataConvert == null)
-                    return;
+                    return Task.CompletedTask;
 
                 if (dataConvert.Length == 0)
-                    return;
+                    return Task.CompletedTask;
 
-                var overrideQueued = false;
-                try
+                return SendMainSerialAsync(
+                    connection, dataConvert, applySendProcessing ? data : null, sessionStringLogOverride,
+                    cancellationToken: cancellationToken, propagateErrors: propagateErrors);
+            }
+            if (propagateErrors)
+                throw new InvalidOperationException(TryFindResource("CircularSendPortNotOpen") as string ?? "请先打开串口");
+            return Task.CompletedTask;
+        }
+
+        private async Task SendMainSerialAsync(
+            Uart.ConnectionLease connection,
+            byte[] data,
+            byte[] rawData = null,
+            string sessionStringLogOverride = null,
+            bool showErrors = true,
+            CancellationToken cancellationToken = default(CancellationToken),
+            bool propagateErrors = false)
+        {
+            try
+            {
+                if (!await connection.SendAsync(
+                    data, cancellationToken, null, true, rawData, sessionStringLogOverride))
                 {
-                    if (sessionStringLogOverride != null && Tools.Global.setting.showSend)
-                    {
-                        EnqueueSessionSendStringOverride(sessionStringLogOverride);
-                        overrideQueued = true;
-                    }
-                    Tools.Global.uart.SendData(dataConvert, applySendProcessing ? data : null);
+                    throw new IOException("The selected serial connection closed before the queued send.");
                 }
-                catch(Exception ex)
+            }
+            catch (Exception ex)
+            {
+                if (propagateErrors || cancellationToken.IsCancellationRequested)
+                    throw;
+                if (showErrors && !windowIsClosing && !Tools.Global.isMainWindowsClosed)
                 {
-                    if (overrideQueued)
-                        DequeueSessionSendStringOverride();
-                    Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n"+ ex.ToString());
-                    return;
+                    Tools.MessageBox.Show(
+                        $"{TryFindResource("ErrorSendFail") as string ?? "发送失败"}\r\n{connection.DisplayName}: {ex.Message}");
                 }
             }
         }
@@ -2754,7 +2820,8 @@ namespace llcom_plus
             bool? defaultHexSend = null,
             bool? extraEnterOverride = null,
             UartPortProfile profile = null,
-            string sourceText = null)
+            string sourceText = null,
+            bool propagateErrors = false)
         {
             byte[] dataConvert = data;
             if (!applySendProcessing)
@@ -2796,6 +2863,8 @@ namespace llcom_plus
             }
             catch (Exception ex)
             {
+                if (propagateErrors)
+                    throw;
                 Tools.MessageBox.Show($"{TryFindResource("ErrorScript") as string ?? "?!"}\r\n" + ex.ToString());
                 return null;
             }
@@ -2813,20 +2882,29 @@ namespace llcom_plus
             bool? isHex,
             bool applySendProcessing,
             bool? extraEnterOverride,
-            string sourceText)
+            string sourceText,
+            CancellationToken cancellationToken = default(CancellationToken),
+            bool propagateErrors = false,
+            bool autoOpen = true)
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (mainSplitPortPage == null)
                     ApplySerialSplitLayout();
                 var page = mainSplitPortPage;
                 if (page == null)
+                {
+                    if (propagateErrors)
+                        throw new InvalidOperationException("The serial split view is unavailable.");
                     return;
+                }
 
                 var preparedTargets = new List<Tuple<int, byte[]>>();
                 var failures = new List<string>();
                 for (var slot = 1; slot <= page.SlotCount; slot++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var targetProfile = page.GetSlotProfileSnapshot(slot);
                     var targetHexMode = targetProfile?.hexSend ?? page.IsSlotHexMode(slot);
                     var data = PrepareUartSendData(
@@ -2836,11 +2914,12 @@ namespace llcom_plus
                         targetHexMode,
                         extraEnterOverride,
                         targetProfile,
-                        sourceText);
+                        sourceText,
+                        propagateErrors);
                     if (data == null || data.Length == 0)
                         continue;
 
-                    if (!page.EnsureSlotOpen(slot))
+                    if (!(autoOpen ? page.EnsureSlotOpen(slot) : page.IsSlotSelectedPortOpen(slot)))
                     {
                         failures.Add(FormatSplitTargetFailure(slot, page.GetSlotLastError(slot)));
                         continue;
@@ -2852,7 +2931,7 @@ namespace llcom_plus
                 var pendingSends = preparedTargets
                     .Select(target => Tuple.Create(
                         target.Item1,
-                        page.SendBytesAsync(target.Item1, target.Item2)))
+                        page.SendBytesAsync(target.Item1, target.Item2, cancellationToken)))
                     .ToList();
                 if (pendingSends.Count > 0)
                 {
@@ -2867,10 +2946,14 @@ namespace llcom_plus
                 }
 
                 UpdateSelectedSplitSlotControls();
+                if (propagateErrors && failures.Count > 0)
+                    throw new IOException(string.Join("\r\n", failures));
                 ShowSplitBroadcastFailures(failures);
             }
             catch (Exception ex)
             {
+                if (propagateErrors || cancellationToken.IsCancellationRequested)
+                    throw;
                 Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n" + ex);
             }
         }
@@ -2893,41 +2976,59 @@ namespace llcom_plus
             Tools.MessageBox.Show(title + "\r\n" + string.Join("\r\n", failures));
         }
 
-        private async Task SendToSelectedSplitSlotAsync(byte[] data, bool autoOpen = true)
+        private async Task SendToSelectedSplitSlotAsync(
+            byte[] data,
+            bool autoOpen = true,
+            CancellationToken cancellationToken = default(CancellationToken),
+            bool propagateErrors = false,
+            int? capturedSlot = null)
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (mainSplitPortPage == null)
                     ApplySerialSplitLayout();
 
-                if (mainSplitPortPage == null)
+                var page = mainSplitPortPage;
+                if (page == null)
+                {
+                    if (propagateErrors)
+                        throw new InvalidOperationException("The serial split view is unavailable.");
                     return;
+                }
 
-                var slot = GetSelectedSerialSplitSlot();
+                var slot = capturedSlot ?? GetSelectedSerialSplitSlot();
                 if (autoOpen)
                 {
-                    if (!mainSplitPortPage.EnsureSlotOpen(slot))
+                    if (!page.EnsureSlotOpen(slot))
                     {
                         UpdateSelectedSplitSlotControls();
-                        var detail = mainSplitPortPage.GetSlotLastError(slot);
+                        var detail = page.GetSlotLastError(slot);
                         var message = TryFindResource("ErrorOpenPort") as string ?? "串口打开失败！";
                         if (!string.IsNullOrWhiteSpace(detail))
                             message += "\r\n" + detail;
+                        if (propagateErrors)
+                            throw new IOException(message);
                         Tools.MessageBox.Show(message);
                         return;
                     }
                     UpdateSelectedSplitSlotControls();
                 }
-                else if (!mainSplitPortPage.IsSlotSelectedPortOpen(slot))
+                else if (!page.IsSlotSelectedPortOpen(slot))
                 {
                     UpdateSelectedSplitSlotControls();
+                    if (propagateErrors)
+                        throw new InvalidOperationException(TryFindResource("CircularSendPortNotOpen") as string ?? "请先打开串口");
                     return;
                 }
 
-                await mainSplitPortPage.SendBytesAsync(slot, data);
+                if (!await page.SendBytesAsync(slot, data, cancellationToken) && propagateErrors)
+                    throw new IOException(TryFindResource("ErrorSendFail") as string ?? "发送失败");
             }
             catch (Exception ex)
             {
+                if (propagateErrors || cancellationToken.IsCancellationRequested)
+                    throw;
                 Tools.MessageBox.Show($"{TryFindResource("ErrorSendFail") as string ?? "?!"}\r\n" + ex.ToString());
             }
         }
@@ -3272,14 +3373,28 @@ namespace llcom_plus
 
         private void AddSendListButton_Click(object sender, RoutedEventArgs e)
         {
-            toSendListItems.Add(CreateBlankQuickSendItem(toSendListItems.Count + 1));
+            ExitQuickSendKeyboardNavigation();
+            var item = CreateBlankQuickSendItem(toSendListItems.Count + 1);
+            toSendListItems.Add(item);
             SaveSendList(null, EventArgs.Empty);
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var index = toSendListItems.IndexOf(item);
+                if (index < 0)
+                    return;
+                var textBox = GetQuickSendNavigationElement(index, 0) as TextBox;
+                if (textBox == null)
+                    return;
+                quickSendExplicitEditMode = true;
+                textBox.IsReadOnly = false;
+                textBox.Focus();
+                Keyboard.Focus(textBox);
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
-        private void RemoveSendListItemButton_Click(object sender, RoutedEventArgs e)
+        private void RemoveQuickSendItem(ToSendData item)
         {
-            var item = ((Button)sender).Tag as ToSendData;
-            if (item == null)
+            if (item == null || !toSendListItems.Contains(item))
                 return;
 
             Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
@@ -3361,6 +3476,14 @@ namespace llcom_plus
         {
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
             var data = GetQuickSendDataFromSource(e.OriginalSource as DependencyObject);
+            var sourceColumn = GetQuickSendNavigationColumnFromSource(e.OriginalSource as DependencyObject);
+            // Focus can leave the row's three browse cells. Never interpret
+            // Enter/Space on a secondary action as a serial send.
+            if (sourceColumn < QuickSendNavigationFirstColumn)
+            {
+                ExitQuickSendKeyboardNavigation();
+                return;
+            }
 
             if (!quickSendKeyboardNavigationMode)
             {
@@ -3387,6 +3510,10 @@ namespace llcom_plus
                 return;
             }
 
+            // Tab/mouse focus may have moved independently of arrow browsing.
+            // The focused cell, never a stale browse index, owns this key press.
+            quickSendNavigationRowIndex = data == null ? -1 : toSendListItems.IndexOf(data);
+            quickSendNavigationColumn = sourceColumn;
             if (quickSendNavigationRowIndex < 0 ||
                 quickSendNavigationRowIndex >= toSendListItems.Count)
             {
@@ -3414,7 +3541,10 @@ namespace llcom_plus
                     e.Handled = true;
                     break;
                 case Key.Enter:
-                    SendQuickSendItem(data);
+                    if (quickSendNavigationColumn == 2)
+                        ActivateQuickSendNavigationCell(data);
+                    else
+                        SendQuickSendItem(data);
                     e.Handled = true;
                     break;
                 case Key.Space:
@@ -3523,13 +3653,8 @@ namespace llcom_plus
                     SendQuickSendItem(data);
                     break;
                 case 2:
-                    data.hex = !data.hex;
-                    break;
-                case 3:
-                    data.appendCrlf = !data.appendCrlf;
-                    break;
-                case 4:
-                    data.disableSuggestion = !data.disableSuggestion;
+                    var settingsButton = GetQuickSendNavigationElement(quickSendNavigationRowIndex, 2);
+                    OpenQuickSendItemSettings(data, settingsButton);
                     break;
             }
         }
@@ -3579,11 +3704,7 @@ namespace llcom_plus
                 ? "QuickSendRowTextBox"
                 : column == 1
                     ? "QuickSendRowSendButton"
-                    : column == 2
-                        ? "QuickSendRowHexCheckBox"
-                        : column == 3
-                            ? "QuickSendRowCrlfCheckBox"
-                            : "QuickSendRowExcludeCheckBox";
+                    : "QuickSendRowSettingsButton";
             return container.Template.FindName(elementName, container) as FrameworkElement;
         }
 
@@ -3617,12 +3738,8 @@ namespace llcom_plus
                             return 0;
                         case "QuickSendRowSendButton":
                             return 1;
-                        case "QuickSendRowHexCheckBox":
+                        case "QuickSendRowSettingsButton":
                             return 2;
-                        case "QuickSendRowCrlfCheckBox":
-                            return 3;
-                        case "QuickSendRowExcludeCheckBox":
-                            return 4;
                     }
                 }
 
@@ -3980,6 +4097,7 @@ namespace llcom_plus
         }
         private void Window_Deactivated(object sender, EventArgs e)
         {
+            CloseQuickSendItemSettings();
             CloseNotificationPopup();
             //窗口变为后台,可能在切换编辑器,自动保存脚本
             if (lastScriptFile != "")
@@ -4892,7 +5010,8 @@ namespace llcom_plus
 
         private void SelectQuickSendPage(int select)
         {
-            if (select == Global.setting.quickSendSelect)
+            if (select < 0 || select >= Global.setting.GetQuickSendListCount() ||
+                select == Global.setting.quickSendSelect)
                 return;
 
             SaveSendList(null, EventArgs.Empty);
@@ -4905,6 +5024,7 @@ namespace llcom_plus
 
         private void AddQuickSendPageButton_Click(object sender, RoutedEventArgs e)
         {
+            QuickListSelectComboBox.IsDropDownOpen = false;
             SaveSendList(null, EventArgs.Empty);
             canSaveSendList = false;
             toSendListItems.Clear();
@@ -4912,17 +5032,19 @@ namespace llcom_plus
             LoadQuickSendList();
             canSaveSendList = true;
             QuickListNameTextBox.Focus();
+            QuickListNameTextBox.SelectAll();
         }
 
         private void DeleteQuickSendPageButton_Click(object sender, RoutedEventArgs e)
         {
+            QuickListSelectComboBox.IsDropDownOpen = false;
             if (Global.setting.GetQuickSendListCount() <= 1)
             {
                 Tools.MessageBox.Show(TryFindResource("QuickSendDeletePageBlocked") as string ?? "?!");
                 return;
             }
 
-            if (toSendListItems.Count(HasQuickSendContent) > 1)
+            if (toSendListItems.Any(HasQuickSendContent))
             {
                 var ret = Tools.InputDialog.OpenDialog(
                     TryFindResource("QuickSendDeletePageConfirmMsg") as string ?? "?!",
@@ -5425,6 +5547,16 @@ namespace llcom_plus
             ExportQuickSend(true);
         }
 
+        private void QuickSendCommandMenu_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.ContextMenu != null)
+            {
+                button.ContextMenu.PlacementTarget = button;
+                button.ContextMenu.Placement = PlacementMode.Bottom;
+                button.ContextMenu.IsOpen = true;
+            }
+        }
+
         private void QuickSendBackupButton_Click(object sender, RoutedEventArgs e)
         {
             SaveSendList(null, EventArgs.Empty);
@@ -5596,7 +5728,10 @@ namespace llcom_plus
             if (IsSelectedMainSerialPortOpen())
                 try
                 {
-                    Tools.Global.uart.SendData(Encoding.ASCII.GetBytes(e.TextComposition.Text));
+                    _ = SendMainSerialAsync(
+                        Tools.Global.uart.CaptureConnectionLease(),
+                        Encoding.ASCII.GetBytes(e.TextComposition.Text), showErrors: false);
+                    e.Handled = true;
                 }
                 catch { }
         }
@@ -5630,7 +5765,9 @@ namespace llcom_plus
             if (e.Key >= Key.A && e.Key <= Key.Z && IsSelectedMainSerialPortOpen())
                 try
                 {
-                    Tools.Global.uart.SendData(new byte[] { (byte)((int)e.Key - (int)Key.A + 1) });
+                    _ = SendMainSerialAsync(
+                        Tools.Global.uart.CaptureConnectionLease(),
+                        new byte[] { (byte)((int)e.Key - (int)Key.A + 1) }, showErrors: false);
                     e.Handled = true;
                 }
                 catch { }
@@ -5647,101 +5784,92 @@ namespace llcom_plus
                 dataShowPage.SelectAllLog();
         }
 
-        private void ScriptIcon_Click(object sender, MouseButtonEventArgs e)
+        private void QuickSendRowSettingsButton_Click(object sender, RoutedEventArgs e)
         {
+            if (sender is FrameworkElement button)
+                OpenQuickSendItemSettings(button.Tag as ToSendData, button);
+        }
+
+        private void OpenQuickSendItemSettings(ToSendData item, FrameworkElement anchor)
+        {
+            if (item == null || anchor == null || !toSendListItems.Contains(item))
+                return;
+            ExitQuickSendKeyboardNavigation();
+            CloseQuickSendItemSettings();
             WaitRuntimeFilesReady();
-            // 点击📜图标时配置接收脚本
-            TextBlock icon = sender as TextBlock;
-            ToSendData data = icon.Tag as ToSendData;
-            recvScriptCombo.ItemsSource = Directory.GetFiles(Global.ProfilePath + "user_script_recv_convert", "*.js")
-                                                   .Select(System.IO.Path.GetFileNameWithoutExtension).ToList();
-            recvScriptPopup.PlacementTarget = icon;
-            recvScriptCombo.Tag = data;
-            recvScriptCombo.SelectedItem = data.recvScriptPath ?? "";
-            recvScriptCombo.IsDropDownOpen = true;
-            recvScriptPopup.IsOpen = false;
-            recvScriptPopup.IsOpen = true;
-
-            // 打开对话框，选择接收脚本
-            //System.Windows.Forms.OpenFileDialog dialog = new System.Windows.Forms.OpenFileDialog();
-            //dialog.Filter = "Lua脚本文件 (*.js)|*.js|所有文件 (*.*)|*.*";
-            //dialog.InitialDirectory = System.IO.Path.Combine(Tools.Global.ProfilePath, "user_script_recv_convert");
-
-            //if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-            //{
-            //    data.recvScriptPath = System.IO.Path.GetFileNameWithoutExtension(dialog.FileName);
-            //    //SaveSendList(null, EventArgs.Empty);
-            //}
+            quickSendSettingsAnchor = anchor;
+            QuickSendItemSettingsEditor.SetItem(item);
+            QuickSendItemSettingsPopup.PlacementTarget = anchor;
+            QuickSendItemSettingsPopup.IsOpen = true;
         }
 
-        private void ScriptIcon_RightClick(object sender, MouseButtonEventArgs e)
+        private void QuickSendItemSettingsPopup_Opened(object sender, EventArgs e)
         {
-            // 右击📜图标时清除接收脚本
-            TextBlock icon = sender as TextBlock;
-            ToSendData data = icon.Tag as ToSendData;
-
-            // 清除接收脚本项
-            if (!string.IsNullOrEmpty(data.recvScriptPath))
+            var anchor = quickSendSettingsAnchor;
+            Dispatcher.BeginInvoke(new Action(() =>
             {
-                data.recvScriptPath = "";
-                //SaveSendList(null, EventArgs.Empty);
+                if (QuickSendItemSettingsPopup.IsOpen && ReferenceEquals(anchor, quickSendSettingsAnchor))
+                    (QuickSendItemSettingsEditor.FindName("HexCheckBox") as CheckBox)?.Focus();
+            }), System.Windows.Threading.DispatcherPriority.Input);
+        }
+
+        private void QuickSendItemSettingsPopup_Closed(object sender, EventArgs e)
+        {
+            QuickSendItemSettingsEditor.SetItem(null);
+            quickSendSettingsAnchor = null;
+        }
+
+        private void CloseQuickSendItemSettings(bool restoreFocus = false)
+        {
+            if (QuickSendItemSettingsPopup == null || QuickSendItemSettingsEditor == null)
+                return;
+            var anchor = quickSendSettingsAnchor;
+            QuickSendItemSettingsPopup.IsOpen = false;
+            QuickSendItemSettingsEditor.SetItem(null);
+            quickSendSettingsAnchor = null;
+            if (restoreFocus && anchor?.IsVisible == true && !windowIsClosing)
+                anchor.Focus();
+        }
+
+        private void QuickSendItemSettingsEditor_CloseRequested(object sender, EventArgs e)
+        {
+            CloseQuickSendItemSettings(restoreFocus: true);
+        }
+
+        private void QuickSendItemSettingsEditor_DeleteRequested(object sender, EventArgs e)
+        {
+            var item = QuickSendItemSettingsEditor.Item;
+            CloseQuickSendItemSettings();
+            RemoveQuickSendItem(item);
+        }
+
+        private void QuickSendItemSettingsEditor_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape &&
+                !(QuickSendItemSettingsEditor.FindName("ScriptComboBox") as ComboBox).IsDropDownOpen)
+            {
+                CloseQuickSendItemSettings(restoreFocus: true);
+                e.Handled = true;
             }
         }
 
-        private void recvScriptCombo_DropDownClosed(object sender, EventArgs e)
+        private void QuickSendRowSettingsButton_ToolTipOpening(object sender, ToolTipEventArgs e)
         {
-            ComboBox me = sender as ComboBox;
-            ToSendData data = me.Tag as ToSendData;
-            string newItem = me.SelectedItem as string;
-            if(data.recvScriptPath != newItem) data.recvScriptPath = newItem;
-            recvScriptPopup.IsOpen = false;
-            me.SelectedItem = null;
-        }
-
-        [DllImport("user32")]
-        public static extern IntPtr SetFocus(IntPtr hWnd);
-        private async void ScriptParaIcon_Click(object sender, MouseButtonEventArgs e)
-        {
-            TextBlock icon = sender as TextBlock;
-            ToSendData data = icon.Tag as ToSendData;
-
-            recvScriptParaBox.Tag = data;
-            recvScriptParaBox.Text = data.recvScriptPara;
-            recvScriptParaBox.ScrollToEnd();
-            recvScriptParaPopup.PlacementTarget = icon;
-            recvScriptParaPopup.IsOpen = false;
-            await Task.Yield();
-            recvScriptParaPopup.IsOpen = true;
-            await Task.Yield();
-            var source = (HwndSource)PresentationSource.FromVisual(recvScriptParaPopup.Child);
-            SetFocus(source.Handle);
-            await Task.Yield();
-            Keyboard.Focus(recvScriptParaBox);
-        }
-        private void ScriptParaIcon_RightClick(object sender, MouseButtonEventArgs e)
-        {
-            TextBlock icon = sender as TextBlock;
-            ToSendData data = icon.Tag as ToSendData;
-
-            if (!string.IsNullOrEmpty(data.recvScriptPara))
+            if (!(sender is FrameworkElement button) || !(button.Tag is ToSendData item))
+                return;
+            var parts = new List<string>
             {
-                data.recvScriptPara = "";
-                //SaveSendList(null, EventArgs.Empty);
-            }
-        }
-        private void ScriptParaConfirm_Click(object sender, MouseButtonEventArgs e)
-        {
-            TextBlock icon = sender as TextBlock;
-            TextBox t = icon.Tag as TextBox;
-            ToSendData data = t.Tag as ToSendData;
-
-            data.recvScriptPara = t.Text;
-            //SaveSendList(null, EventArgs.Empty);
-            recvScriptParaPopup.IsOpen = false;
-        }
-        private void ScriptParaCancel_Click(object sender, MouseButtonEventArgs e)
-        {
-            recvScriptParaPopup.IsOpen = false;
+                item.hex ? "HEX" : (TryFindResource("QuickSendSettingsTextMode") as string ?? "Text"),
+                item.appendCrlf ? "CRLF" : (TryFindResource("QuickSendSettingsNoCrlf") as string ?? "No CRLF")
+            };
+            if (item.disableSuggestion)
+                parts.Add(TryFindResource("QuickSendSettingsExclude") as string ?? "Excluded from suggestions");
+            if (!string.IsNullOrWhiteSpace(item.recvScriptPath))
+                parts.Add((TryFindResource("QuickSendSettingsScript") as string ?? "Receive script") + ": " + item.recvScriptPath);
+            if (!string.IsNullOrWhiteSpace(item.recvScriptPara))
+                parts.Add(TryFindResource("QuickSendSettingsHasParameters") as string ?? "Parameters configured");
+            button.ToolTip = string.Format(TryFindResource("QuickSendSettingsTitle") as string ?? "Command {0} settings", item.id) +
+                Environment.NewLine + string.Join(" · ", parts);
         }
     }
 }

@@ -5,10 +5,10 @@ param(
     [ValidateSet('x64', 'x86')]
     [string]$Platform = 'x64',
     [switch]$SkipBuild,
-    [ValidateRange(1, 26)]
+    [ValidateRange(1, 28)]
     [int]$CheckFrom = 1,
-    [ValidateRange(1, 26)]
-    [int]$CheckThrough = 26
+    [ValidateRange(1, 28)]
+    [int]$CheckThrough = 28
 )
 
 $ErrorActionPreference = 'Stop'
@@ -808,6 +808,9 @@ public static class LlcomCriticalBoundedInvoker
         $profileType.GetProperty('hexSend').SetValue($originalProfile, $true, $null)
         $profileType.GetProperty('rts').SetValue($originalProfile, $true, $null)
         $profileType.GetProperty('showHexFormat').SetValue($originalProfile, 2, $null)
+        $originalProfile.dtrWakeBeforeSend = $true
+        $originalProfile.dtrWakeDelayMs = 250
+        $originalProfile.dtrWakeIdleMs = 1500
 
         $profilesField = $settingsType.GetField('uartProfiles', [Reflection.BindingFlags]'Public,Instance')
         Assert-CriticalCondition ($null -ne $profilesField) 'Settings.uartProfiles was not found.'
@@ -828,6 +831,8 @@ public static class LlcomCriticalBoundedInvoker
         $profileType.GetProperty('baudRate').SetValue($snapshot, 115200, $null)
         $profileType.GetProperty('sendScript').SetValue($snapshot, 'mutated-snapshot', $null)
         $profileType.GetProperty('hexSend').SetValue($snapshot, $false, $null)
+        $snapshot.dtrWakeBeforeSend = $false
+        $snapshot.dtrWakeDelayMs = 800
         $secondSnapshot = $getSnapshot.Invoke($isolatedSettings, [object[]]@('COM9'))
 
         Assert-CriticalCondition (
@@ -836,7 +841,10 @@ public static class LlcomCriticalBoundedInvoker
             $originalProfile.hexSend -and
             $secondSnapshot.baudRate -eq 57600 -and
             $secondSnapshot.sendScript -eq 'original-script' -and
-            $secondSnapshot.hexSend
+            $secondSnapshot.hexSend -and
+            $secondSnapshot.dtrWakeBeforeSend -and
+            $secondSnapshot.dtrWakeDelayMs -eq 250 -and
+            $secondSnapshot.dtrWakeIdleMs -eq 1500
         ) 'Mutating a UART profile snapshot polluted the stored profile.'
 
         $settingsType.GetProperty('showHexFormat').SetValue($isolatedSettings, 1, $null)
@@ -873,18 +881,50 @@ public static class LlcomCriticalBoundedInvoker
         $settingsType.GetProperty('showHexFormat').SetValue($isolatedSettings, 1, $null)
         $settingsType.GetProperty('encoding').SetValue($isolatedSettings, 936, $null)
         $settingsType.GetProperty('autoReconnect').SetValue($isolatedSettings, $false, $null)
+        $isolatedSettings.dtrWakeBeforeSend = $true
+        $isolatedSettings.dtrWakeDelayMs = 350
+        $isolatedSettings.dtrWakeIdleMs = 2500
         [void]$setActiveProfile.Invoke($isolatedSettings, [object[]]@('COM10', $false))
         $com10Loaded =
             $isolatedSettings.showHexFormat -eq 0 -and
             $isolatedSettings.encoding -eq 65001 -and
-            $isolatedSettings.autoReconnect
+            $isolatedSettings.autoReconnect -and
+            -not $isolatedSettings.dtrWakeBeforeSend -and
+            $isolatedSettings.dtrWakeDelayMs -eq 100 -and
+            $isolatedSettings.dtrWakeIdleMs -eq 1000
         [void]$setActiveProfile.Invoke($isolatedSettings, [object[]]@('COM9', $false))
         Assert-CriticalCondition (
             $com10Loaded -and
             $isolatedSettings.showHexFormat -eq 1 -and
             $isolatedSettings.encoding -eq 936 -and
-            -not $isolatedSettings.autoReconnect
+            -not $isolatedSettings.autoReconnect -and
+            $isolatedSettings.dtrWakeBeforeSend -and
+            $isolatedSettings.dtrWakeDelayMs -eq 350 -and
+            $isolatedSettings.dtrWakeIdleMs -eq 2500
         ) 'Switching active split COM did not load and preserve each port More Settings profile independently.'
+        $newPort = $getSnapshot.Invoke($isolatedSettings, [object[]]@('COM11'))
+        Assert-CriticalCondition (
+            -not $newPort.dtrWakeBeforeSend -and
+            $newPort.dtrWakeDelayMs -eq 100 -and $newPort.dtrWakeIdleMs -eq 1000
+        ) 'A new COM silently inherited another module DTR wake opt-in.'
+    }
+
+    Invoke-CriticalCheck 27 'DTR wake lifecycle and bounded asynchronous serial FIFO work without hardware' {
+        Add-Type -Path (Join-Path $PSScriptRoot 'LowPowerRegressionProbe.cs')
+        [LowPowerRegressionProbe]::Run($assembly)
+        $legacy = [Newtonsoft.Json.JsonConvert]::DeserializeObject(
+            '{"uartProfileSchemaVersion":0,"uartProfiles":{"COM19":{"dtr":true,"rts":false}}}', $settingsType)
+        Assert-CriticalCondition ($legacy.uartProfiles['COM19'].dtr) 'Legacy migration changed an explicitly saved DTR state.'
+        $legacy.dtrWakeDelayMs = -5
+        $legacy.dtrWakeIdleMs = 999999
+        Assert-CriticalCondition (
+            $legacy.dtrWakeDelayMs -eq 0 -and $legacy.dtrWakeIdleMs -eq 60000
+        ) 'Wake timing settings did not clamp to supported limits.'
+    }
+
+    Invoke-CriticalCheck 28 'Circular sends await completion and propagate cancellation and failures' {
+        Add-Type -Path (Join-Path $PSScriptRoot 'CircularSendRegressionProbe.cs')
+        [CircularSendRegressionProbe]::Run($assembly)
     }
 
     Invoke-CriticalCheck 10 'Script filename and profile path validation reject traversal' {
@@ -2506,7 +2546,8 @@ public static class LlcomRuntimeWorkerLifecycleProbe
             $updaterSource.Contains('EnsureDownloadDiskSpace') -and
             $updaterSource.Contains('TryDeleteFile(downloadPath)') -and
             $updaterSource.Contains('ValidateTrustedUpdatePackage') -and
-            $downloadValidationSource.Contains('cancellationToken);') -and
+            $downloadValidationSource.Contains('totalCts.Token);') -and
+            $downloadValidationSource.Contains('totalCts.Token.ThrowIfCancellationRequested();') -and
             -not $downloadValidationSource.Contains('CancellationToken.None);') -and
             ([Text.RegularExpressions.Regex]::Matches($updaterSource, 'Assert-PackageTrust').Count -ge 3) -and
             $updaterSource.Contains('Assert-ExtractedIdentity') -and

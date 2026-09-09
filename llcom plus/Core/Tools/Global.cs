@@ -58,6 +58,7 @@ namespace llcom_plus.Tools
         public bool? IsHex { get; set; }
         public bool ApplySendProcessing { get; set; } = true;
         public string SessionStringLogOverride { get; set; }
+        public string SourceText { get; set; }
     }
 
     /// <summary>
@@ -604,6 +605,30 @@ namespace llcom_plus.Tools
                 return false;
             SendDataRequest(request);
             return true;
+        }
+
+        // Unlike the legacy notification above, this contract completes only after
+        // the captured connection has actually finished sending. Never fall back to
+        // the Action event: queuing a request is not evidence of successful delivery.
+        public static Func<UartSendRequest, CancellationToken, Task<bool>> SendDataAsyncRequest;
+
+        public static Task<bool> RequestSendDataAsync(
+            UartSendRequest request,
+            CancellationToken token = default(CancellationToken))
+        {
+            token.ThrowIfCancellationRequested();
+            var send = SendDataAsyncRequest;
+            if (request?.Data == null || request.Data.Length == 0 || send == null)
+                return Task.FromResult(false);
+
+            return send(new UartSendRequest
+            {
+                Data = (byte[])request.Data.Clone(),
+                IsHex = request.IsHex,
+                ApplySendProcessing = request.ApplySendProcessing,
+                SessionStringLogOverride = request.SessionStringLogOverride,
+                SourceText = request.SourceText
+            }, token);
         }
 
         public static Func<bool> IsActiveSerialTargetOpenRequest;

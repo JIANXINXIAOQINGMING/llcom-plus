@@ -40,7 +40,7 @@ namespace llcom_plus.Pages
 
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
-            SetRunning(false);
+            SetRunning(loopCts != null);
             UpdateSelectionHeader();
         }
 
@@ -434,7 +434,21 @@ namespace llcom_plus.Pages
                     step.Source.Status = string.Format(
                         TryFindResource("CircularSendSendingStatus") as string ?? "第 {0} 轮发送中",
                         round);
-                    SendStep(step);
+                    try
+                    {
+                        await SendStepAsync(step, token);
+                        token.ThrowIfCancellationRequested();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        step.Source.Status = TryFindResource("CircularSendStopped") as string ?? "已停止";
+                        throw;
+                    }
+                    catch
+                    {
+                        step.Source.Status = TryFindResource("CircularSendFailed") as string ?? "发送失败";
+                        throw;
+                    }
                     step.Source.Status = string.Format(
                         TryFindResource("CircularSendSentStatus") as string ?? "第 {0} 轮已发送",
                         round);
@@ -465,9 +479,10 @@ namespace llcom_plus.Pages
             return runTimes >= 0 && allDelaysAreZero;
         }
 
-        private void SendOneButton_Click(object sender, RoutedEventArgs e)
+        private async void SendOneButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!((sender as Button)?.Tag is CircularSendItem item))
+            var button = sender as Button;
+            if (!(button?.Tag is CircularSendItem item) || loopCts != null)
                 return;
 
             if (string.IsNullOrWhiteSpace(item.Command))
@@ -478,8 +493,9 @@ namespace llcom_plus.Pages
                 if (!Global.EnsureActiveSerialTargetOpen())
                     return;
 
+                button.IsEnabled = false;
                 var step = new CircularSendStep(item, item.Command.Trim(), item.Hex, 0);
-                SendStep(step);
+                await SendStepAsync(step, CancellationToken.None);
                 item.Status = TryFindResource("CircularSendSentOnce") as string ?? "已发送";
             }
             catch (Exception ex)
@@ -487,9 +503,13 @@ namespace llcom_plus.Pages
                 item.Status = TryFindResource("CircularSendFailed") as string ?? "发送失败";
                 Tools.MessageBox.Show(ex.Message);
             }
+            finally
+            {
+                button.IsEnabled = true;
+            }
         }
 
-        private void SendStep(CircularSendStep step)
+        private async Task SendStepAsync(CircularSendStep step, CancellationToken token)
         {
             var data = step.Hex
                 ? Global.Hex2Byte(step.Command)
@@ -500,10 +520,13 @@ namespace llcom_plus.Pages
                 Data = data,
                 IsHex = step.Hex,
                 ApplySendProcessing = true,
-                SessionStringLogOverride = step.Hex ? step.Command : null
+                SessionStringLogOverride = step.Hex ? step.Command : null,
+                // Preserve the source so each captured COM profile supplies its own
+                // text encoding before the ordinary send script and CRLF processing.
+                SourceText = step.Command
             };
 
-            if (!Global.RequestSendData(request))
+            if (!await Global.RequestSendDataAsync(request, token))
                 throw new InvalidOperationException(TryFindResource("CircularSendRequestFailed") as string ?? "发送请求失败");
         }
 

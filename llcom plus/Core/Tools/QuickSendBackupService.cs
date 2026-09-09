@@ -1,6 +1,7 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -20,6 +21,7 @@ namespace llcom_plus.Tools
         internal const int MaximumSnapshotCount = 15;
         internal const long MaximumSnapshotBytes = 64L * 1024L * 1024L;
         internal const int AutoSnapshotDebounceMilliseconds = 1000;
+        internal const int AutoSnapshotRetryMilliseconds = 3000;
 
         private const int MutexWaitMilliseconds = 150;
         private const int MaximumReasonLength = 120;
@@ -28,11 +30,14 @@ namespace llcom_plus.Tools
         private const string SnapshotFileExtension = ".json";
 
         private static readonly object timerLock = new object();
+        private static readonly object autoSnapshotWriteLock = new object();
         private static Timer debounceTimer;
         private static Model.Settings pendingSettings;
         private static string pendingReason;
         private static bool autoSnapshotPending;
         private static bool shuttingDown;
+        private static long pendingVersion;
+        private static long nextAutoSnapshotTimestamp;
 
         internal static string BackupDirectory => BackupDirectoryPath;
 
@@ -86,9 +91,8 @@ namespace llcom_plus.Tools
                 pendingSettings = settings;
                 pendingReason = NormalizeReason(reason, "change");
                 autoSnapshotPending = true;
-                if (debounceTimer == null)
-                    debounceTimer = new Timer(AutoSnapshotTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
-                debounceTimer.Change(AutoSnapshotDebounceMilliseconds, Timeout.Infinite);
+                pendingVersion++;
+                ArmAutoSnapshotTimerUnsafe(AutoSnapshotDebounceMilliseconds);
             }
         }
 
@@ -127,24 +131,7 @@ namespace llcom_plus.Tools
 
         internal static QuickSendBackupWriteResult FlushPending()
         {
-            Model.Settings settings;
-            string reason;
-            lock (timerLock)
-            {
-                if (!autoSnapshotPending || shuttingDown)
-                    return QuickSendBackupWriteResult.Skipped("没有等待写入的快捷发送快照。");
-
-                autoSnapshotPending = false;
-                settings = pendingSettings;
-                reason = pendingReason;
-                pendingReason = null;
-                if (debounceTimer != null)
-                    debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
-            }
-
-            return settings == null
-                ? QuickSendBackupWriteResult.Skipped("没有等待写入的快捷发送快照。")
-                : CreateSnapshotNow(settings, reason ?? "auto");
+            return WritePendingSnapshot(false);
         }
 
         /// <summary>
@@ -377,47 +364,96 @@ namespace llcom_plus.Tools
 
         internal static void Shutdown()
         {
-            lock (timerLock)
+            // An automatic writer that already started must finish before shutdown
+            // returns; queued callbacks must not start writing afterwards.
+            lock (autoSnapshotWriteLock)
             {
-                shuttingDown = true;
-                autoSnapshotPending = false;
-                pendingSettings = null;
-                pendingReason = null;
-                if (debounceTimer != null)
+                lock (timerLock)
                 {
-                    debounceTimer.Dispose();
-                    debounceTimer = null;
+                    shuttingDown = true;
+                    autoSnapshotPending = false;
+                    pendingSettings = null;
+                    pendingReason = null;
+                    pendingVersion++;
+                    if (debounceTimer != null)
+                    {
+                        debounceTimer.Dispose();
+                        debounceTimer = null;
+                    }
                 }
             }
         }
 
         private static void AutoSnapshotTimerCallback(object ignored)
         {
-            Model.Settings settings;
-            string reason;
-            lock (timerLock)
-            {
-                if (shuttingDown)
-                    return;
-                if (!autoSnapshotPending)
-                    return;
-                autoSnapshotPending = false;
-                settings = pendingSettings;
-                reason = pendingReason;
-                pendingReason = null;
-            }
+            WritePendingSnapshot(true);
+        }
 
-            if (settings != null)
-                CreateSnapshotNow(settings, reason ?? "change");
+        private static void ArmAutoSnapshotTimerUnsafe(int delayMilliseconds)
+        {
+            nextAutoSnapshotTimestamp = Stopwatch.GetTimestamp() +
+                (long)Math.Ceiling(delayMilliseconds * (double)Stopwatch.Frequency / 1000);
+            if (debounceTimer == null)
+                debounceTimer = new Timer(AutoSnapshotTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
+            debounceTimer.Change(delayMilliseconds, Timeout.Infinite);
+        }
+
+        private static QuickSendBackupWriteResult WritePendingSnapshot(bool respectDebounce)
+        {
+            // Serialize timer/flush attempts without holding timerLock during file IO.
+            // Edits may schedule newer work while a snapshot is being captured/written.
+            lock (autoSnapshotWriteLock)
+            {
+                Model.Settings settings;
+                string reason;
+                long version;
+                lock (timerLock)
+                {
+                    if (!autoSnapshotPending || shuttingDown)
+                        return QuickSendBackupWriteResult.Skipped("没有等待写入的快捷发送快照。");
+
+                    var remainingTicks = nextAutoSnapshotTimestamp - Stopwatch.GetTimestamp();
+                    if (respectDebounce && remainingTicks > 0)
+                    {
+                        // A callback queued before a new edit/retry must respect the
+                        // new deadline instead of defeating debounce or retry throttling.
+                        var remainingMilliseconds = (int)Math.Min(int.MaxValue,
+                            Math.Ceiling(remainingTicks * 1000.0 / Stopwatch.Frequency));
+                        debounceTimer.Change(Math.Max(1, remainingMilliseconds), Timeout.Infinite);
+                        return QuickSendBackupWriteResult.Skipped("快捷发送快照仍在等待写入。");
+                    }
+
+                    settings = pendingSettings;
+                    reason = pendingReason;
+                    version = pendingVersion;
+                    autoSnapshotPending = false;
+                    pendingReason = null;
+                    debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                }
+
+                var result = CreateSnapshotNow(settings, reason ?? "change");
+                lock (timerLock)
+                {
+                    // A busy store or transient IO failure is not a completed backup.
+                    // Never replace a newer pending edit with this older attempt.
+                    if (!result.Succeeded && !shuttingDown && pendingVersion == version)
+                    {
+                        pendingSettings = settings;
+                        pendingReason = reason;
+                        autoSnapshotPending = true;
+                        ArmAutoSnapshotTimerUnsafe(AutoSnapshotRetryMilliseconds);
+                    }
+                }
+                return result;
+            }
         }
 
         private static QuickSendBackupState CaptureState(Model.Settings settings)
         {
-            var sourcePages = settings.GetAllQuickSendLists();
-            var sourceNames = settings.GetAllQuickListNames();
+            settings.GetQuickSendStateSnapshot(out var sourcePages, out var sourceNames, out var selected);
             var result = new QuickSendBackupState
             {
-                Selected = settings.quickSendSelect,
+                Selected = selected,
                 QuickSendList = new List<List<QuickSendBackupItem>>(),
                 QuickListNames = sourceNames == null
                     ? new List<string>()

@@ -237,6 +237,7 @@ namespace llcom_plus.Tools
             cancellationToken.ThrowIfCancellationRequested();
             if (TryGetCachedUpdatePackage(release, out var cachedZipPath))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var cachedLength = new FileInfo(cachedZipPath).Length;
                 progress?.Report(new GitHubDownloadProgress(cachedLength, cachedLength));
                 return cachedZipPath;
@@ -282,15 +283,18 @@ namespace llcom_plus.Tools
                             totalCts.Token).ConfigureAwait(false);
                     }
 
-                    cancellationToken.ThrowIfCancellationRequested();
+                    totalCts.Token.ThrowIfCancellationRequested();
                     ValidateTrustedUpdatePackage(
                         downloadPath,
                         signatureDownloadPath,
                         release.Version,
                         release.AssetName,
                         release.AssetDigest,
-                        cancellationToken);
+                        totalCts.Token);
 
+                    // This is the commit boundary: a cancelled validation must never
+                    // leave a new installable package in the pending-package directory.
+                    totalCts.Token.ThrowIfCancellationRequested();
                     TryDeleteFile(zipPath);
                     TryDeleteFile(signaturePath);
                     File.Move(downloadPath, zipPath);
@@ -1176,7 +1180,8 @@ namespace llcom_plus.Tools
                 }
             }
 
-            var actualVersion = InspectUpdatePackage(zipPath, signedVersion);
+            var actualVersion = InspectUpdatePackage(zipPath, signedVersion, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             return new TrustedUpdatePackage
             {
                 Version = actualVersion,
@@ -1295,8 +1300,10 @@ namespace llcom_plus.Tools
             return difference == 0;
         }
 
-        private static Version InspectUpdatePackage(string zipPath, Version expectedVersion)
+        private static Version InspectUpdatePackage(
+            string zipPath, Version expectedVersion, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath) || new FileInfo(zipPath).Length <= 0)
                 throw new FileNotFoundException("本地更新包不存在或为空。", zipPath);
 
@@ -1317,6 +1324,7 @@ namespace llcom_plus.Tools
                     var executableEntries = new System.Collections.Generic.List<ZipArchiveEntry>();
                     foreach (var entry in archive.Entries)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         expandedBytes = checked(expandedBytes + entry.Length);
                         if (expandedBytes > MaximumExpandedUpdateBytes)
                             throw new InvalidDataException("本地更新 ZIP 解压后超过 2 GB，已拒绝安装。");
@@ -1339,8 +1347,9 @@ namespace llcom_plus.Tools
                     var executablePath = Path.Combine(validationRoot, Global.ExpectedExeFileName);
                     using (var input = executableEntries[0].Open())
                     using (var output = File.Create(executablePath))
-                        input.CopyTo(output);
+                        CopyUpdateEntry(input, output, cancellationToken);
 
+                    cancellationToken.ThrowIfCancellationRequested();
                     var actualArchitecture = GetPortableExecutableArchitecture(executablePath);
                     var expectedArchitecture = Environment.Is64BitProcess ? "x64" : "x86";
                     if (!string.Equals(actualArchitecture, expectedArchitecture, StringComparison.OrdinalIgnoreCase))
@@ -1354,12 +1363,27 @@ namespace llcom_plus.Tools
                     if (expectedVersion != null && NormalizeVersion(actualVersion) != NormalizeVersion(expectedVersion))
                         throw new InvalidDataException(
                             $"更新包标注版本 {NormalizeVersionText(expectedVersion)} 与内部主程序版本 {NormalizeVersionText(actualVersion)} 不一致。");
+                    cancellationToken.ThrowIfCancellationRequested();
                     return actualVersion;
                 }
             }
             finally
             {
                 TryDeleteDirectory(validationRoot);
+            }
+        }
+
+        private static void CopyUpdateEntry(Stream input, Stream output, CancellationToken cancellationToken)
+        {
+            var buffer = new byte[81920];
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var read = input.Read(buffer, 0, buffer.Length);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (read == 0)
+                    return;
+                output.Write(buffer, 0, read);
             }
         }
 
@@ -1460,10 +1484,7 @@ function Wait-ForAppExit([int]$processId, [int]$graceSeconds) {{
         }}
 
         if ((Get-Date) -ge $deadline) {{
-            Write-UpdateLog ""待更新进程未按时退出，强制结束：$processId $($process.ProcessName)""
-            Stop-Process -Id $processId -Force -ErrorAction Stop
-            Start-Sleep -Seconds 2
-            return
+            throw ""程序仍在退出或保存数据，已取消本次安装以保护数据。请等待程序正常退出后重试。PID=$processId""
         }}
 
         Start-Sleep -Milliseconds 500
@@ -1533,10 +1554,12 @@ function Copy-WithRetry([string]$sourcePath, [string]$destinationPath, [int]$att
     }}
 }}
 $success = $false
+$appExited = $false
 try {{
     Write-UpdateLog ""安装脚本启动。PID=$pidToWait, Zip=$zip, AppDir=$appDir""
     Assert-PackageTrust
-    Wait-ForAppExit -processId $pidToWait -graceSeconds 8
+    Wait-ForAppExit -processId $pidToWait -graceSeconds 120
+    $appExited = $true
     Assert-PackageTrust
     if (Test-Path -LiteralPath $extract) {{ Remove-Item -LiteralPath $extract -Recurse -Force }}
     New-Item -ItemType Directory -Path $extract -Force | Out-Null
@@ -1565,7 +1588,7 @@ try {{
     $message = ""自动更新失败。`r`n临时目录：$tempRoot`r`n下载包：$zip`r`n解压目录：$extract`r`n安装目录：$appDir`r`n错误信息：$($_.Exception.Message)`r`n`r`n可以手动关闭 llcom plus 后，将解压目录中的文件复制到安装目录覆盖。""
     Write-UpdateLog $message
     Show-UpdateFailure $message
-    if ($restartAfterInstall -and (Test-Path -LiteralPath $exe)) {{
+    if ($appExited -and $restartAfterInstall -and (Test-Path -LiteralPath $exe)) {{
         try {{ Start-Process -FilePath $exe -WorkingDirectory $appDir }} catch {{ }}
     }}
 }} finally {{

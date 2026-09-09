@@ -24,6 +24,9 @@ namespace llcom_plus
         private bool checkingUpdate;
         private bool startupCheckRequested;
         private string lastNotifiedVersion = string.Empty;
+        private readonly CancellationTokenSource lifetimeCts = new CancellationTokenSource();
+        private readonly CancellationToken lifetimeToken;
+        private bool ownerClosed;
 
         public UpdateCheckController(
             Window owner,
@@ -35,6 +38,18 @@ namespace llcom_plus
             this.updateButton = updateButton ?? throw new ArgumentNullException(nameof(updateButton));
             this.updateIcon = updateIcon ?? throw new ArgumentNullException(nameof(updateIcon));
             this.updateBadge = updateBadge ?? throw new ArgumentNullException(nameof(updateBadge));
+            lifetimeToken = lifetimeCts.Token;
+            owner.Closed += Owner_Closed;
+        }
+
+        private void Owner_Closed(object sender, EventArgs e)
+        {
+            if (ownerClosed)
+                return;
+            ownerClosed = true;
+            owner.Closed -= Owner_Closed;
+            lifetimeCts.Cancel();
+            lifetimeCts.Dispose();
         }
 
         /// <summary>
@@ -44,17 +59,21 @@ namespace llcom_plus
         /// </summary>
         public async Task CheckOnStartupAsync()
         {
-            if (startupCheckRequested)
+            if (startupCheckRequested || ownerClosed)
                 return;
 
             startupCheckRequested = true;
             try
             {
                 var release = await GetLatestReleaseAsync(forceRefresh: false);
+                if (ownerClosed)
+                    return;
                 ApplyUpdateAvailability(release, publishNotification: true);
             }
             catch (Exception ex)
             {
+                if (ownerClosed)
+                    return;
                 ApplyCachedUpdateAvailabilityAfterFailure();
                 Tools.Logger.AddUartLogDebug(
                     $"[Update] startup check failed: {ex.GetBaseException().Message}");
@@ -63,7 +82,7 @@ namespace llcom_plus
 
         public async Task CheckAsync()
         {
-            if (checkingUpdate)
+            if (checkingUpdate || ownerClosed)
                 return;
 
             checkingUpdate = true;
@@ -91,10 +110,14 @@ namespace llcom_plus
                     // startup result is still fresh. If that startup request is still
                     // in flight, both paths continue to share the same task.
                     release = await GetLatestReleaseAsync(forceRefresh: true);
+                    if (ownerClosed)
+                        return;
                     ApplyUpdateAvailability(release, publishNotification: true);
                 }
                 catch (Exception ex)
                 {
+                    if (ownerClosed)
+                        return;
                     onlineError = ex;
                     ApplyCachedUpdateAvailabilityAfterFailure();
                 }
@@ -156,6 +179,8 @@ namespace llcom_plus
 
                         SetStatus("AboutUpdateDownloading", "Downloading...");
                         zipPath = await DownloadUpdateWithProgressAsync(release);
+                        if (ownerClosed)
+                            return;
                     }
 
                     Tools.Global.PublishNotification(
@@ -213,10 +238,13 @@ namespace llcom_plus
             }
             catch (OperationCanceledException)
             {
-                SetStatus("AboutUpdateCancelled", "Update download cancelled.");
+                if (!ownerClosed)
+                    SetStatus("AboutUpdateCancelled", "Update download cancelled.");
             }
             catch (Exception ex)
             {
+                if (ownerClosed)
+                    return;
                 Tools.Global.PublishNotification(
                     string.Format(
                         ResourceText("NotificationOperationFailedTitleFormat", "{0} failed"),
@@ -229,7 +257,7 @@ namespace llcom_plus
             }
             finally
             {
-                if (!shouldShutdown)
+                if (!shouldShutdown && !ownerClosed)
                 {
                     updateIcon.Spin = false;
                     ApplyUpdateIndicator(cachedOnlineRelease);
@@ -241,7 +269,8 @@ namespace llcom_plus
 
         public void RefreshIndicatorText()
         {
-            ApplyUpdateIndicator(cachedOnlineRelease);
+            if (!ownerClosed)
+                ApplyUpdateIndicator(cachedOnlineRelease);
         }
 
         private Task<Tools.GitHubReleaseInfo> GetLatestReleaseAsync(bool forceRefresh)
@@ -260,7 +289,7 @@ namespace llcom_plus
 
                 if (checkTask == null)
                 {
-                    checkTask = Tools.GitHubReleaseUpdater.CheckLatestAsync();
+                    checkTask = Tools.GitHubReleaseUpdater.CheckLatestAsync(lifetimeToken);
                     activeOnlineCheckTask = checkTask;
                 }
             }
@@ -366,11 +395,8 @@ namespace llcom_plus
         private static void StartLocalUpdateAndShutdown(string packagePath)
         {
             Tools.GitHubReleaseUpdater.StartInstallAfterExit(packagePath);
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(1500);
-                Environment.Exit(0);
-            });
+            // Closing saves scripts/settings and flushes pending snapshots. Never race
+            // that work with a forced process exit; the installer waits for normal exit.
             Application.Current.Shutdown();
         }
 
@@ -382,7 +408,7 @@ namespace llcom_plus
         private async Task<string> DownloadUpdateWithProgressAsync(Tools.GitHubReleaseInfo release)
         {
             UpdateProgressWindow progressWindow = null;
-            using (var cts = new CancellationTokenSource())
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken))
             {
                 try
                 {
@@ -397,6 +423,8 @@ namespace llcom_plus
 
                     var progress = new Progress<Tools.GitHubDownloadProgress>(value =>
                     {
+                        if (ownerClosed)
+                            return;
                         progressWindow.Report(
                             value,
                             ResourceText("AboutUpdateDownloading", "Downloading..."),

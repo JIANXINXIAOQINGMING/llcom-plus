@@ -4,8 +4,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:adonisExtensions="clr-namespace:AdonisUI.Extensions;assembly=AdonisUI"
     Title="{DynamicResource FlowControlWindowTitle}"
-    Width="380"
-    MinWidth="360"
+    Width="440"
+    MinWidth="420"
     MinHeight="245"
     SizeToContent="Height"
     adonisExtensions:RippleExtension.FadeInDuration="0"
@@ -17,6 +17,11 @@
         <Style BasedOn="{StaticResource AppGlassWindowStyle}" TargetType="Window" />
     </Window.Style>
     <StackPanel Margin="16,14,16,16">
+        <TextBlock
+            Margin="0,0,0,12"
+            FontWeight="SemiBold"
+            Foreground="{DynamicResource AppGlassMutedBrush}"
+            Text="{Binding ActiveUartProfileName}" />
         <WrapPanel Margin="0,0,0,10">
             <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingFlowControl}" />
             <ComboBox
@@ -53,6 +58,52 @@
                     Margin="0,8,0,0"
                     FontSize="12"
                     Text="{DynamicResource SettingSendThrottleTip}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox
+            Margin="0,12,0,0"
+            HorizontalAlignment="Stretch"
+            Header="{DynamicResource SettingDtrWake}">
+            <StackPanel Margin="8">
+                <CheckBox
+                    x:Name="DtrWakeBeforeSendCheckBox"
+                    IsChecked="{Binding dtrWakeBeforeSend}">
+                    <TextBlock Text="{DynamicResource SettingDtrWakeBeforeSend}" TextWrapping="Wrap" />
+                </CheckBox>
+                <Grid
+                    Margin="22,10,0,0"
+                    IsEnabled="{Binding IsChecked, ElementName=DtrWakeBeforeSendCheckBox}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="72" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="10" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock VerticalAlignment="Center" Text="{DynamicResource SettingDtrWakeDelay}" />
+                    <TextBox
+                        Grid.Column="1"
+                        Margin="8,0,4,0"
+                        Text="{Binding dtrWakeDelayMs, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{DynamicResource SettingMsShort}" />
+                    <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="{DynamicResource SettingDtrWakeIdle}" />
+                    <TextBox
+                        Grid.Row="2"
+                        Grid.Column="1"
+                        Margin="8,0,4,0"
+                        Text="{Binding dtrWakeIdleMs, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" Text="{DynamicResource SettingMsShort}" />
+                </Grid>
+                <TextBlock
+                    Margin="22,10,0,2"
+                    FontSize="12"
+                    Foreground="{DynamicResource AppGlassMutedBrush}"
+                    Text="{DynamicResource SettingDtrWakeTip}"
                     TextWrapping="Wrap" />
             </StackPanel>
         </GroupBox>

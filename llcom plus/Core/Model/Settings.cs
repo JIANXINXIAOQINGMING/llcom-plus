@@ -28,6 +28,9 @@ namespace llcom_plus.Model
         public int flowControl { get; set; } = 0;
         public int sendThrottlePacketSize { get; set; } = 0;
         public int sendThrottleDelayMs { get; set; } = 0;
+        public bool dtrWakeBeforeSend { get; set; } = false;
+        public int dtrWakeDelayMs { get; set; } = 100;
+        public int dtrWakeIdleMs { get; set; } = 1000;
         public bool bitDelay { get; set; } = true;
         public uint maxLength { get; set; } = 10240;
         public string sendScript { get; set; } = "default";
@@ -71,6 +74,10 @@ namespace llcom_plus.Model
     {
         private const int DefaultQuickSendRows = 10;
         private const int CurrentUartProfileSchemaVersion = 2;
+        internal const int DefaultDtrWakeDelayMilliseconds = 100;
+        internal const int DefaultDtrWakeIdleMilliseconds = 1000;
+        internal const int MaxDtrWakeDelayMilliseconds = 10000;
+        internal const int MaxDtrWakeIdleMilliseconds = 60000;
         private const string MqttPasswordCredentialName = "mqtt-password";
         private const string MqttClientCertificatePasswordCredentialName = "mqtt-client-certificate-password";
         private const string TlsClientCertificatePasswordCredentialName = "tls-client-certificate-password";
@@ -108,6 +115,9 @@ namespace llcom_plus.Model
         private int _flowControl = 0;
         private int _sendThrottlePacketSize = 0;
         private int _sendThrottleDelayMs = 0;
+        private bool _dtrWakeBeforeSend = false;
+        private int _dtrWakeDelayMs = DefaultDtrWakeDelayMilliseconds;
+        private int _dtrWakeIdleMs = DefaultDtrWakeIdleMilliseconds;
         private string _sendScript = "default";
         private string _recvScript = "default";
         private string _runScript = "example";
@@ -523,15 +533,11 @@ namespace llcom_plus.Model
             if (uartProfileSchemaVersion >= CurrentUartProfileSchemaVersion)
                 return;
 
-            // v1：旧版把 DTR=true 作为所有串口的默认值；部分设备会因此在
-            // 打开时复位。只对尚未完成 v1 迁移的配置执行一次。
             foreach (var entry in uartProfiles.Where(i => !string.IsNullOrWhiteSpace(i.Key) && i.Value != null))
             {
-                if (uartProfileSchemaVersion < 1 && entry.Value.dtr && !entry.Value.rts)
-                    entry.Value.dtr = false;
-
                 // v2：发送框内容改为全局只保存当前一份。标记所有端口配置重写，
                 // 让旧 JSON 中每个 COM 下残留的 dataToSend 字段被清除。
+                // 旧配置中显式保存的 DTR 是用户的硬件状态，迁移时必须原样保留。
                 _uartProfilesPendingWrite.Add(NormalizePortName(entry.Key));
             }
 
@@ -568,7 +574,7 @@ namespace llcom_plus.Model
             _activeUartProfileName = normalizedPortName;
             _activeUartProfileUsesMainUart = usesMainUart;
             if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
-                uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
+                uartProfiles[normalizedPortName] = CreateNewUartProfile();
 
             ApplyUartProfile(uartProfiles[normalizedPortName]);
             if (usesMainUart && ReferenceEquals(this, Tools.Global.setting))
@@ -594,7 +600,7 @@ namespace llcom_plus.Model
             {
                 EnsureUartProfiles();
                 if (!uartProfiles.ContainsKey(normalizedPortName) || uartProfiles[normalizedPortName] == null)
-                    uartProfiles[normalizedPortName] = CreateUartProfileFromCurrent();
+                    uartProfiles[normalizedPortName] = CreateNewUartProfile();
 
                 return CreateNormalizedUartProfileSnapshot(uartProfiles[normalizedPortName]);
             }
@@ -656,6 +662,9 @@ namespace llcom_plus.Model
                 flowControl = profile.flowControl < 0 || profile.flowControl > 2 ? 0 : profile.flowControl,
                 sendThrottlePacketSize = packetSize,
                 sendThrottleDelayMs = packetSize == 0 ? 0 : Math.Min(10000, Math.Max(0, profile.sendThrottleDelayMs)),
+                dtrWakeBeforeSend = profile.dtrWakeBeforeSend,
+                dtrWakeDelayMs = NormalizeDtrWakeDelayMilliseconds(profile.dtrWakeDelayMs),
+                dtrWakeIdleMs = NormalizeDtrWakeIdleMilliseconds(profile.dtrWakeIdleMs),
                 bitDelay = profile.bitDelay,
                 maxLength = profile.maxLength == 0 ? 10240 : profile.maxLength,
                 sendScript = string.IsNullOrWhiteSpace(profile.sendScript) ? "default" : profile.sendScript,
@@ -736,6 +745,9 @@ namespace llcom_plus.Model
                 flowControl = _flowControl,
                 sendThrottlePacketSize = _sendThrottlePacketSize,
                 sendThrottleDelayMs = _sendThrottleDelayMs,
+                dtrWakeBeforeSend = _dtrWakeBeforeSend,
+                dtrWakeDelayMs = _dtrWakeDelayMs,
+                dtrWakeIdleMs = _dtrWakeIdleMs,
                 bitDelay = _bitDelay,
                 maxLength = _maxLength,
                 sendScript = _sendScript,
@@ -748,6 +760,27 @@ namespace llcom_plus.Model
                 rts = storedActiveProfile?.rts ?? Tools.Global.uart?.Rts ?? false,
                 dtr = storedActiveProfile?.dtr ?? Tools.Global.uart?.Dtr ?? false
             };
+        }
+
+        private UartPortProfile CreateNewUartProfile()
+        {
+            var profile = CreateUartProfileFromCurrent();
+            // Wake opt-in belongs to a specific module/COM wiring. A previously
+            // unseen COM must not inherit another device's automatic DTR control.
+            profile.dtrWakeBeforeSend = false;
+            profile.dtrWakeDelayMs = DefaultDtrWakeDelayMilliseconds;
+            profile.dtrWakeIdleMs = DefaultDtrWakeIdleMilliseconds;
+            return profile;
+        }
+
+        internal static int NormalizeDtrWakeDelayMilliseconds(int value)
+        {
+            return Math.Min(MaxDtrWakeDelayMilliseconds, Math.Max(0, value));
+        }
+
+        internal static int NormalizeDtrWakeIdleMilliseconds(int value)
+        {
+            return Math.Min(MaxDtrWakeIdleMilliseconds, Math.Max(0, value));
         }
 
         internal UartPortProfile GetCurrentUartProfileSnapshot()
@@ -777,6 +810,9 @@ namespace llcom_plus.Model
                 flowControl = profile.flowControl < 0 || profile.flowControl > 2 ? 0 : profile.flowControl;
                 sendThrottlePacketSize = Math.Max(0, profile.sendThrottlePacketSize);
                 sendThrottleDelayMs = Math.Max(0, profile.sendThrottleDelayMs);
+                dtrWakeBeforeSend = profile.dtrWakeBeforeSend;
+                dtrWakeDelayMs = NormalizeDtrWakeDelayMilliseconds(profile.dtrWakeDelayMs);
+                dtrWakeIdleMs = NormalizeDtrWakeIdleMilliseconds(profile.dtrWakeIdleMs);
                 bitDelay = profile.bitDelay;
                 maxLength = profile.maxLength == 0 ? 10240 : profile.maxLength;
                 sendScript = string.IsNullOrWhiteSpace(profile.sendScript) ? "default" : profile.sendScript;
@@ -789,7 +825,7 @@ namespace llcom_plus.Model
                 if (ControlsGlobalUart && Tools.Global.uart != null)
                 {
                     Tools.Global.uart.Rts = profile.rts;
-                    Tools.Global.uart.Dtr = profile.dtr;
+                    Tools.Global.uart.SetConfiguredDtr(profile.dtr);
                     Tools.Global.uart.ApplyFlowControl();
                 }
             }
@@ -815,6 +851,9 @@ namespace llcom_plus.Model
                 merged.flowControl = _flowControl;
                 merged.sendThrottlePacketSize = _sendThrottlePacketSize;
                 merged.sendThrottleDelayMs = _sendThrottleDelayMs;
+                merged.dtrWakeBeforeSend = _dtrWakeBeforeSend;
+                merged.dtrWakeDelayMs = _dtrWakeDelayMs;
+                merged.dtrWakeIdleMs = _dtrWakeIdleMs;
                 merged.bitDelay = _bitDelay;
                 merged.maxLength = _maxLength;
                 merged.sendScript = _sendScript;
@@ -997,6 +1036,14 @@ namespace llcom_plus.Model
             out List<List<ToSendData>> lists,
             out List<string> names)
         {
+            GetQuickSendStateSnapshot(out lists, out names, out _);
+        }
+
+        internal void GetQuickSendStateSnapshot(
+            out List<List<ToSendData>> lists,
+            out List<string> names,
+            out int selectedIndex)
+        {
             lock (quickSendStateLock)
             {
                 EnsureQuickSendListStateUnsafe();
@@ -1004,6 +1051,7 @@ namespace llcom_plus.Model
                 foreach (var list in quickSendList)
                     lists.Add(new List<ToSendData>(list));
                 names = new List<string>(quickListNames.GetRange(0, quickSendList.Count));
+                selectedIndex = _quickSendSelect;
             }
         }
 
@@ -1263,6 +1311,45 @@ namespace llcom_plus.Model
                 if (value > 10000)
                     value = 10000;
                 _sendThrottleDelayMs = value;
+                SaveUartProcessingSetting();
+            }
+        }
+
+        public bool dtrWakeBeforeSend
+        {
+            get
+            {
+                return _dtrWakeBeforeSend;
+            }
+            set
+            {
+                _dtrWakeBeforeSend = value;
+                SaveUartProcessingSetting();
+            }
+        }
+
+        public int dtrWakeDelayMs
+        {
+            get
+            {
+                return _dtrWakeDelayMs;
+            }
+            set
+            {
+                _dtrWakeDelayMs = NormalizeDtrWakeDelayMilliseconds(value);
+                SaveUartProcessingSetting();
+            }
+        }
+
+        public int dtrWakeIdleMs
+        {
+            get
+            {
+                return _dtrWakeIdleMs;
+            }
+            set
+            {
+                _dtrWakeIdleMs = NormalizeDtrWakeIdleMilliseconds(value);
                 SaveUartProcessingSetting();
             }
         }

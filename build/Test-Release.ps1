@@ -739,7 +739,7 @@ try {
             $wrapUpFromFirst -eq 7 -and
             $wrapDownFromLast -eq 0 -and
             $leftColumnBoundary -eq 0 -and
-            $rightColumnBoundary -eq 4
+            $rightColumnBoundary -eq 2
         ) 'Quick-send keyboard navigation wraps rows and bounds columns'
 
         $shouldNotifyBaudRateChange = $windowType.GetMethod(

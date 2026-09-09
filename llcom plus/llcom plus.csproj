@@ -315,6 +315,7 @@
     <Compile Include="Core\Model\Settings.cs" />
     <Compile Include="Core\Model\ToSendData.cs" />
     <Compile Include="Core\Model\Uart.cs" />
+    <Compile Include="Core\Model\SerialSendQueue.cs" />
     <Compile Include="UI\Pages\DataShowPage.xaml.cs">
       <DependentUpon>DataShowPage.xaml</DependentUpon>
     </Compile>
@@ -402,6 +403,13 @@
     <Page Include="UI\View\HttpToolWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Compile Include="UI\View\QuickSendItemSettings.xaml.cs">
+      <DependentUpon>QuickSendItemSettings.xaml</DependentUpon>
+    </Compile>
+    <Page Include="UI\View\QuickSendItemSettings.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
     </Page>
     <Page Include="UI\View\QuickSendBackupWindow.xaml">
       <SubType>Designer</SubType>

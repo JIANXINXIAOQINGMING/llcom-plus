@@ -20,6 +20,10 @@ namespace llcom_plus.Model
         private string _recvScriptPara = "";
         private bool _appendCrlf;
         private bool _disableSuggestion;
+        // View-only state; never add derived UI fields to saved/imported data.
+        [Newtonsoft.Json.JsonIgnore]
+        public bool HasCustomOptions => hex || !appendCrlf || disableSuggestion ||
+            !string.IsNullOrWhiteSpace(recvScriptPath) || !string.IsNullOrWhiteSpace(recvScriptPara);
         public int id
         {
             get
@@ -123,6 +127,10 @@ namespace llcom_plus.Model
         protected void OnPropertyChanged(string propertyName)
         {
             this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            if (propertyName == nameof(hex) || propertyName == nameof(appendCrlf) ||
+                propertyName == nameof(disableSuggestion) || propertyName == nameof(recvScriptPath) ||
+                propertyName == nameof(recvScriptPara))
+                this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasCustomOptions)));
         }
     }
 }

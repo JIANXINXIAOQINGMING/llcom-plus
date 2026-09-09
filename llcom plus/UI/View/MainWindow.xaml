@@ -864,7 +864,113 @@
                             <RowDefinition Height="auto" />
                         </Grid.RowDefinitions>
                         <Grid.Resources>
+                            <Style x:Key="QuickSendCommandButtonStyle" BasedOn="{StaticResource GlassButtonStyle}" TargetType="{x:Type Button}">
+                                <Setter Property="Height" Value="32" />
+                                <Setter Property="MinWidth" Value="34" />
+                                <Setter Property="Margin" Value="2,0" />
+                                <Setter Property="Padding" Value="9,0" />
+                                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                                <Setter Property="Background" Value="{DynamicResource AppFloatingGlassControlBackground}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource AppFloatingGlassControlBorderBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
+                            </Style>
+                            <Style x:Key="QuickSendDeleteCommandStyle" BasedOn="{StaticResource QuickSendInlineButtonStyle}" TargetType="{x:Type Button}">
+                                <Setter Property="Foreground" Value="{DynamicResource AppGlassMutedBrush}" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource AppDangerBrush}" />
+                                    </Trigger>
+                                    <Trigger Property="IsKeyboardFocused" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource AppDangerBrush}" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                            <!-- Commands are outside the item host: selecting pages with arrow keys
+                                 must never create/delete a page or change the page-index contract. -->
+                            <Style x:Key="QuickSendPageSelectorStyle" BasedOn="{StaticResource {x:Type ComboBox}}" TargetType="{x:Type ComboBox}">
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="{x:Type ComboBox}">
+                                            <Grid>
+                                                <ToggleButton x:Name="DropDownToggle" Focusable="False" ClickMode="Press"
+                                                              Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                                              BorderThickness="{TemplateBinding BorderThickness}"
+                                                              IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                                    <ToggleButton.Template>
+                                                        <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                                            <Border x:Name="Chrome" CornerRadius="7" Background="{TemplateBinding Background}"
+                                                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                                                                <Path Width="8" Height="5" Margin="0,0,10,0" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                                      Data="M 0 0 L 4 5 L 8 0 Z" Fill="{DynamicResource AppGlassTextBrush}" Stretch="Fill" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppGlassControlHoverBackground}" />
+                                                                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppGlassFocusBorderBrush}" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsChecked" Value="True">
+                                                                    <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+                                                                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </ToggleButton.Template>
+                                                </ToggleButton>
+                                                <TextBlock Margin="8,4,30,4" VerticalAlignment="Center" IsHitTestVisible="False"
+                                                           Text="{TemplateBinding SelectionBoxItem}" TextTrimming="CharacterEllipsis" />
+                                                <Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False"
+                                                       IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" PopupAnimation="Fade">
+                                                    <Border MinWidth="260" MaxHeight="{TemplateBinding MaxDropDownHeight}" Padding="5"
+                                                            Background="{DynamicResource AppPopupBackground}" BorderBrush="{DynamicResource AppGlassBorderBrush}"
+                                                            BorderThickness="1" CornerRadius="8">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="*" />
+                                                                <RowDefinition Height="Auto" />
+                                                            </Grid.RowDefinitions>
+                                                            <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                                                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
+                                                            </ScrollViewer>
+                                                            <StackPanel Grid.Row="1">
+                                                                <Border Height="1" Margin="4,5" Background="{DynamicResource AppGlassBorderBrush}" />
+                                                                <Button x:Name="AddQuickSendPageButton" Click="AddQuickSendPageButton_Click"
+                                                                        AutomationProperties.Name="{DynamicResource QuickSendAddPage}"
+                                                                        Style="{StaticResource QuickSendInlineButtonStyle}">
+                                                                    <StackPanel Orientation="Horizontal">
+                                                                        <fa:FontAwesome Width="18" VerticalAlignment="Center" FontSize="13" Icon="Plus" Foreground="{DynamicResource AppAccentBrush}" />
+                                                                        <TextBlock Margin="7,0,0,0" Text="{DynamicResource QuickSendAddPage}" />
+                                                                    </StackPanel>
+                                                                </Button>
+                                                                <Button x:Name="DeleteQuickSendPageButton" Click="DeleteQuickSendPageButton_Click"
+                                                                        AutomationProperties.Name="{DynamicResource QuickSendDeletePage}"
+                                                                        IsEnabled="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                                                        Style="{StaticResource QuickSendDeleteCommandStyle}">
+                                                                    <StackPanel Orientation="Horizontal">
+                                                                        <fa:FontAwesome Width="18" VerticalAlignment="Center" FontSize="13" Icon="TrashOutline" />
+                                                                        <TextBlock Margin="7,0,0,0" Text="{DynamicResource QuickSendDeletePage}" />
+                                                                    </StackPanel>
+                                                                </Button>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </Popup>
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                                    <Setter TargetName="DropDownToggle" Property="BorderBrush" Value="{DynamicResource AppGlassFocusBorderBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsEnabled" Value="False">
+                                                    <Setter Property="Opacity" Value="0.55" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
                             <Style x:Key="toSendListStyle" TargetType="{x:Type ListBoxItem}">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                 <Setter Property="Template">
                                     <Setter.Value>
                                         <ControlTemplate TargetType="{x:Type ListBoxItem}">
@@ -872,152 +978,52 @@
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="28" />
                                                     <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="42" />
-                                                    <ColumnDefinition Width="44" />
+                                                    <ColumnDefinition Width="84" />
                                                     <ColumnDefinition Width="38" />
-                                                    <ColumnDefinition Width="46" />
-                                                    <ColumnDefinition Width="40" />
-                                                    <ColumnDefinition Width="0" />
                                                 </Grid.ColumnDefinitions>
-                                                <Grid
-                                                Margin="1"
-                                                Background="Transparent"
-                                                Cursor="Cross"
-                                                MouseRightButtonDown="TextBlock_MouseRightButtonDown"
-                                                Tag="{Binding}" />
-                                                <TextBlock
-                                                Grid.Column="0"
-                                                Margin="2"
-                                                HorizontalAlignment="Center"
-                                                Cursor="Cross"
-                                                MouseRightButtonDown="TextBlock_MouseRightButtonDown"
-                                                Tag="{Binding}"
-                                                Text="{Binding id}"
-                                                ToolTip="{DynamicResource QuickSendIdTip}" />
-                                                <TextBox
-                                                x:Name="QuickSendRowTextBox"
-                                                Grid.Column="1"
-                                                Margin="0,0,2,0"
-                                                HorizontalAlignment="Stretch"
-                                                MinWidth="60"
-                                                MouseDoubleClick="QuickSendTextBox_MouseDoubleClick"
-                                                PreviewMouseLeftButtonDown="QuickSendTextBox_PreviewMouseLeftButtonDown"
-                                                PreviewKeyDown="QuickSendTextBox_PreviewKeyDown"
-                                                Text="{Binding text, UpdateSourceTrigger=PropertyChanged}" />
-                                                <Button
-                                                x:Name="QuickSendRowSendButton"
-                                                Grid.Column="2"
-                                                MinWidth="58"
-                                                Margin="0,0,2,0"
-                                                Padding="10,0"
-                                                HorizontalAlignment="Left"
-                                                Click="knowSendDataButton_click"
-                                                MouseRightButtonDown="QuickSendButton_MouseRightButtonDown"
-                                                Content="{Binding commit}"
-                                                Cursor="Cross"
-                                                Tag="{Binding}"
-                                                ToolTip="{DynamicResource QuickSendButtonTip}" />
-                                                <CheckBox
-                                                x:Name="QuickSendRowHexCheckBox"
-                                                Grid.Column="3"
-                                                Margin="2"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                IsChecked="{Binding hex}" />
-                                                <CheckBox
-                                                x:Name="QuickSendRowCrlfCheckBox"
-                                                Grid.Column="4"
-                                                Margin="2"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                IsChecked="{Binding appendCrlf}"
-                                                ToolTip="{DynamicResource QuickSendAppendCrlfTip}" />
-                                                <CheckBox
-                                                x:Name="QuickSendRowExcludeCheckBox"
-                                                Grid.Column="5"
-                                                Margin="2"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                IsChecked="{Binding disableSuggestion}"
-                                                ToolTip="{DynamicResource QuickSendDisableSuggestionTip}" />
-                                                <TextBlock
-                                                Name="recvScriptSet"
-                                                Grid.Column="6"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                Opacity="{Binding recvScriptPath, Converter={StaticResource rsOpacityConverter}}"
-                                                MouseLeftButtonDown="ScriptIcon_Click"
-                                                MouseRightButtonDown="ScriptIcon_RightClick"
-                                                Tag="{Binding}">
-                                                <fa:FontAwesome Foreground="{DynamicResource AppIconBrush}" Icon="FileText">
-                                                    <fa:FontAwesome.Style>
-                                                        <Style TargetType="fa:FontAwesome">
-                                                            <Setter Property="FontSize" Value="16"/>
+                                                <TextBlock Grid.Column="0" Margin="2" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                           Cursor="Cross" MouseRightButtonDown="TextBlock_MouseRightButtonDown"
+                                                           Tag="{Binding}" Text="{Binding id}" ToolTip="{DynamicResource QuickSendIdTip}" />
+                                                <TextBox x:Name="QuickSendRowTextBox" Grid.Column="1" Margin="0,0,4,0" MinWidth="60"
+                                                         HorizontalAlignment="Stretch"
+                                                         MouseDoubleClick="QuickSendTextBox_MouseDoubleClick"
+                                                         PreviewMouseLeftButtonDown="QuickSendTextBox_PreviewMouseLeftButtonDown"
+                                                         PreviewKeyDown="QuickSendTextBox_PreviewKeyDown"
+                                                         Text="{Binding text, UpdateSourceTrigger=PropertyChanged}" />
+                                                <Button x:Name="QuickSendRowSendButton" Grid.Column="2" Margin="0,0,4,0" Padding="8,0"
+                                                        HorizontalContentAlignment="Stretch" Click="knowSendDataButton_click"
+                                                        MouseRightButtonDown="QuickSendButton_MouseRightButtonDown" Tag="{Binding}">
+                                                    <TextBlock Text="{Binding commit}" TextTrimming="CharacterEllipsis" TextAlignment="Center" />
+                                                    <Button.ToolTip>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding commit}" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{DynamicResource QuickSendButtonTip}" />
+                                                        </StackPanel>
+                                                    </Button.ToolTip>
+                                                </Button>
+                                                <Button x:Name="QuickSendRowSettingsButton" Grid.Column="3" Width="32" Height="30" Padding="0"
+                                                        HorizontalAlignment="Center" HorizontalContentAlignment="Center" VerticalAlignment="Center"
+                                                        Click="QuickSendRowSettingsButton_Click" ToolTipOpening="QuickSendRowSettingsButton_ToolTipOpening"
+                                                        Tag="{Binding}" ToolTip="{DynamicResource QuickSendItemSettings}"
+                                                        AutomationProperties.Name="{DynamicResource QuickSendItemSettings}">
+                                                    <Button.Style>
+                                                        <Style TargetType="{x:Type Button}" BasedOn="{StaticResource QuickSendInlineButtonStyle}">
+                                                            <Setter Property="Foreground" Value="{DynamicResource AppGlassMutedBrush}" />
                                                             <Style.Triggers>
-                                                                <Trigger Property="IsMouseOver" Value="True">
-                                                                    <Setter Property="FontSize" Value="20"/>
-                                                                </Trigger>
+                                                                <DataTrigger Binding="{Binding HasCustomOptions}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+                                                                </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
-                                                    </fa:FontAwesome.Style>
-                                                </fa:FontAwesome>
-                                                    <TextBlock.ToolTip>
-                                                        <MultiBinding Converter="{StaticResource rsToolTipConverter}">
-                                                            <Binding Path="recvScriptPath" UpdateSourceTrigger="PropertyChanged"/>
-                                                            <Binding Path="commit" UpdateSourceTrigger="PropertyChanged" Delay="1000"/>
-                                                        </MultiBinding>
-                                                    </TextBlock.ToolTip>
-                                                </TextBlock>
-                                                <TextBlock
-                                                Visibility="Collapsed"
-                                                Name="recvScriptPara"
-                                                Grid.Column="8"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                Opacity="{Binding recvScriptPara, Converter={StaticResource rsOpacityConverter}}"
-                                                MouseLeftButtonUp="ScriptParaIcon_Click"
-                                                MouseRightButtonDown="ScriptParaIcon_RightClick"
-                                                Tag="{Binding}"
-                                                ToolTip="{DynamicResource QuickSendRecvScriptParaSet}">
-                                                <fa:FontAwesome Foreground="{DynamicResource AppIconBrush}" Icon="Cog">
-                                                    <fa:FontAwesome.Style>
-                                                        <Style TargetType="fa:FontAwesome">
-                                                            <Setter Property="FontSize" Value="18"/>
-                                                            <Style.Triggers>
-                                                                <Trigger Property="IsMouseOver" Value="True">
-                                                                    <Setter Property="FontSize" Value="22"/>
-                                                                </Trigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </fa:FontAwesome.Style>
-                                                </fa:FontAwesome>
-                                                </TextBlock>
-                                                <Button
-                                                Grid.Column="7"
-                                                Width="28"
-                                                Height="24"
-                                                Margin="3,0,0,0"
-                                                Padding="0"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                Click="RemoveSendListItemButton_Click"
-                                                Content="−"
-                                                FontSize="18"
-                                                FontWeight="Bold"
-                                                Foreground="{DynamicResource AppDangerBrush}"
-                                                Style="{StaticResource GlassButtonStyle}"
-                                                Tag="{Binding}"
-                                                ToolTip="{DynamicResource QuickSendRemoveItem}" />
+                                                    </Button.Style>
+                                                    <Grid Width="22" Height="22">
+                                                        <fa:FontAwesome FontSize="16" Icon="Sliders" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        <Ellipse Width="5" Height="5" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                                 Fill="{DynamicResource AppAccentBrush}"
+                                                                 Visibility="{Binding HasCustomOptions, Converter={StaticResource boolVisibeConverter}}" />
+                                                    </Grid>
+                                                </Button>
                                             </Grid>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="true">
-                                                    <Setter TargetName="ItemGrid" Property="Background" Value="Transparent" />
-                                                </Trigger>
-                                                <Trigger Property="Selector.IsSelected" Value="true">
-                                                    <Setter TargetName="ItemGrid" Property="Background" Value="Transparent" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Setter.Value>
                                 </Setter>
@@ -1034,6 +1040,10 @@
                                 MinWidth="170"
                                 MaxWidth="260"
                                 MaxDropDownHeight="280"
+                                Tag="False"
+                                Style="{StaticResource QuickSendPageSelectorStyle}"
+                                AutomationProperties.Name="{DynamicResource QuickSendPageActions}"
+                                ToolTip="{DynamicResource QuickSendPageActions}"
                                 HorizontalAlignment="Left"
                                 SelectionChanged="QuickListSelectComboBox_SelectionChanged" />
                                 <TextBox
@@ -1045,47 +1055,23 @@
                                 TextChanged="QuickListNameTextBox_TextChanged"
                                 ToolTip="{DynamicResource QuickSendListNameTip}" />
                             </DockPanel>
-                            <Grid Grid.Row="1" Margin="0,0,18,0">
+                            <Grid Grid.Row="1" Margin="0,0,0,2">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="28" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="64" />
-                                    <ColumnDefinition Width="42" />
-                                    <ColumnDefinition Width="44" />
-                                    <ColumnDefinition Width="38" />
-                                    <ColumnDefinition Width="46" />
-                                    <ColumnDefinition Width="40" />
-                                    <ColumnDefinition Width="0" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock
-                                Grid.Column="0"
-                                HorizontalAlignment="Center"
-                                Text="{DynamicResource QuickSendId}" />
-                                <TextBlock
-                                Grid.Column="1"
-                                HorizontalAlignment="Center"
-                                Text="{DynamicResource QuickSendContent}" />
-                                <TextBlock
-                                Grid.Column="3"
-                                HorizontalAlignment="Center"
-                                Text="{DynamicResource QuickSendHex}" />
-                                <TextBlock
-                                Grid.Column="4"
-                                HorizontalAlignment="Center"
-                                Text="{DynamicResource QuickSendAppendCrlf}" />
-                                <TextBlock
-                                Grid.Column="5"
-                                HorizontalAlignment="Center"
-                                Text="{DynamicResource QuickSendDisableSuggestion}" />
-                                <TextBlock
-                                Grid.Column="6"
-                                HorizontalAlignment="Center"
-                                Text="{DynamicResource QuickSendRecvScript}" />
+                                <TextBlock HorizontalAlignment="Center" Text="{DynamicResource QuickSendId}" />
+                                <TextBlock Grid.Column="1" Margin="4,0,0,0" HorizontalAlignment="Left" Text="{DynamicResource QuickSendContent}" />
                             </Grid>
                         </Grid>
-                        <ListBox
+                        <Grid Grid.Row="1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ListBox
                         Name="toSendList"
-                        Grid.Row="1"
+                        Padding="0"
                         Background="Transparent"
                         BorderBrush="Transparent"
                         BorderThickness="0"
@@ -1098,125 +1084,106 @@
                         VirtualizingPanel.CacheLengthUnit="Page"
                         VirtualizingPanel.IsVirtualizing="True"
                         VirtualizingPanel.VirtualizationMode="Recycling" />
-                        <Popup Name="recvScriptPopup" Placement="Bottom" VerticalOffset="5" StaysOpen="True">
-                            <ComboBox Name="recvScriptCombo" Width="250" DropDownClosed="recvScriptCombo_DropDownClosed"/>
-                        </Popup>
-                        <Popup Name="recvScriptParaPopup" Placement="Bottom" VerticalOffset="5" StaysOpen="False">
-                            <Grid Background="{DynamicResource AppPopupBackground}">
-                                <Border
-                                BorderBrush="{DynamicResource AppGlassBorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="8">
-                                    <TextBox
-                                    Name="recvScriptParaBox" 
-                                    Margin="3"
-                                    Width="250" Height="100" 
-                                    AcceptsReturn="True"
-                                    HorizontalContentAlignment="Left"
-                                    TextWrapping="Wrap"
-                                    VerticalContentAlignment="Top"
-                                    VerticalScrollBarVisibility="Auto" />
-                                </Border>
-                                <Grid HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,1,3,0" Background="Transparent">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Name="rsParaConfirm" Grid.Column="0" Tag="{Binding ElementName=recvScriptParaBox}" MouseLeftButtonUp="ScriptParaConfirm_Click">
-                                    <fa:FontAwesome Icon="Check" Foreground="{DynamicResource AppSuccessBrush}" FontSize="18"/>
-                                        <TextBlock.Style>
-                                            <Style TargetType="{x:Type TextBlock}">
-                                                <Setter Property="Opacity" Value="0.25"/>
-                                                <Style.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter Property="Opacity" Value="0.8"/>
-                                                    </Trigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                    <TextBlock Name="rsParaCancel" Grid.Column="1" MouseLeftButtonUp="ScriptParaCancel_Click">
-                                    <fa:FontAwesome Icon="Times" Foreground="{DynamicResource AppDangerBrush}" FontSize="18"/>
-                                        <TextBlock.Style>
-                                            <Style TargetType="{x:Type TextBlock}">
-                                                <Setter Property="Opacity" Value="0.25"/>
-                                                <Style.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter Property="Opacity" Value="0.8"/>
-                                                    </Trigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </Grid>
-                            </Grid>
-                        </Popup>
-                        <StackPanel Grid.Row="2">
-                            <Button
-                            Name="addSendListButton"
-                            Height="34"
-                            Margin="3,8,3,3"
-                            Click="AddSendListButton_Click"
-                            HorizontalContentAlignment="Center"
-                            Padding="0"
-                            Style="{StaticResource GlassButtonStyle}"
-                            ToolTip="{DynamicResource QuickSendAdd}"
-                            VerticalContentAlignment="Center">
-                                <fa:FontAwesome
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                FontSize="16"
-                                Icon="Plus" />
+                            <Button Name="addSendListButton" Grid.Row="1" Margin="28,5,0,0"
+                                    HorizontalAlignment="Left" Click="AddSendListButton_Click"
+                                    AutomationProperties.Name="{DynamicResource QuickSendAdd}"
+                                    Style="{StaticResource QuickSendInlineButtonStyle}"
+                                    ToolTip="{DynamicResource QuickSendAdd}">
+                                <StackPanel Orientation="Horizontal">
+                                    <fa:FontAwesome VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource AppAccentBrush}" Icon="Plus" />
+                                    <TextBlock Margin="7,0,0,0" FontWeight="SemiBold" Text="{DynamicResource QuickSendAdd}" />
+                                </StackPanel>
                             </Button>
-                            <Grid Margin="0,0,0,0">
+                        </Grid>
+                        <Popup x:Name="QuickSendItemSettingsPopup" Placement="Bottom" VerticalOffset="5"
+                               AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade"
+                               Opened="QuickSendItemSettingsPopup_Opened" Closed="QuickSendItemSettingsPopup_Closed">
+                            <local:QuickSendItemSettings x:Name="QuickSendItemSettingsEditor"
+                                                        PreviewKeyDown="QuickSendItemSettingsEditor_PreviewKeyDown"
+                                                        CloseRequested="QuickSendItemSettingsEditor_CloseRequested"
+                                                        DeleteRequested="QuickSendItemSettingsEditor_DeleteRequested" />
+                        </Popup>
+                        <Border
+                            x:Name="QuickSendCommandBar"
+                            Grid.Row="2"
+                            MinHeight="44"
+                            Margin="3,8,3,3"
+                            Padding="4"
+                            Background="{DynamicResource AppFloatingGlassBackground}"
+                            BorderBrush="{DynamicResource AppFloatingGlassBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="11">
+                            <Grid>
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Button
-                                Name="QuickSendImportButton"
-                                Margin="3"
-                                Click="QuickSendImportButton_Click"
-                                Content="{DynamicResource QuickSendImport}" />
-                                <Button
-                                Name="QuickSendExportButton"
-                                Grid.Column="1"
-                                Margin="3"
-                                Click="QuickSendExportButton_Click"
-                                Content="{DynamicResource QuickSendExport}" />
-                                <Button
-                                Name="QuickSendExportAllButton"
-                                Grid.Column="2"
-                                Margin="3"
-                                Click="QuickSendExportAllButton_Click"
-                                Content="{DynamicResource QuickSendExportAll}" />
-                            </Grid>
-                            <Grid Margin="0,0,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Button
-                                Name="AddQuickSendPageButton"
-                                Grid.Column="0"
-                                Margin="3"
-                                Click="AddQuickSendPageButton_Click"
-                                Content="{DynamicResource QuickSendAddPage}" />
-                                <Button
-                                Name="DeleteQuickSendPageButton"
-                                Grid.Column="1"
-                                Margin="3"
-                                Click="DeleteQuickSendPageButton_Click"
-                                Content="{DynamicResource QuickSendDeletePage}" />
-                            </Grid>
-                            <Button
-                                Name="QuickSendBackupButton"
-                                Margin="3"
-                                Click="QuickSendBackupButton_Click"
-                                Content="{DynamicResource QuickSendBackupManage}" />
 
-                        </StackPanel>
+                                <!-- File operations and recovery have one quiet, separate home. -->
+                                <StackPanel Orientation="Horizontal">
+                                    <Button
+                                        Name="QuickSendImportButton"
+                                        AutomationProperties.Name="{DynamicResource QuickSendImport}"
+                                        Click="QuickSendImportButton_Click"
+                                        Style="{StaticResource QuickSendCommandButtonStyle}"
+                                        ToolTip="{DynamicResource QuickSendImport}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <fa:FontAwesome VerticalAlignment="Center" FontSize="14" Icon="Download" />
+                                            <TextBlock Margin="6,0,0,0" Text="{DynamicResource QuickSendImportShort}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button
+                                        AutomationProperties.Name="{DynamicResource QuickSendExportShort}"
+                                        Click="QuickSendCommandMenu_Click"
+                                        Style="{StaticResource QuickSendCommandButtonStyle}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <fa:FontAwesome VerticalAlignment="Center" FontSize="14" Icon="Upload" />
+                                            <TextBlock Margin="6,0,6,0" Text="{DynamicResource QuickSendExportShort}" />
+                                            <fa:FontAwesome VerticalAlignment="Center" FontSize="10" Icon="CaretDown" />
+                                        </StackPanel>
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Name="QuickSendExportButton" Header="{DynamicResource QuickSendExport}" Click="QuickSendExportButton_Click" />
+                                                <MenuItem Name="QuickSendExportAllButton" Header="{DynamicResource QuickSendExportAll}" Click="QuickSendExportAllButton_Click" />
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </StackPanel>
+
+                                <StackPanel
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                                    <Border
+                                        MaxWidth="170"
+                                        Margin="8,0,8,0"
+                                        VerticalAlignment="Center"
+                                        Background="Transparent"
+                                        ToolTip="{DynamicResource QuickSendBackupDescription}"
+                                        AutomationProperties.Name="{DynamicResource QuickSendBackupAutoStatus}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <fa:FontAwesome
+                                                VerticalAlignment="Center"
+                                                FontSize="12"
+                                                Foreground="{DynamicResource AppSuccessBrush}"
+                                                Icon="CheckCircle" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Button
+                                        Name="QuickSendBackupButton"
+                                        AutomationProperties.Name="{DynamicResource QuickSendBackupManage}"
+                                        Click="QuickSendBackupButton_Click"
+                                        Style="{StaticResource QuickSendCommandButtonStyle}"
+                                        ToolTip="{DynamicResource QuickSendBackupManage}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <fa:FontAwesome VerticalAlignment="Center" FontSize="13" Icon="History" />
+                                            <TextBlock Margin="6,0,0,0" Text="{DynamicResource QuickSendBackupManage}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                     </Grid>
                 </TabItem>
                 <TabItem Name="ScriptTab" Header="{DynamicResource ScriptCard}" Margin="0,2,0,-8" Width="118">

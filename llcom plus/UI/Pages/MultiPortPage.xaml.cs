@@ -644,8 +644,12 @@ namespace llcom_plus.Pages
             return opened;
         }
 
-        public Task<bool> SendBytesAsync(int slotNumber, byte[] data)
+        public Task<bool> SendBytesAsync(
+            int slotNumber,
+            byte[] data,
+            CancellationToken token = default(CancellationToken))
         {
+            token.ThrowIfCancellationRequested();
             if (data == null || data.Length == 0)
                 return Task.FromResult(false);
 
@@ -653,7 +657,7 @@ namespace llcom_plus.Pages
             if (index < 0 || index >= slots.Count)
                 return Task.FromResult(false);
 
-            return slots[index].SendBytesAsync(data);
+            return slots[index].SendBytesAsync(data, token);
         }
 
         public bool IsSlotHexMode(int slotNumber)
@@ -993,9 +997,14 @@ namespace llcom_plus.Pages
             private readonly object serialLock = new object();
             private readonly object serialLifecycleLock = new object();
             private readonly object sendLock = new object();
+            private readonly DtrWakeController dtrWakeController = new DtrWakeController();
+            private readonly SerialSendQueue uiSendQueue = new SerialSendQueue();
+            private int pendingUiSends;
             private readonly object receiveBufferLock = new object();
             private readonly object sessionLogLock = new object();
             private readonly List<byte> pendingReceiveData = new List<byte>();
+            private long pendingReceiveGeneration;
+            private UartPortProfile pendingReceiveProfile;
             private readonly Dictionary<Block, DataShowPage.DataShow> packedLogItems = new Dictionary<Block, DataShowPage.DataShow>();
             private SerialPinMonitor pinMonitor;
             private Timer receiveFlushTimer;
@@ -1206,34 +1215,7 @@ namespace llcom_plus.Pages
 
             private static UartPortProfile CloneProfile(UartPortProfile profile)
             {
-                profile = profile ?? new UartPortProfile();
-                return new UartPortProfile
-                {
-                    baudRate = profile.baudRate,
-                    autoReconnect = profile.autoReconnect,
-                    showHexFormat = profile.showHexFormat,
-                    hexSend = profile.hexSend,
-                    showSend = profile.showSend,
-                    showSendRaw = profile.showSendRaw,
-                    parity = profile.parity,
-                    timeout = profile.timeout,
-                    dataBits = profile.dataBits,
-                    stopBit = profile.stopBit,
-                    flowControl = profile.flowControl,
-                    sendThrottlePacketSize = profile.sendThrottlePacketSize,
-                    sendThrottleDelayMs = profile.sendThrottleDelayMs,
-                    bitDelay = profile.bitDelay,
-                    maxLength = profile.maxLength,
-                    sendScript = profile.sendScript,
-                    recvScript = profile.recvScript,
-                    terminal = profile.terminal,
-                    encoding = profile.encoding,
-                    extraEnter = profile.extraEnter,
-                    enterSend = profile.enterSend,
-                    enableSymbol = profile.enableSymbol,
-                    rts = profile.rts,
-                    dtr = profile.dtr
-                };
+                return Settings.CreateNormalizedUartProfileSnapshot(profile);
             }
 
             private bool IsDirectConnectionOpen(long generation)
@@ -1249,14 +1231,21 @@ namespace llcom_plus.Pages
 
             private long BeginSerialTransition()
             {
+                long retiredGeneration;
+                long nextGeneration;
                 lock (serialLock)
                 {
+                    retiredGeneration = connectionGeneration;
                     connectionGeneration = unchecked(connectionGeneration + 1);
                     if (connectionGeneration == 0)
                         connectionGeneration = 1;
                     serialTransition = true;
-                    return connectionGeneration;
+                    nextGeneration = connectionGeneration;
                 }
+                // Drain any in-flight DTR operation before reusing this SerialPort.
+                // No helper lock is taken while waiting for serialLock here.
+                dtrWakeController.InvalidateConnection(serial, retiredGeneration);
+                return nextGeneration;
             }
 
             private void CompleteSerialTransition(long generation)
@@ -1391,6 +1380,9 @@ namespace llcom_plus.Pages
             public void Close(bool closeMainUart = true, bool waitForDispose = false)
             {
                 Exception closeError = null;
+                // Drain the current packet before invalidating its connection/log.
+                if (!useMainUart)
+                    FlushReceivedData(null);
                 if (useMainUart)
                 {
                     try
@@ -1460,7 +1452,9 @@ namespace llcom_plus.Pages
                 if (useMainUart)
                     return;
 
+                uiSendQueue.Stop();
                 BeginSerialTransition();
+                dtrWakeController.Dispose();
                 lock (serialLock)
                     serialDisposed = true;
 
@@ -1803,7 +1797,7 @@ namespace llcom_plus.Pages
                             serial.Parity = (Parity)profile.parity;
                             serial.StopBits = (StopBits)profile.stopBit;
                             serial.Handshake = handshake;
-                            serial.DtrEnable = profile.dtr;
+                            dtrWakeController.ApplyConfiguredDtr(serial, generation, profile.dtr);
                             if (serial.Handshake != Handshake.RequestToSend)
                                 serial.RtsEnable = profile.rts;
                             serial.Open();
@@ -2060,8 +2054,13 @@ namespace llcom_plus.Pages
                 return fallbackName;
             }
 
-            public async Task<bool> SendBytesAsync(byte[] data)
+            public async Task<bool> SendBytesAsync(
+                byte[] data,
+                CancellationToken token = default(CancellationToken))
             {
+                token.ThrowIfCancellationRequested();
+                if (data == null || data.Length == 0)
+                    return true;
                 var target = CaptureSerialTarget();
                 if (target?.IsOpen != true)
                 {
@@ -2069,10 +2068,22 @@ namespace llcom_plus.Pages
                     return false;
                 }
 
+                pendingUiSends++;
                 sendButton.IsEnabled = false;
                 try
                 {
-                    return await Task.Run(() => target.Send(data, CancellationToken.None, null));
+                    if (useMainUart)
+                    {
+                        var connection = Global.uart.CaptureConnectionLease();
+                        return await connection.SendAsync(data, token, null, true);
+                    }
+                    var sendData = (byte[])data.Clone();
+                    return await uiSendQueue.Enqueue(
+                        () => target.Send(sendData, token, null), sendData.LongLength);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -2081,7 +2092,8 @@ namespace llcom_plus.Pages
                 }
                 finally
                 {
-                    sendButton.IsEnabled = true;
+                    pendingUiSends--;
+                    sendButton.IsEnabled = pendingUiSends == 0;
                 }
             }
 
@@ -2128,13 +2140,9 @@ namespace llcom_plus.Pages
                 {
                     lock (sendLock)
                     {
-                        WriteDirectSerial(
-                            generation,
-                            portName,
-                            profile,
-                            data,
-                            token,
-                            committedBytes);
+                        dtrWakeController.ExecuteWithWake(
+                            serial, generation, () => IsDirectConnectionOpen(generation), profile, token,
+                            () => WriteDirectSerial(generation, portName, profile, data, token, committedBytes));
                     }
                     owner.RunOnUi(() => WriteDataLog(data, true, profile));
                     return true;
@@ -2155,7 +2163,7 @@ namespace llcom_plus.Pages
             private void ControlLineCheckBox_Changed(object sender, RoutedEventArgs e)
             {
                 if (!applyingProfile)
-                    ApplyControlLines();
+                    ApplyControlLines(ReferenceEquals(sender, dtrCheckBox));
             }
 
             private void ControlLineCheckBox_Click(object sender, RoutedEventArgs e)
@@ -2168,7 +2176,7 @@ namespace llcom_plus.Pages
                     ReferenceEquals(checkBox, rtsCheckBox) ? "RTS" : "DTR");
             }
 
-            private void ApplyControlLines()
+            private void ApplyControlLines(bool userChangedDtr)
             {
                 if (applyingProfile)
                     return;
@@ -2183,7 +2191,8 @@ namespace llcom_plus.Pages
                 {
                     try
                     {
-                        Global.uart.Dtr = dtrCheckBox.IsChecked == true;
+                        if (userChangedDtr)
+                            Global.uart.Dtr = dtrCheckBox.IsChecked == true;
                         Global.uart.Rts = rtsCheckBox.IsChecked == true;
                     }
                     catch (Exception ex)
@@ -2201,7 +2210,11 @@ namespace llcom_plus.Pages
                     {
                         if (!serialDisposed && !serialTransition && serial.IsOpen)
                         {
-                            serial.DtrEnable = dtrCheckBox.IsChecked == true;
+                            if (userChangedDtr)
+                            {
+                                dtrWakeController.ApplyUserDtr(
+                                    serial, connectionGeneration, dtrCheckBox.IsChecked == true);
+                            }
                             if (serial.Handshake != Handshake.RequestToSend)
                                 serial.RtsEnable = rtsCheckBox.IsChecked == true;
                         }
@@ -2242,6 +2255,7 @@ namespace llcom_plus.Pages
             private void Serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
             {
                 long generation;
+                UartPortProfile profile;
                 lock (serialLock)
                 {
                     if (serialDisposed ||
@@ -2252,8 +2266,10 @@ namespace llcom_plus.Pages
                         return;
                     }
                     generation = connectionGeneration;
+                    profile = GetProfileSnapshot();
                 }
 
+                RenewDtrWakeAfterReceive(generation);
                 try
                 {
                     var result = new List<byte>();
@@ -2280,6 +2296,7 @@ namespace llcom_plus.Pages
 
                         if (read <= 0)
                             break;
+                        RenewDtrWakeAfterReceive(generation);
                         if (read == block.Length)
                             result.AddRange(block);
                         else
@@ -2287,7 +2304,7 @@ namespace llcom_plus.Pages
                     }
 
                     if (result.Count > 0)
-                        QueueReceivedData(result.ToArray());
+                        QueueReceivedData(result.ToArray(), generation, profile);
                 }
                 catch (Exception ex) when (IsClosedSerialException(ex))
                 {
@@ -2298,17 +2315,25 @@ namespace llcom_plus.Pages
                 }
             }
 
-            private void QueueReceivedData(byte[] data)
+            private void QueueReceivedData(byte[] data, long generation, UartPortProfile profile)
             {
                 if (data == null || data.Length == 0)
                     return;
 
-                var profile = GetProfileSnapshot();
                 var flushImmediately = false;
+                lock (serialLock)
                 lock (receiveBufferLock)
                 {
+                    if (serialDisposed || serialTransition || generation != connectionGeneration)
+                        return;
+                    if (pendingReceiveData.Count == 0 || pendingReceiveGeneration != generation)
+                    {
+                        pendingReceiveData.Clear();
+                        pendingReceiveGeneration = generation;
+                        pendingReceiveProfile = CloneProfile(profile);
+                    }
                     pendingReceiveData.AddRange(data);
-                    var maxLength = Math.Max(1L, profile.maxLength);
+                    var maxLength = Math.Max(1L, pendingReceiveProfile.maxLength);
                     if (pendingReceiveData.Count > maxLength)
                     {
                         receiveFlushTimer?.Change(Timeout.Infinite, Timeout.Infinite);
@@ -2317,9 +2342,9 @@ namespace llcom_plus.Pages
                     }
                     else
                     {
-                        var timeout = profile.timeout;
+                        var timeout = pendingReceiveProfile.timeout;
                         var delay = timeout > 0 ? timeout : 10;
-                        var resetOnEveryReceive = timeout < 0 || profile.bitDelay;
+                        var resetOnEveryReceive = timeout < 0 || pendingReceiveProfile.bitDelay;
                         if (!receiveFlushScheduled || resetOnEveryReceive)
                             receiveFlushTimer?.Change(delay, Timeout.Infinite);
                         receiveFlushScheduled = true;
@@ -2330,9 +2355,17 @@ namespace llcom_plus.Pages
                     FlushReceivedData(null);
             }
 
+            private void RenewDtrWakeAfterReceive(long generation)
+            {
+                dtrWakeController.RenewAfterReceive(
+                    serial, generation, () => IsDirectConnectionOpen(generation), GetProfileSnapshot());
+            }
+
             private void FlushReceivedData(object state)
             {
                 byte[] data;
+                long generation;
+                UartPortProfile profile;
                 lock (receiveBufferLock)
                 {
                     receiveFlushScheduled = false;
@@ -2340,12 +2373,21 @@ namespace llcom_plus.Pages
                         return;
 
                     data = pendingReceiveData.ToArray();
+                    generation = pendingReceiveGeneration;
+                    profile = pendingReceiveProfile;
                     pendingReceiveData.Clear();
+                    pendingReceiveProfile = null;
                 }
 
                 owner.RunOnUi(() =>
                 {
-                    WriteDataLog(data, false);
+                    // UI work can outlive a close/reopen or removal of this pane.
+                    lock (serialLock)
+                    {
+                        if (serialDisposed || serialTransition || generation != connectionGeneration)
+                            return;
+                    }
+                    WriteDataLog(data, false, profile);
                     if (Index == owner.activeSlotNumber)
                         Global.NotifyActiveSerialTargetReceived(data);
                 });
@@ -2358,6 +2400,7 @@ namespace llcom_plus.Pages
                     receiveFlushTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                     receiveFlushScheduled = false;
                     pendingReceiveData.Clear();
+                    pendingReceiveProfile = null;
                 }
             }
 
@@ -2441,8 +2484,14 @@ namespace llcom_plus.Pages
                 if (data == null || data.Length == 0)
                     return;
 
+                var received = e as UartReceiveEventArgs;
+                var profile = received?.Profile ?? GetProfileSnapshot();
                 owner.RunOnUi(() =>
-                    WriteDataLog(data, false, updateCounters: false, writeSessionLog: false));
+                {
+                    if (received != null && !received.IsCurrent)
+                        return;
+                    WriteDataLog(data, false, profile, updateCounters: false, writeSessionLog: false);
+                });
             }
 
             private void WriteDataLog(

@@ -1,0 +1,60 @@
+<UserControl x:Class="llcom_plus.QuickSendItemSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fa="http://schemas.fontawesome.io/icons/"
+             Width="350" Focusable="False"
+             Foreground="{DynamicResource AppGlassTextBrush}">
+    <Border Padding="15" CornerRadius="10" BorderThickness="1"
+            Background="{DynamicResource AppPopupBackground}" BorderBrush="{DynamicResource AppGlassBorderBrush}">
+        <StackPanel KeyboardNavigation.TabNavigation="Cycle">
+            <DockPanel LastChildFill="True">
+                <Button x:Name="CloseButton" DockPanel.Dock="Right" Width="28" Height="28" Padding="0"
+                        Style="{StaticResource QuickSendInlineButtonStyle}" HorizontalContentAlignment="Center" Click="CloseButton_Click"
+                        ToolTip="{DynamicResource QuickSendSettingsClose}" AutomationProperties.Name="{DynamicResource QuickSendSettingsClose}">
+                    <fa:FontAwesome Icon="Times" FontSize="13" />
+                </Button>
+                <TextBlock x:Name="SettingsTitle" VerticalAlignment="Center" FontSize="15" FontWeight="SemiBold" />
+            </DockPanel>
+            <TextBlock Margin="0,3,0,14" Foreground="{DynamicResource AppGlassMutedBrush}" TextWrapping="Wrap"
+                       Text="{DynamicResource QuickSendSettingsAutoSave}" />
+            <CheckBox x:Name="HexCheckBox" Margin="0,0,0,10" IsChecked="{Binding hex, Mode=TwoWay}">
+                <TextBlock Text="{DynamicResource QuickSendSettingsHex}" TextWrapping="Wrap" />
+            </CheckBox>
+            <CheckBox x:Name="CrlfCheckBox" Margin="0,0,0,10" IsChecked="{Binding appendCrlf, Mode=TwoWay}"
+                      ToolTip="{DynamicResource QuickSendAppendCrlfTip}">
+                <TextBlock Text="{DynamicResource QuickSendSettingsCrlf}" TextWrapping="Wrap" />
+            </CheckBox>
+            <CheckBox x:Name="ExcludeCheckBox" Margin="0,0,0,4" IsChecked="{Binding disableSuggestion, Mode=TwoWay}"
+                      ToolTip="{DynamicResource QuickSendDisableSuggestionTip}">
+                <TextBlock Text="{DynamicResource QuickSendSettingsExclude}" TextWrapping="Wrap" />
+            </CheckBox>
+            <Border Height="1" Margin="0,12" Background="{DynamicResource AppGlassBorderBrush}" />
+            <TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Text="{DynamicResource QuickSendSettingsScript}" />
+            <ComboBox x:Name="ScriptComboBox" HorizontalAlignment="Stretch"
+                      SelectionChanged="ScriptComboBox_SelectionChanged"
+                      AutomationProperties.Name="{DynamicResource QuickSendSettingsScript}">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBlock x:Name="ScriptWarning" Margin="0,5,0,0" Visibility="Collapsed" TextWrapping="Wrap"
+                       Foreground="{DynamicResource AppGlassMutedBrush}" />
+            <TextBlock Margin="0,12,0,6" Text="{DynamicResource QuickSendSettingsParameters}" />
+            <TextBox x:Name="ScriptParameterTextBox" Height="64" Padding="7" AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                     Text="{Binding recvScriptPara, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     AutomationProperties.Name="{DynamicResource QuickSendSettingsParameters}" />
+            <Border Height="1" Margin="0,12,0,8" Background="{DynamicResource AppGlassBorderBrush}" />
+            <Button x:Name="DeleteCommandButton" Height="30" Padding="7,0" HorizontalAlignment="Left"
+                    Style="{StaticResource QuickSendInlineButtonStyle}" Foreground="{DynamicResource AppDangerBrush}"
+                    Click="DeleteCommandButton_Click" AutomationProperties.Name="{DynamicResource QuickSendRemoveItem}">
+                <StackPanel Orientation="Horizontal">
+                    <fa:FontAwesome Icon="TrashOutline" FontSize="13" VerticalAlignment="Center" />
+                    <TextBlock Margin="7,0,0,0" Text="{DynamicResource QuickSendRemoveItem}" />
+                </StackPanel>
+            </Button>
+        </StackPanel>
+    </Border>
+</UserControl>

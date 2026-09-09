@@ -12,6 +12,845 @@ using System.Threading.Tasks;
 
 namespace llcom_plus.Model
 {
+    /// <summary>
+    /// Serializes the temporary DTR wake lifecycle for one logical serial endpoint.
+    /// The caller still owns its normal serial write/lifecycle locks; this helper never
+    /// retries a write and never keeps a caller's lifecycle lock during a wake delay.
+    /// </summary>
+    internal sealed class DtrWakeController : IDisposable
+    {
+        private interface IDtrLine
+        {
+            bool Enabled { get; set; }
+        }
+
+        private sealed class SerialPortDtrLine : IDtrLine
+        {
+            private readonly SerialPort port;
+
+            internal SerialPortDtrLine(SerialPort port)
+            {
+                this.port = port ?? throw new ArgumentNullException(nameof(port));
+            }
+
+            public bool Enabled
+            {
+                get { return port.DtrEnable; }
+                set { port.DtrEnable = value; }
+            }
+        }
+
+        private sealed class WakeSession
+        {
+            internal object ConnectionKey;
+            internal long Generation;
+            internal Func<bool> IsConnectionCurrent;
+            internal IDtrLine DtrLine;
+            internal bool OriginalDtr;
+            internal long UserDtrRevision;
+            internal long ActivityRevision;
+            internal int IdleMilliseconds;
+            internal bool SendInProgress;
+            internal bool Initializing;
+        }
+
+        private sealed class RestoreTimerState
+        {
+            internal WakeSession Session;
+            internal long ActivityRevision;
+        }
+
+        private sealed class ProbeDtrLine : IDtrLine
+        {
+            private bool enabled;
+
+            internal ProbeDtrLine(bool initialValue)
+            {
+                enabled = initialValue;
+            }
+
+            public bool Enabled
+            {
+                get { return enabled; }
+                set
+                {
+                    enabled = value;
+                    SetCount++;
+                }
+            }
+
+            internal int SetCount { get; private set; }
+        }
+
+        private readonly object stateLock = new object();
+        private readonly object sendExecutionLock = new object();
+        private readonly object lineOperationLock = new object();
+        private WakeSession activeSession;
+        private Timer restoreTimer;
+        private RestoreTimerState restoreTimerState;
+        private long userDtrRevision;
+        private long lifecycleRevision;
+        private bool disposed;
+
+        internal void ExecuteWithWake(
+            SerialPort port,
+            long connectionGeneration,
+            Func<bool> isConnectionCurrent,
+            UartPortProfile profile,
+            CancellationToken cancellationToken,
+            Action send)
+        {
+            ExecuteWithWakeCore(
+                port,
+                connectionGeneration,
+                isConnectionCurrent,
+                profile,
+                cancellationToken,
+                send,
+                port == null ? null : new SerialPortDtrLine(port));
+        }
+
+        internal void RenewAfterReceive(
+            SerialPort port,
+            long connectionGeneration,
+            Func<bool> isConnectionCurrent,
+            UartPortProfile profile)
+        {
+            if (port == null)
+                return;
+
+            RenewAfterReceiveCore(
+                port,
+                connectionGeneration,
+                isConnectionCurrent,
+                profile,
+                new SerialPortDtrLine(port));
+        }
+
+        internal void InvalidateConnection(SerialPort port, long connectionGeneration)
+        {
+            InvalidateConnectionCore(port, connectionGeneration);
+        }
+
+        internal void ApplyUserDtr(SerialPort port, long connectionGeneration, bool enabled)
+        {
+            ApplyUserDtrCore(
+                port,
+                connectionGeneration,
+                port == null ? null : new SerialPortDtrLine(port),
+                enabled);
+        }
+
+        internal void ApplyConfiguredDtr(SerialPort port, long connectionGeneration, bool enabled)
+        {
+            if (port == null)
+                return;
+
+            var line = new SerialPortDtrLine(port);
+            lock (lineOperationLock)
+            {
+                bool keepAwake;
+                lock (stateLock)
+                {
+                    ThrowIfDisposed();
+                    keepAwake = IsMatchingSessionUnsafe(port, connectionGeneration);
+                }
+                line.Enabled = keepAwake || enabled;
+            }
+        }
+
+        private void ExecuteWithWakeCore(
+            object connectionKey,
+            long connectionGeneration,
+            Func<bool> isConnectionCurrent,
+            UartPortProfile profile,
+            CancellationToken cancellationToken,
+            Action send,
+            IDtrLine dtrLine)
+        {
+            if (send == null)
+                throw new ArgumentNullException(nameof(send));
+
+            lock (sendExecutionLock)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                profile = profile ?? new UartPortProfile();
+                bool hasWakeSession;
+                lock (stateLock)
+                {
+                    ThrowIfDisposed();
+                    hasWakeSession = IsMatchingSessionUnsafe(connectionKey, connectionGeneration);
+                }
+                if (!profile.dtrWakeBeforeSend && !hasWakeSession)
+                {
+                    send();
+                    return;
+                }
+                if (connectionKey == null || dtrLine == null || isConnectionCurrent == null)
+                    throw new IOException("Serial port is not open.");
+
+                bool wakeDelayRequired;
+                var wakeSession = BeginSend(
+                    connectionKey,
+                    connectionGeneration,
+                    isConnectionCurrent,
+                    dtrLine,
+                    profile,
+                    cancellationToken,
+                    out wakeDelayRequired);
+                try
+                {
+                    if (wakeSession != null)
+                    {
+                        if (wakeDelayRequired)
+                        {
+                            WaitForWakeDelay(
+                                wakeSession,
+                                Settings.NormalizeDtrWakeDelayMilliseconds(profile.dtrWakeDelayMs),
+                                cancellationToken);
+                        }
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (!IsActiveSession(wakeSession) || !IsCurrent(wakeSession.IsConnectionCurrent))
+                            throw new IOException("The serial connection changed during DTR wake-up.");
+                    }
+                    else if (!IsCurrent(isConnectionCurrent))
+                    {
+                        throw new IOException("The captured serial connection is no longer open.");
+                    }
+
+                    // Exactly one invocation: a failure may mean the driver accepted a
+                    // prefix, so replaying arbitrary application data would be unsafe.
+                    send();
+                }
+                finally
+                {
+                    if (wakeSession != null)
+                        CompleteSend(wakeSession);
+                }
+            }
+        }
+
+        private WakeSession BeginSend(
+            object connectionKey,
+            long connectionGeneration,
+            Func<bool> isConnectionCurrent,
+            IDtrLine dtrLine,
+            UartPortProfile profile,
+            CancellationToken cancellationToken,
+            out bool wakeDelayRequired)
+        {
+            wakeDelayRequired = false;
+            long expectedLifecycleRevision;
+            lock (stateLock)
+                expectedLifecycleRevision = lifecycleRevision;
+            if (!IsCurrent(isConnectionCurrent))
+                throw new IOException("The captured serial connection is no longer open.");
+
+            Timer retiredTimer = null;
+            WakeSession session = null;
+            var createdSession = false;
+            try
+            {
+                lock (lineOperationLock)
+                {
+                    try
+                    {
+                        lock (stateLock)
+                        {
+                            ThrowIfDisposed();
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (expectedLifecycleRevision != lifecycleRevision)
+                                throw new IOException("The serial connection changed before DTR wake-up.");
+
+                            if (IsMatchingSessionUnsafe(connectionKey, connectionGeneration) &&
+                                activeSession.UserDtrRevision == userDtrRevision)
+                            {
+                                session = activeSession;
+                                session.IsConnectionCurrent = isConnectionCurrent;
+                                session.DtrLine = dtrLine;
+                            }
+                            else
+                            {
+                                // A setting change may disable wake while the previous
+                                // TX is still held awake. Preserve that existing session,
+                                // but never assert a new wake edge after it has expired.
+                                if (!profile.dtrWakeBeforeSend)
+                                    return null;
+                                retiredTimer = ClearSessionUnsafe();
+                                session = new WakeSession
+                                {
+                                    ConnectionKey = connectionKey,
+                                    Generation = connectionGeneration,
+                                    IsConnectionCurrent = isConnectionCurrent,
+                                    DtrLine = dtrLine,
+                                    UserDtrRevision = userDtrRevision,
+                                    Initializing = true
+                                };
+                                activeSession = session;
+                                createdSession = true;
+                            }
+
+                            session.IdleMilliseconds =
+                                Settings.NormalizeDtrWakeIdleMilliseconds(profile.dtrWakeIdleMs);
+                            session.SendInProgress = true;
+                            session.ActivityRevision = unchecked(session.ActivityRevision + 1);
+                            if (restoreTimer != null)
+                            {
+                                retiredTimer = restoreTimer;
+                                restoreTimer = null;
+                                restoreTimerState = null;
+                            }
+                        }
+
+                        // SerialPort control-line access can enter the driver. Keep it
+                        // outside stateLock so close/invalidate and RX renewal stay live.
+                        var dtrWasAsserted = dtrLine.Enabled;
+                        if (!dtrWasAsserted)
+                        {
+                            dtrLine.Enabled = true;
+                            wakeDelayRequired = true;
+                        }
+
+                        lock (stateLock)
+                        {
+                            if (!ReferenceEquals(activeSession, session) ||
+                                session.UserDtrRevision != userDtrRevision ||
+                                disposed)
+                            {
+                                return session;
+                            }
+
+                            if (createdSession)
+                            {
+                                session.OriginalDtr = dtrWasAsserted;
+                                session.Initializing = false;
+                                if (dtrWasAsserted)
+                                {
+                                    // The user already asserted DTR. There is nothing
+                                    // automatic to restore and no wake edge to delay for.
+                                    ClearSessionUnsafe();
+                                    return null;
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        lock (stateLock)
+                        {
+                            if (ReferenceEquals(activeSession, session))
+                                ClearSessionUnsafe();
+                        }
+                        throw;
+                    }
+                }
+                return session;
+            }
+            finally
+            {
+                DisposeTimer(retiredTimer);
+            }
+        }
+
+        private void WaitForWakeDelay(
+            WakeSession session,
+            int delayMilliseconds,
+            CancellationToken cancellationToken)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < delayMilliseconds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsActiveSession(session) || !IsCurrent(session.IsConnectionCurrent))
+                    throw new IOException("The serial connection changed during DTR wake-up.");
+
+                var remaining = delayMilliseconds - (int)stopwatch.ElapsedMilliseconds;
+                var slice = Math.Min(20, Math.Max(1, remaining));
+                if (cancellationToken.WaitHandle.WaitOne(slice))
+                    cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsActiveSession(session) || !IsCurrent(session.IsConnectionCurrent))
+                throw new IOException("The serial connection changed during DTR wake-up.");
+        }
+
+        private void CompleteSend(WakeSession session)
+        {
+            var connectionIsCurrent = IsCurrent(session.IsConnectionCurrent);
+            Timer retiredTimer = null;
+            lock (stateLock)
+            {
+                if (!ReferenceEquals(activeSession, session))
+                    return;
+
+                session.SendInProgress = false;
+                if (disposed ||
+                    !connectionIsCurrent ||
+                    session.UserDtrRevision != userDtrRevision)
+                {
+                    retiredTimer = ClearSessionUnsafe();
+                }
+                else
+                {
+                    retiredTimer = ScheduleRestoreUnsafe(session);
+                }
+            }
+            DisposeTimer(retiredTimer);
+        }
+
+        private void RenewAfterReceiveCore(
+            object connectionKey,
+            long connectionGeneration,
+            Func<bool> isConnectionCurrent,
+            UartPortProfile profile,
+            IDtrLine dtrLine)
+        {
+            if (isConnectionCurrent == null ||
+                !IsCurrent(isConnectionCurrent))
+            {
+                return;
+            }
+
+            Timer retiredTimer = null;
+            lock (lineOperationLock)
+            lock (stateLock)
+            {
+                if (disposed ||
+                    !IsMatchingSessionUnsafe(connectionKey, connectionGeneration) ||
+                    activeSession.UserDtrRevision != userDtrRevision ||
+                    activeSession.Initializing)
+                {
+                    return;
+                }
+
+                activeSession.IsConnectionCurrent = isConnectionCurrent;
+                activeSession.DtrLine = dtrLine;
+                if (profile != null)
+                    activeSession.IdleMilliseconds =
+                        Settings.NormalizeDtrWakeIdleMilliseconds(profile.dtrWakeIdleMs);
+                if (activeSession.SendInProgress)
+                {
+                    activeSession.ActivityRevision = unchecked(activeSession.ActivityRevision + 1);
+                    if (restoreTimer != null)
+                    {
+                        retiredTimer = restoreTimer;
+                        restoreTimer = null;
+                        restoreTimerState = null;
+                    }
+                }
+                else
+                {
+                    retiredTimer = ScheduleRestoreUnsafe(activeSession);
+                }
+            }
+            DisposeTimer(retiredTimer);
+        }
+
+        private Timer ScheduleRestoreUnsafe(WakeSession session)
+        {
+            var retiredTimer = restoreTimer;
+            session.ActivityRevision = unchecked(session.ActivityRevision + 1);
+            var timerState = new RestoreTimerState
+            {
+                Session = session,
+                ActivityRevision = session.ActivityRevision
+            };
+
+            try
+            {
+                var nextTimer = new Timer(
+                    RestoreAfterIdle,
+                    timerState,
+                    Timeout.Infinite,
+                    Timeout.Infinite);
+                restoreTimer = nextTimer;
+                restoreTimerState = timerState;
+                // Publish ownership before arming: an idle value of zero may queue
+                // the callback immediately on another thread.
+                nextTimer.Change(session.IdleMilliseconds, Timeout.Infinite);
+            }
+            catch (Exception ex)
+            {
+                // Keeping DTR asserted is safer than throwing after bytes may already
+                // have been committed. A later RX/TX activity can schedule it again.
+                restoreTimer = null;
+                restoreTimerState = null;
+                Log($"[DtrWake]unable to schedule idle restore: {ex.Message}");
+            }
+
+            return retiredTimer;
+        }
+
+        private void RestoreAfterIdle(object state)
+        {
+            var timerState = state as RestoreTimerState;
+            if (timerState == null)
+                return;
+
+            WakeSession session;
+            lock (stateLock)
+            {
+                if (!IsCurrentTimerUnsafe(timerState))
+                    return;
+                session = timerState.Session;
+            }
+
+            // Never invoke caller code while holding stateLock. Close/reconnect paths
+            // commonly hold their lifecycle lock while invalidating this controller.
+            var connectionIsCurrent = IsCurrent(session.IsConnectionCurrent);
+            Timer retiredTimer = null;
+            Exception restoreError = null;
+            if (!connectionIsCurrent)
+            {
+                lock (stateLock)
+                {
+                    if (IsCurrentTimerUnsafe(timerState))
+                        retiredTimer = ClearSessionUnsafe();
+                }
+                DisposeTimer(retiredTimer);
+                return;
+            }
+
+            lock (lineOperationLock)
+            {
+                IDtrLine lineToRestore = null;
+                bool restoreValue = false;
+                lock (stateLock)
+                {
+                    if (!IsCurrentTimerUnsafe(timerState))
+                        return;
+
+                    if (session.UserDtrRevision == userDtrRevision &&
+                        !session.SendInProgress &&
+                        !session.Initializing)
+                    {
+                        lineToRestore = session.DtrLine;
+                        restoreValue = session.OriginalDtr;
+                    }
+                    retiredTimer = ClearSessionUnsafe();
+                }
+
+                if (lineToRestore != null)
+                {
+                    try
+                    {
+                        lineToRestore.Enabled = restoreValue;
+                    }
+                    catch (Exception ex)
+                    {
+                        restoreError = ex;
+                    }
+                }
+            }
+            DisposeTimer(retiredTimer);
+
+            // A restore failure must not turn a successful send into an apparent send
+            // failure and tempt a caller to duplicate arbitrary data.
+            if (restoreError != null)
+                Log($"[DtrWake]idle restore skipped: {restoreError.Message}");
+        }
+
+        private void ApplyUserDtrCore(
+            object connectionKey,
+            long connectionGeneration,
+            IDtrLine dtrLine,
+            bool enabled)
+        {
+            Timer retiredTimer = null;
+            try
+            {
+                lock (lineOperationLock)
+                {
+                    lock (stateLock)
+                    {
+                        ThrowIfDisposed();
+                        userDtrRevision = unchecked(userDtrRevision + 1);
+                        retiredTimer = ClearSessionUnsafe();
+                    }
+                    if (connectionKey != null && dtrLine != null)
+                        dtrLine.Enabled = enabled;
+                }
+            }
+            finally
+            {
+                DisposeTimer(retiredTimer);
+            }
+        }
+
+        private void InvalidateConnectionCore(object connectionKey, long connectionGeneration)
+        {
+            Timer retiredTimer = null;
+            lock (lineOperationLock)
+            lock (stateLock)
+            {
+                lifecycleRevision = unchecked(lifecycleRevision + 1);
+                if (IsMatchingSessionUnsafe(connectionKey, connectionGeneration))
+                    retiredTimer = ClearSessionUnsafe();
+            }
+            DisposeTimer(retiredTimer);
+        }
+
+        private bool IsActiveSession(WakeSession session)
+        {
+            lock (stateLock)
+            {
+                return !disposed &&
+                    ReferenceEquals(activeSession, session) &&
+                    session.UserDtrRevision == userDtrRevision;
+            }
+        }
+
+        private bool IsMatchingSessionUnsafe(object connectionKey, long connectionGeneration)
+        {
+            return activeSession != null &&
+                ReferenceEquals(activeSession.ConnectionKey, connectionKey) &&
+                activeSession.Generation == connectionGeneration;
+        }
+
+        private bool IsCurrentTimerUnsafe(RestoreTimerState timerState)
+        {
+            return !disposed &&
+                ReferenceEquals(activeSession, timerState.Session) &&
+                ReferenceEquals(restoreTimerState, timerState) &&
+                timerState.ActivityRevision == timerState.Session.ActivityRevision;
+        }
+
+        private Timer ClearSessionUnsafe()
+        {
+            if (activeSession != null)
+                activeSession.ActivityRevision = unchecked(activeSession.ActivityRevision + 1);
+            activeSession = null;
+            var retiredTimer = restoreTimer;
+            restoreTimer = null;
+            restoreTimerState = null;
+            return retiredTimer;
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+                throw new ObjectDisposedException(nameof(DtrWakeController));
+        }
+
+        private static bool IsCurrent(Func<bool> predicate)
+        {
+            try
+            {
+                return predicate?.Invoke() == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void DisposeTimer(Timer timer)
+        {
+            try { timer?.Dispose(); }
+            catch { }
+        }
+
+        private static void Log(string message)
+        {
+            try { Tools.Logger.AddUartLogDebug(message); }
+            catch { }
+        }
+
+        public void Dispose()
+        {
+            Timer retiredTimer;
+            lock (lineOperationLock)
+            lock (stateLock)
+            {
+                if (disposed)
+                    return;
+                disposed = true;
+                retiredTimer = ClearSessionUnsafe();
+            }
+            DisposeTimer(retiredTimer);
+        }
+
+        internal static bool ProbeDtrWakeLifecycleBehavior()
+        {
+            var profile = new UartPortProfile
+            {
+                dtrWakeBeforeSend = true,
+                dtrWakeDelayMs = 0,
+                dtrWakeIdleMs = 10000
+            };
+
+            var receiveController = new DtrWakeController();
+            var receiveLine = new ProbeDtrLine(false);
+            var receiveKey = new object();
+            var receiveCurrent = true;
+            var receiveSendCount = 0;
+            var assertedDuringSend = false;
+            receiveController.ExecuteWithWakeCore(
+                receiveKey,
+                7,
+                () => receiveCurrent,
+                profile,
+                CancellationToken.None,
+                () =>
+                {
+                    receiveSendCount++;
+                    assertedDuringSend = receiveLine.Enabled;
+                },
+                receiveLine);
+            var firstReceiveTimer = receiveController.restoreTimerState;
+            receiveController.RenewAfterReceiveCore(
+                receiveKey,
+                7,
+                () => receiveCurrent,
+                profile,
+                receiveLine);
+            var renewedReceiveTimer = receiveController.restoreTimerState;
+            receiveController.RestoreAfterIdle(firstReceiveTimer);
+            var obsoleteTimerIgnored = receiveLine.Enabled;
+            receiveController.RestoreAfterIdle(renewedReceiveTimer);
+            var receiveEventuallyRestored = !receiveLine.Enabled;
+            receiveController.Dispose();
+
+            var manualController = new DtrWakeController();
+            var manualLine = new ProbeDtrLine(false);
+            var manualKey = new object();
+            manualController.ExecuteWithWakeCore(
+                manualKey,
+                11,
+                () => true,
+                profile,
+                CancellationToken.None,
+                () => manualController.ApplyUserDtrCore(manualKey, 11, manualLine, true),
+                manualLine);
+            var manualChangePreserved = manualLine.Enabled && manualController.activeSession == null;
+            manualController.Dispose();
+
+            var staleController = new DtrWakeController();
+            var staleLine = new ProbeDtrLine(false);
+            var staleKey = new object();
+            var staleCurrent = true;
+            staleController.ExecuteWithWakeCore(
+                staleKey,
+                13,
+                () => staleCurrent,
+                profile,
+                CancellationToken.None,
+                () => { },
+                staleLine);
+            var staleTimer = staleController.restoreTimerState;
+            staleCurrent = false;
+            staleController.InvalidateConnectionCore(staleKey, 13);
+            var staleSetCount = staleLine.SetCount;
+            staleController.RestoreAfterIdle(staleTimer);
+            var staleTimerDidNotTouchRetiredConnection =
+                staleLine.SetCount == staleSetCount && staleLine.Enabled;
+            staleController.Dispose();
+
+            var throwingController = new DtrWakeController();
+            var throwingLine = new ProbeDtrLine(false);
+            var throwingKey = new object();
+            var throwingSendCount = 0;
+            try
+            {
+                throwingController.ExecuteWithWakeCore(
+                    throwingKey,
+                    17,
+                    () => true,
+                    profile,
+                    CancellationToken.None,
+                    () =>
+                    {
+                        throwingSendCount++;
+                        throw new IOException("probe write failure");
+                    },
+                    throwingLine);
+            }
+            catch (IOException)
+            {
+            }
+            var throwingTimer = throwingController.restoreTimerState;
+            if (throwingTimer != null)
+                throwingController.RestoreAfterIdle(throwingTimer);
+            var failedSendWasNotRetried = throwingSendCount == 1 && !throwingLine.Enabled;
+            throwingController.Dispose();
+
+            var canceledController = new DtrWakeController();
+            var canceledLine = new ProbeDtrLine(false);
+            var canceledSendCount = 0;
+            using (var cancellation = new CancellationTokenSource())
+            {
+                cancellation.Cancel();
+                try
+                {
+                    canceledController.ExecuteWithWakeCore(
+                        new object(),
+                        19,
+                        () => true,
+                        profile,
+                        cancellation.Token,
+                        () => canceledSendCount++,
+                        canceledLine);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
+            var cancellationPreventedWakeAndSend =
+                canceledSendCount == 0 && !canceledLine.Enabled;
+            canceledController.Dispose();
+
+            var disabledController = new DtrWakeController();
+            var disabledLine = new ProbeDtrLine(false);
+            var disabledObservedDtr = true;
+            var disabledProfile = new UartPortProfile { dtrWakeBeforeSend = false };
+            disabledController.ExecuteWithWakeCore(
+                new object(),
+                23,
+                () => true,
+                disabledProfile,
+                CancellationToken.None,
+                () => disabledObservedDtr = disabledLine.Enabled,
+                disabledLine);
+            disabledController.Dispose();
+
+            return receiveSendCount == 1 &&
+                assertedDuringSend &&
+                firstReceiveTimer != null &&
+                renewedReceiveTimer != null &&
+                !ReferenceEquals(firstReceiveTimer, renewedReceiveTimer) &&
+                obsoleteTimerIgnored &&
+                receiveEventuallyRestored &&
+                manualChangePreserved &&
+                staleTimerDidNotTouchRetiredConnection &&
+                failedSendWasNotRetried &&
+                cancellationPreventedWakeAndSend &&
+                !disabledObservedDtr;
+        }
+    }
+
+    internal sealed class UartSendEventArgs : EventArgs
+    {
+        internal UartSendEventArgs(string sessionStringLogOverride)
+        {
+            SessionStringLogOverride = sessionStringLogOverride;
+        }
+
+        internal string SessionStringLogOverride { get; }
+    }
+
+    internal sealed class UartReceiveEventArgs : EventArgs
+    {
+        internal UartReceiveEventArgs(Uart.ConnectionLease connection)
+        {
+            Connection = connection;
+        }
+
+        internal Uart.ConnectionLease Connection { get; }
+        internal bool IsCurrent => Connection?.IsCurrent == true;
+        internal UartPortProfile Profile => Connection?.Profile;
+    }
+
     class Uart
     {
         private const int SerialWriteTimeoutMilliseconds = 5000;
@@ -30,6 +869,9 @@ namespace llcom_plus.Model
         private readonly object sendLock = new object();
         private readonly object receiveLock = new object();
         private readonly object lifecycleLock = new object();
+        private readonly object dtrSettingLock = new object();
+        private readonly DtrWakeController dtrWakeController = new DtrWakeController();
+        private readonly SerialSendQueue uiSendQueue = new SerialSendQueue();
         private volatile bool directReceiveMode;
         private int directReceiveScheduled;
         private long connectionGeneration;
@@ -71,32 +913,65 @@ namespace llcom_plus.Model
         {
             private readonly Uart owner;
 
-            internal ConnectionLease(Uart owner, SerialPort port, long generation, string portName)
+            internal ConnectionLease(
+                Uart owner,
+                SerialPort port,
+                long generation,
+                string portName,
+                UartPortProfile profile)
             {
                 this.owner = owner;
                 Port = port;
                 Generation = generation;
                 PortName = portName ?? string.Empty;
+                Profile = Settings.CreateNormalizedUartProfileSnapshot(profile);
             }
 
             internal SerialPort Port { get; }
             internal long Generation { get; }
             internal string PortName { get; }
+            internal UartPortProfile Profile { get; }
             internal string Identity => $"uart:{PortName}:{Generation}";
             internal string DisplayName => string.IsNullOrWhiteSpace(PortName) ? "Serial" : PortName;
             internal bool IsOpen => owner.IsConnectionOpen(this);
+            internal bool IsCurrent => owner.IsConnectionCurrent(this);
 
             internal bool Send(
                 byte[] data,
                 CancellationToken token,
                 Action<int> committedBytes,
-                bool raiseEvents)
+                bool raiseEvents,
+                byte[] dataRaw = null,
+                string sessionStringLogOverride = null)
             {
+                if (data == null)
+                    throw new ArgumentNullException(nameof(data));
                 if (!IsOpen)
                     return false;
+                if (data.Length == 0)
+                    return true;
 
-                owner.SendDataForLease(this, data, token, null, raiseEvents, committedBytes);
+                owner.SendDataForLease(this, data, token, dataRaw, raiseEvents, committedBytes, sessionStringLogOverride);
                 return true;
+            }
+
+            internal Task<bool> SendAsync(
+                byte[] data,
+                CancellationToken token,
+                Action<int> committedBytes,
+                bool raiseEvents,
+                byte[] dataRaw = null,
+                string sessionStringLogOverride = null)
+            {
+                if (data == null)
+                    throw new ArgumentNullException(nameof(data));
+                // Queue ownership includes the payload: subsequent editor/script
+                // mutations must not alter a send already accepted by the UI.
+                var capturedData = (byte[])data.Clone();
+                var capturedRaw = dataRaw == null ? null : (byte[])dataRaw.Clone();
+                return owner.uiSendQueue.Enqueue(
+                    () => Send(capturedData, token, committedBytes, raiseEvents, capturedRaw, sessionStringLogOverride),
+                    capturedData.LongLength + (capturedRaw?.LongLength ?? 0));
             }
         }
 
@@ -108,7 +983,31 @@ namespace llcom_plus.Model
                 var portName = string.Empty;
                 try { portName = port?.PortName ?? string.Empty; }
                 catch (Exception ex) when (IsClosedSerialException(ex)) { }
-                return new ConnectionLease(this, port, connectionGeneration, portName);
+                return new ConnectionLease(
+                    this,
+                    port,
+                    connectionGeneration,
+                    portName,
+                    GetRuntimeProfile());
+            }
+        }
+
+        private ConnectionLease CaptureConnectionLease(SerialPort expectedPort)
+        {
+            lock (lifecycleLock)
+            {
+                if (expectedPort == null || !ReferenceEquals(expectedPort, serial) || isShuttingDown)
+                    return null;
+
+                var portName = string.Empty;
+                try { portName = expectedPort.PortName ?? string.Empty; }
+                catch (Exception ex) when (IsClosedSerialException(ex)) { }
+                return new ConnectionLease(
+                    this,
+                    expectedPort,
+                    connectionGeneration,
+                    portName,
+                    GetRuntimeProfile());
             }
         }
 
@@ -155,12 +1054,40 @@ namespace llcom_plus.Model
         {
             get
             {
-                return _dtr;
+                lock (dtrSettingLock)
+                    return _dtr;
             }
             set
             {
+                lock (lifecycleLock)
+                lock (dtrSettingLock)
+                {
+                    _dtr = value;
+                    try
+                    {
+                        dtrWakeController.ApplyUserDtr(
+                            serial,
+                            Interlocked.Read(ref connectionGeneration),
+                            value);
+                    }
+                    catch (Exception ex) when (IsClosedSerialException(ex))
+                    {
+                    }
+                }
+            }
+        }
+
+        internal void SetConfiguredDtr(bool value)
+        {
+            lock (lifecycleLock)
+            lock (dtrSettingLock)
+            {
                 _dtr = value;
-                TryApplyControlLine(port => port.DtrEnable = value);
+                try
+                {
+                    dtrWakeController.ApplyConfiguredDtr(serial, connectionGeneration, value);
+                }
+                catch (Exception ex) when (IsClosedSerialException(ex)) { }
             }
         }
 
@@ -240,10 +1167,12 @@ namespace llcom_plus.Model
         private void RefreshSerialDeviceCore(bool waitForDispose)
         {
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]start");
+            var retiredGeneration = connectionGeneration;
             connectionGeneration = unchecked(connectionGeneration + 1);
             if (connectionGeneration == 0)
                 connectionGeneration = 1;
             var oldSerial = serial;
+            dtrWakeController.InvalidateConnection(oldSerial, retiredGeneration);
             var oldBaseStream = lastPortBaseStream;
             lastPortBaseStream = null;
             pinMonitor?.Dispose();
@@ -357,7 +1286,8 @@ namespace llcom_plus.Model
 
         public void ApplyFlowControl()
         {
-            ApplyControlLines(serial);
+            lock (lifecycleLock)
+                ApplyControlLines(serial);
         }
 
         private void ApplyControlLines(SerialPort port)
@@ -381,7 +1311,10 @@ namespace llcom_plus.Model
                 port.Handshake = handshake;
                 if (handshake != Handshake.RequestToSend)
                     port.RtsEnable = Rts;
-                port.DtrEnable = Dtr;
+                dtrWakeController.ApplyConfiguredDtr(
+                    port,
+                    Interlocked.Read(ref connectionGeneration),
+                    Dtr);
             }
             catch (Exception ex) when (IsClosedSerialException(ex))
             {
@@ -548,10 +1481,13 @@ namespace llcom_plus.Model
                     return;
 
                 isShuttingDown = true;
+                uiSendQueue.Stop();
+                var retiredGeneration = connectionGeneration;
                 connectionGeneration = unchecked(connectionGeneration + 1);
                 if (connectionGeneration == 0)
                     connectionGeneration = 1;
                 var oldSerial = serial;
+                dtrWakeController.InvalidateConnection(oldSerial, retiredGeneration);
                 var oldBaseStream = lastPortBaseStream;
                 pinMonitor?.Dispose();
                 pinMonitor = null;
@@ -561,6 +1497,7 @@ namespace llcom_plus.Model
                     pendingReceivePort = null;
 
                 DisposeSerialResources(oldSerial, oldBaseStream, waitForDispose: true);
+                dtrWakeController.Dispose();
                 WaitUartReceive.Set();
                 Tools.Logger.AddUartLogDebug("[UartShutdown]all serial resources released");
             }
@@ -608,12 +1545,20 @@ namespace llcom_plus.Model
             CancellationToken cancellationToken,
             byte[] dataRaw,
             bool raiseEvents,
-            Action<int> committedBytes)
+            Action<int> committedBytes,
+            string sessionStringLogOverride = null)
         {
+            var profile = lease?.Profile ?? new UartPortProfile();
             lock (sendLock)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                WriteData(lease, data, cancellationToken, committedBytes);
+                dtrWakeController.ExecuteWithWake(
+                    lease?.Port,
+                    lease?.Generation ?? 0,
+                    () => IsConnectionOpen(lease),
+                    profile,
+                    cancellationToken,
+                    () => WriteData(lease, data, profile, cancellationToken, committedBytes));
                 Tools.Global.setting.SentCount += data.Length;
             }
 
@@ -621,22 +1566,22 @@ namespace llcom_plus.Model
                 return;
 
             // External subscribers are invoked after the send serialization lock is released.
-            var profile = GetRuntimeProfile();
             if (dataRaw != null && profile.showSend && ByteArrayEquals(dataRaw, data))
                 dataRaw = null;
             if (dataRaw != null && profile.showSendRaw)
                 UartDataRawSent?.Invoke(dataRaw, EventArgs.Empty);
             if (profile.showSend)
-                UartDataSent?.Invoke(data, EventArgs.Empty);
+                UartDataSent?.Invoke(data, new UartSendEventArgs(sessionStringLogOverride));
         }
 
         private void WriteData(
             ConnectionLease lease,
             byte[] data,
+            UartPortProfile profile,
             CancellationToken cancellationToken,
             Action<int> committedBytes)
         {
-            var profile = GetRuntimeProfile();
+            profile = profile ?? new UartPortProfile();
             var packetSize = Math.Max(0, profile.sendThrottlePacketSize);
             var delayMs = Math.Max(0, profile.sendThrottleDelayMs);
             if (packetSize == 0 || delayMs == 0 || data.Length <= packetSize)
@@ -812,6 +1757,7 @@ namespace llcom_plus.Model
         private void Serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
             var eventPort = sender as SerialPort;
+            RenewDtrWakeAfterReceive(eventPort);
             if (directReceiveMode)
             {
                 if (eventPort == null || !ReferenceEquals(eventPort, serial))
@@ -843,7 +1789,10 @@ namespace llcom_plus.Model
         {
             try
             {
-                var profile = GetRuntimeProfile();
+                var connection = CaptureConnectionLease(eventPort);
+                if (connection == null)
+                    return;
+                var profile = connection.Profile;
                 var timeout = profile.timeout;
                 Thread.Sleep(timeout > 0 ? timeout : 10);
                 if (!directReceiveMode || Tools.Global.isMainWindowsClosed)
@@ -859,6 +1808,7 @@ namespace llcom_plus.Model
                             if (!directReceiveMode ||
                                 eventPort == null ||
                                 !ReferenceEquals(eventPort, serial) ||
+                                connection.Generation != Interlocked.Read(ref connectionGeneration) ||
                                 !eventPort.IsOpen)
                             {
                                 break;
@@ -877,6 +1827,7 @@ namespace llcom_plus.Model
                             else
                                 result.AddRange(block.Take(read));
                         }
+                        RenewDtrWakeAfterReceive(eventPort);
                     }
                     catch (Exception ex)
                     {
@@ -893,7 +1844,7 @@ namespace llcom_plus.Model
                         Thread.Sleep(10);
                 }
 
-                PublishReceivedData(result);
+                PublishReceivedData(result, connection);
             }
             finally
             {
@@ -920,13 +1871,15 @@ namespace llcom_plus.Model
             }
         }
 
-        private void PublishReceivedData(ICollection<byte> result)
+        private void PublishReceivedData(ICollection<byte> result, ConnectionLease connection)
         {
-            if (result == null || result.Count == 0 || Tools.Global.isMainWindowsClosed)
+            if (result == null || result.Count == 0 || Tools.Global.isMainWindowsClosed ||
+                !IsConnectionCurrent(connection))
                 return;
 
             Tools.Global.setting.ReceivedCount += result.Count;
             var data = result.ToArray();
+            var eventArgs = new UartReceiveEventArgs(connection);
             var handlers = UartDataRecived;
             if (handlers != null)
             {
@@ -934,7 +1887,9 @@ namespace llcom_plus.Model
                 {
                     try
                     {
-                        handler(data, EventArgs.Empty);
+                        if (!eventArgs.IsCurrent)
+                            break;
+                        handler(data, eventArgs);
                     }
                     catch (Exception ex)
                     {
@@ -945,6 +1900,20 @@ namespace llcom_plus.Model
                     }
                 }
             }
+        }
+
+        private void RenewDtrWakeAfterReceive(SerialPort eventPort)
+        {
+            // Called before packet aggregation and after each actual read, always
+            // outside receiveLock (close takes lifecycleLock before receiveLock).
+            var lease = CaptureConnectionLease(eventPort);
+            if (lease == null)
+                return;
+            dtrWakeController.RenewAfterReceive(
+                lease.Port,
+                lease.Generation,
+                () => IsConnectionOpen(lease),
+                lease.Profile);
         }
 
         /// <summary>
@@ -958,7 +1927,11 @@ namespace llcom_plus.Model
                 WaitUartReceive.WaitOne();
                 if (Tools.Global.isMainWindowsClosed)
                     return;
-                var profile = GetRuntimeProfile();
+                // A packet belongs to exactly one connection. Never reselect serial
+                // inside the aggregation loop: a COM switch may happen during Sleep.
+                var connection = CaptureConnectionLease();
+                var readPort = connection.Port;
+                var profile = connection.Profile;
                 if (profile.timeout > 0)
                     System.Threading.Thread.Sleep(profile.timeout);//等待时间
                 else
@@ -974,13 +1947,11 @@ namespace llcom_plus.Model
                     {
                         lock (receiveLock)
                         {
-                            if (directReceiveMode)
+                            if (directReceiveMode ||
+                                !ReferenceEquals(readPort, serial) ||
+                                connection.Generation != Interlocked.Read(ref connectionGeneration))
                                 break;
 
-                            var currentPort = serial;
-                            var readPort = ReferenceEquals(pendingReceivePort, currentPort)
-                                ? pendingReceivePort
-                                : currentPort;
                             if (readPort == null || !readPort.IsOpen)//串口被关了，不读了
                                 break;
 
@@ -996,6 +1967,7 @@ namespace llcom_plus.Model
                             else
                                 result.AddRange(rev.Take(read));
                         }
+                        RenewDtrWakeAfterReceive(readPort);
                     }
                     catch (Exception ex)
                     {
@@ -1016,7 +1988,7 @@ namespace llcom_plus.Model
                 }
                 if (Tools.Global.isMainWindowsClosed)
                     return;
-                PublishReceivedData(result);
+                PublishReceivedData(result, connection);
             }
         }
     }
