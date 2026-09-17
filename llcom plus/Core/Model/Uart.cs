@@ -861,11 +861,18 @@ namespace llcom_plus.Model
     internal sealed class UartSendEventArgs : EventArgs
     {
         internal UartSendEventArgs(string sessionStringLogOverride)
+            : this(sessionStringLogOverride, null)
+        {
+        }
+
+        internal UartSendEventArgs(string sessionStringLogOverride, string portName)
         {
             SessionStringLogOverride = sessionStringLogOverride;
+            PortName = portName;
         }
 
         internal string SessionStringLogOverride { get; }
+        internal string PortName { get; }
     }
 
     internal sealed class UartReceiveEventArgs : EventArgs
@@ -1614,7 +1621,7 @@ namespace llcom_plus.Model
             if (dataRaw != null && profile.showSendRaw)
                 UartDataRawSent?.Invoke(dataRaw, EventArgs.Empty);
             if (profile.showSend)
-                UartDataSent?.Invoke(data, new UartSendEventArgs(sessionStringLogOverride));
+                UartDataSent?.Invoke(data, new UartSendEventArgs(sessionStringLogOverride, lease?.PortName));
         }
 
         private void WriteData(

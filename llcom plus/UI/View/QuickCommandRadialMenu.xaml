@@ -1,0 +1,73 @@
+<UserControl x:Class="llcom_plus.QuickCommandRadialMenu"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fa="http://schemas.fontawesome.io/icons/"
+             Width="88" Height="152" UseLayoutRounding="True"
+             KeyboardNavigation.TabNavigation="Cycle"
+             AutomationProperties.Name="{DynamicResource QuickSendHandleActions}">
+    <UserControl.Resources>
+        <!-- Compact ring around the drag handle; coordinates match AnchorCenter. -->
+        <PathGeometry x:Key="CopySector">M 10,8 A 68,68 0 0 1 77.93,73 L 31.79,73 A 22,22 0 0 0 10,54 Z</PathGeometry>
+        <PathGeometry x:Key="DeleteSector">M 31.79,3 L 77.93,3 A 68,68 0 0 1 10,68 L 10,22 A 22,22 0 0 0 31.79,3 Z</PathGeometry>
+        <Style x:Key="SectorButton" TargetType="Button">
+            <Setter Property="Width" Value="88" />
+            <Setter Property="Height" Value="76" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AppPopupBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <!-- Clip hit-testing to the actual sector, including its inner hole. -->
+                        <Grid Clip="{TemplateBinding Tag}" Background="Transparent">
+                            <!-- Only the background is translucent; labels and the outline stay sharp. -->
+                            <Path x:Name="SectorFill" Data="{TemplateBinding Tag}" Fill="{TemplateBinding Background}" Opacity="0.78" />
+                            <Path x:Name="Sector" Data="{TemplateBinding Tag}"
+                                  Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1" />
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SectorFill" Property="Fill" Value="{DynamicResource AppGlassControlHoverBackground}" />
+                                <Setter TargetName="SectorFill" Property="Opacity" Value="0.92" />
+                                <Setter TargetName="Sector" Property="Stroke" Value="{DynamicResource AppAccentBrush}" />
+                                <Setter TargetName="Sector" Property="StrokeThickness" Value="1.5" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Sector" Property="Stroke" Value="{DynamicResource AppAccentBrush}" />
+                                <Setter TargetName="Sector" Property="StrokeThickness" Value="1.5" />
+                                <Setter TargetName="SectorFill" Property="Opacity" Value="0.92" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="SectorFill" Property="Opacity" Value="1" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+    <Canvas>
+        <Button x:Name="CopyButton" Canvas.Top="0" Style="{StaticResource SectorButton}" Tag="{StaticResource CopySector}"
+                Padding="18,27,0,0" Click="Copy_Click" ToolTip="{DynamicResource QuickSendDuplicate}"
+                AutomationProperties.Name="{DynamicResource QuickSendDuplicate}">
+            <StackPanel Width="44">
+                <fa:FontAwesome Icon="Copy" FontSize="16" HorizontalAlignment="Center" />
+                <TextBlock Text="{DynamicResource QuickSendDuplicate}" HorizontalAlignment="Center" FontSize="12" Margin="0,2,0,0" />
+            </StackPanel>
+        </Button>
+        <Button x:Name="DeleteButton" Canvas.Top="76" Style="{StaticResource SectorButton}" Tag="{StaticResource DeleteSector}"
+                Padding="16,13,0,0" Click="Delete_Click" Foreground="{DynamicResource AppDangerBrush}"
+                ToolTip="{DynamicResource QuickSendRemoveItem}" AutomationProperties.Name="{DynamicResource QuickSendRemoveItem}">
+            <StackPanel Width="44">
+                <fa:FontAwesome Icon="TrashOutline" FontSize="16" HorizontalAlignment="Center" />
+                <TextBlock Text="{DynamicResource QuickSendDeleteShort}" HorizontalAlignment="Center" FontSize="12" Margin="0,2,0,0" />
+            </StackPanel>
+        </Button>
+    </Canvas>
+</UserControl>

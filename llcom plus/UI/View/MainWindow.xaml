@@ -1110,6 +1110,7 @@
                         ItemContainerStyle="{StaticResource toSendListStyle}"
                         PreviewKeyDown="QuickSendList_PreviewKeyDown"
                         Unloaded="QuickSendList_Unloaded"
+                        ScrollViewer.ScrollChanged="QuickSendList_ScrollChanged"
                         AllowDrop="True"
                         PreviewDragEnter="QuickSendList_DragOver"
                         PreviewDragOver="QuickSendList_DragOver"
@@ -1153,8 +1154,13 @@
                             <local:QuickSendItemSettings x:Name="QuickSendItemSettingsEditor"
                                                         PreviewKeyDown="QuickSendItemSettingsEditor_PreviewKeyDown"
                                                         CloseRequested="QuickSendItemSettingsEditor_CloseRequested"
-                                                        DuplicateRequested="QuickCommandDuplicate_Click"
-                                                        DeleteRequested="QuickSendItemSettingsEditor_DeleteRequested" />
+                                                        />
+                        </Popup>
+                        <Popup x:Name="QuickCommandActionsPopup" Placement="Right" HorizontalOffset="-12"
+                               AllowsTransparency="True" StaysOpen="False" Closed="QuickCommandActionsPopup_Closed">
+                            <local:QuickCommandRadialMenu x:Name="QuickCommandActionsMenu"
+                                CopyRequested="QuickCommandActions_Copy" DeleteRequested="QuickCommandActions_Delete"
+                                PreviewKeyDown="QuickCommandActions_KeyDown" />
                         </Popup>
                         <Border
                             x:Name="QuickSendCommandBar"

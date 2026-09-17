@@ -74,6 +74,7 @@ namespace llcom_plus.Pages
         private int plainLogCharCount;
         private bool displayedShowSend = true;
         private bool displayedLineEndings = true;
+        private UartPortProfile displayedPrefix;
         private Settings subscribedSettings;
         private Window ownerWindow;
         private void Page_Loaded(object sender, RoutedEventArgs e)
@@ -102,6 +103,7 @@ namespace llcom_plus.Pages
                 subscribedSettings.UartProcessingSettingsChanged += Settings_UartProcessingSettingsChanged;
                 displayedShowSend = subscribedSettings.showSend;
                 displayedLineEndings = subscribedSettings.ShowLineEndings;
+                displayedPrefix = subscribedSettings.GetLogPrefixProfile();
 
                 LogOptionsButton.DataContext = Tools.Global.setting;
                 HexSendCheckBox.DataContext = Tools.Global.setting;
@@ -218,8 +220,11 @@ namespace llcom_plus.Pages
             var showSend = Tools.Global.setting?.showSend != false;
             var lineEndings = Tools.Global.setting?.ShowLineEndings != false;
             var packed = Tools.Global.setting?.timeout >= 0;
-            if (displayedShowSend == showSend && displayedLineEndings == lineEndings && lastPackShowMode == packed)
+            var prefix = Tools.Global.setting?.GetLogPrefixProfile();
+            if (displayedShowSend == showSend && displayedLineEndings == lineEndings && lastPackShowMode == packed &&
+                Settings.LogPrefixOptionsEqual(displayedPrefix, prefix))
                 return;
+            displayedPrefix = prefix;
             displayedShowSend = showSend;
             displayedLineEndings = lineEndings;
             lastPackShowMode = packed;
@@ -380,12 +385,12 @@ namespace llcom_plus.Pages
 
         // Render from retained, direction-aware history. Hiding TX never mutates history.
         internal static void AppendHistoryItem(System.Windows.Controls.RichTextBox target, DataShow item, ref Paragraph plainParagraph,
-            bool showLineEndings = true)
+            bool showLineEndings = true, UartPortProfile prefixProfile = null)
         {
             if (!item.IsPlainText)
             {
                 plainParagraph = null;
-                target.Document.Blocks.Add(CreateLogParagraph(item, showLineEndings));
+                target.Document.Blocks.Add(CreateLogParagraph(item, showLineEndings, prefixProfile));
                 return;
             }
             if (plainParagraph == null)
@@ -397,7 +402,7 @@ namespace llcom_plus.Pages
                 item.IsSent ? SentColorRole : ReceivedColorRole);
         }
 
-        internal static Paragraph CreateLogParagraph(DataShow item, bool showLineEndings = true)
+        internal static Paragraph CreateLogParagraph(DataShow item, bool showLineEndings = true, UartPortProfile prefixProfile = null)
         {
             var paragraph = new Paragraph
             {
@@ -405,11 +410,11 @@ namespace llcom_plus.Pages
                 FontFamily = new FontFamily("Consolas,Microsoft YaHei,微软雅黑"),
                 FontSize = 12
             };
-            paragraph.Inlines.Add(new Run(item.TimeText ?? string.Empty)
-            {
-                Foreground = ResourceBrush("AppGlassMutedBrush", SystemColors.GrayTextBrush)
-            });
-            paragraph.Inlines.Add(new Run(item.ArrowText ?? string.Empty)
+            var prefix = item.IsSerialData && item.LogTime.HasValue && !item.IsPlainText
+                ? Settings.FormatLogPrefix(item.LogTime.Value, item.LogPortName, item.IsSent,
+                    prefixProfile ?? Tools.Global.setting?.GetLogPrefixProfile())
+                : (item.TimeText ?? string.Empty) + (item.ArrowText ?? string.Empty);
+            paragraph.Inlines.Add(new Run(prefix)
             {
                 Foreground = ResourceBrush("AppGlassMutedBrush", SystemColors.GrayTextBrush)
             });
@@ -704,6 +709,8 @@ namespace llcom_plus.Pages
             public SolidColorBrush HexTextColor { get; set; }
             internal bool IsSerialData { get; set; }
             internal bool IsSent { get; set; }
+            internal DateTime? LogTime { get; private set; }
+            internal string LogPortName { get; private set; }
             // Preserve both display projections; never remove literal backslash text,
             // rerun receive scripts, or change the canonical export/session record.
             private string dataWithLineEndings;
@@ -726,7 +733,11 @@ namespace llcom_plus.Pages
                     if (IsPlainText) return dataLength;
                     var rawLength = Math.Max(RawText?.Length ?? 0,
                         Math.Max(GetDisplayRaw(true)?.Length ?? 0, GetDisplayRaw(false)?.Length ?? 0));
-                    return dataLength + rawLength + (TimeText?.Length ?? 0) + (ArrowText?.Length ?? 0) +
+                    var prefixLength = (TimeText?.Length ?? 0) + (ArrowText?.Length ?? 0);
+                    // Reserve enough for the largest safe custom prefix without resizing
+                    // retained history every time a display checkbox is changed.
+                    if (IsSerialData && LogTime.HasValue) prefixLength = Math.Max(prefixLength, 96);
+                    return dataLength + rawLength + prefixLength +
                         (RawTitle?.Length ?? 0) + (HexText?.Length ?? 0) + Environment.NewLine.Length;
                 }
             }
@@ -781,6 +792,8 @@ namespace llcom_plus.Pages
                     HexTextColor = HexTextColor,
                     IsSerialData = IsSerialData,
                     IsSent = IsSent,
+                    LogTime = LogTime,
+                    LogPortName = LogPortName,
                     dataWithLineEndings = dataWithLineEndings,
                     dataWithoutLineEndings = dataWithoutLineEndings,
                     rawWithLineEndings = rawWithLineEndings,
@@ -849,10 +862,16 @@ namespace llcom_plus.Pages
             }
 
             internal DataShow(DataShowPara source, UartPortProfile profile)
+                : this(source, profile, null)
+            {
+            }
+
+            internal DataShow(DataShowPara source, UartPortProfile profile, string portName)
             {
                 var data = source?.data ?? new byte[0];
                 var time = source?.time ?? DateTime.Now;
                 var sent = source?.send ?? false;
+                LogPortName = portName ?? source?.portName ?? Tools.Logger.CaptureMainPortName();
                 if (data == null || data.Length == 0)
                     return;
                 byte[] temp = ApplyReceiveScript(data, source, profile);
@@ -861,6 +880,7 @@ namespace llcom_plus.Pages
 
                 TimeText = time.ToString("[yyyy/MM/dd HH:mm:ss.fff]");
                 ArrowText = sent ? " ← " : " → ";
+                LogTime = time;
                 IsSerialData = true;
                 IsSent = sent;
                 DataTextColor = Tools.Logger.GetLogDataBrush(sent);

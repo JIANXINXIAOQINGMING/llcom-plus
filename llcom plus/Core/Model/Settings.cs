@@ -2,6 +2,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Linq;
@@ -41,6 +42,12 @@ namespace llcom_plus.Model
         public bool enterSend { get; set; } = false;
         public bool enableSymbol { get; set; } = true;
         public bool showLineEndings { get; set; } = true;
+        public bool logShowDate { get; set; } = true;
+        public bool logShowTime { get; set; } = true;
+        public bool logShowMilliseconds { get; set; } = true;
+        public bool logShowPort { get; set; } = false;
+        public string logTxLabel { get; set; } = "←";
+        public string logRxLabel { get; set; } = "→";
         public bool rts { get; set; } = false;
         public bool dtr { get; set; } = false;
     }
@@ -159,6 +166,12 @@ namespace llcom_plus.Model
         private bool _enterSend = false;
         private bool _enableSymbol = true;
         private bool _showLineEndings = true;
+        private bool _logShowDate = true;
+        private bool _logShowTime = true;
+        private bool _logShowMilliseconds = true;
+        private bool _logShowPort;
+        private string _logTxLabel = "←";
+        private string _logRxLabel = "→";
         private bool _showSerialByteCounts = true;
         private bool _sessionLogEnabled = false;
         private string _sessionLogFolder = "";
@@ -746,6 +759,12 @@ namespace llcom_plus.Model
                 enterSend = profile.enterSend,
                 enableSymbol = profile.enableSymbol,
                 showLineEndings = profile.showLineEndings,
+                logShowDate = profile.logShowDate,
+                logShowTime = profile.logShowTime,
+                logShowMilliseconds = profile.logShowMilliseconds,
+                logShowPort = profile.logShowPort,
+                logTxLabel = NormalizeLogDirectionLabel(profile.logTxLabel, "←"),
+                logRxLabel = NormalizeLogDirectionLabel(profile.logRxLabel, "→"),
                 rts = profile.rts,
                 dtr = profile.dtr
             };
@@ -830,6 +849,12 @@ namespace llcom_plus.Model
                 enterSend = _enterSend,
                 enableSymbol = _enableSymbol,
                 showLineEndings = _showLineEndings,
+                logShowDate = _logShowDate,
+                logShowTime = _logShowTime,
+                logShowMilliseconds = _logShowMilliseconds,
+                logShowPort = _logShowPort,
+                logTxLabel = _logTxLabel,
+                logRxLabel = _logRxLabel,
                 rts = storedActiveProfile?.rts ?? Tools.Global.uart?.Rts ?? false,
                 dtr = storedActiveProfile?.dtr ?? Tools.Global.uart?.Dtr ?? false
             };
@@ -896,6 +921,12 @@ namespace llcom_plus.Model
                 enterSend = profile.enterSend;
                 EnableSymbol = profile.enableSymbol;
                 ShowLineEndings = profile.showLineEndings;
+                LogShowDate = profile.logShowDate;
+                LogShowTime = profile.logShowTime;
+                LogShowMilliseconds = profile.logShowMilliseconds;
+                LogShowPort = profile.logShowPort;
+                LogTxLabel = profile.logTxLabel;
+                LogRxLabel = profile.logRxLabel;
                 if (ControlsGlobalUart && Tools.Global.uart != null)
                 {
                     Tools.Global.uart.Rts = profile.rts;
@@ -938,6 +969,12 @@ namespace llcom_plus.Model
                 merged.enterSend = _enterSend;
                 merged.enableSymbol = _enableSymbol;
                 merged.showLineEndings = _showLineEndings;
+                merged.logShowDate = _logShowDate;
+                merged.logShowTime = _logShowTime;
+                merged.logShowMilliseconds = _logShowMilliseconds;
+                merged.logShowPort = _logShowPort;
+                merged.logTxLabel = _logTxLabel;
+                merged.logRxLabel = _logRxLabel;
                 return CreateNormalizedUartProfileSnapshot(merged);
             }
         }
@@ -1819,6 +1856,100 @@ namespace llcom_plus.Model
                 _showLineEndings = value;
                 SaveUartProcessingSetting();
             }
+        }
+
+        public bool LogShowDate
+        {
+            get => _logShowDate;
+            set { _logShowDate = value; SaveUartProcessingSetting(); }
+        }
+
+        public bool LogShowTime
+        {
+            get => _logShowTime;
+            set { _logShowTime = value; SaveUartProcessingSetting(); }
+        }
+
+        public bool LogShowMilliseconds
+        {
+            get => _logShowMilliseconds;
+            set { _logShowMilliseconds = value; SaveUartProcessingSetting(); }
+        }
+
+        public bool LogShowPort
+        {
+            get => _logShowPort;
+            set { _logShowPort = value; SaveUartProcessingSetting(); }
+        }
+
+        public string LogTxLabel
+        {
+            get => _logTxLabel;
+            set { _logTxLabel = NormalizeLogDirectionLabel(value, "←"); SaveUartProcessingSetting(); }
+        }
+
+        public string LogRxLabel
+        {
+            get => _logRxLabel;
+            set { _logRxLabel = NormalizeLogDirectionLabel(value, "→"); SaveUartProcessingSetting(); }
+        }
+
+        internal UartPortProfile GetLogPrefixProfile()
+        {
+            return new UartPortProfile
+            {
+                logShowDate = _logShowDate,
+                logShowTime = _logShowTime,
+                logShowMilliseconds = _logShowMilliseconds,
+                logShowPort = _logShowPort,
+                logTxLabel = _logTxLabel,
+                logRxLabel = _logRxLabel
+            };
+        }
+
+        internal static string NormalizeLogDirectionLabel(string value, string fallback)
+        {
+            if (value == null) return fallback;
+            // Labels are plain single-line text, not XAML, scripts or format expressions.
+            // Drop controls/bidi markers and never retain a partial surrogate pair.
+            var label = new StringBuilder(16);
+            for (var i = 0; i < value.Length && label.Length < 16; i++)
+            {
+                var c = value[i];
+                if (char.IsControl(c) || char.GetUnicodeCategory(c) == UnicodeCategory.Format || c == '\u2028' || c == '\u2029') continue;
+                if (char.IsHighSurrogate(c))
+                {
+                    if (i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]) && label.Length < 15)
+                    {
+                        label.Append(c).Append(value[++i]);
+                    }
+                }
+                else if (!char.IsLowSurrogate(c)) label.Append(c);
+            }
+            return label.ToString().Trim();
+        }
+
+        internal static bool LogPrefixOptionsEqual(UartPortProfile first, UartPortProfile second)
+        {
+            return first != null && second != null &&
+                first.logShowDate == second.logShowDate && first.logShowTime == second.logShowTime &&
+                first.logShowMilliseconds == second.logShowMilliseconds && first.logShowPort == second.logShowPort &&
+                first.logTxLabel == second.logTxLabel && first.logRxLabel == second.logRxLabel;
+        }
+
+        internal static string FormatLogPrefix(DateTime time, string portName, bool sent, UartPortProfile profile)
+        {
+            profile = profile ?? new UartPortProfile();
+            var fields = new List<string>();
+            var timestamp = new List<string>();
+            if (profile.logShowDate) timestamp.Add(time.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture));
+            if (profile.logShowTime) timestamp.Add(time.ToString(profile.logShowMilliseconds ? "HH:mm:ss.fff" : "HH:mm:ss", CultureInfo.InvariantCulture));
+            if (timestamp.Count > 0) fields.Add("[" + string.Join(" ", timestamp) + "]");
+            if (profile.logShowPort && !string.IsNullOrWhiteSpace(portName))
+                fields.Add("[" + new string(portName.Trim().Where(c => char.IsLetterOrDigit(c)).Take(32).ToArray()) + "]");
+            var direction = NormalizeLogDirectionLabel(sent ? profile.logTxLabel : profile.logRxLabel, sent ? "←" : "→");
+            if (direction.Length > 0) fields.Add(direction);
+            return fields.Count > 0 ? string.Join(" ", fields) + " " : string.Empty;
         }
 
         public bool sessionLogEnabled

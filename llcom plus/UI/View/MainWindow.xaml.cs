@@ -409,6 +409,7 @@ namespace llcom_plus
 
             if (MainTabControl.SelectedItem != QuickSendTab)
             {
+                CloseQuickCommandActions();
                 CloseQuickSendItemSettings();
                 ExitQuickSendKeyboardNavigation();
             }
@@ -1510,7 +1511,8 @@ namespace llcom_plus
 
         private void Uart_UartDataSent(object sender, EventArgs e)
         {
-            Tools.Logger.ShowData(sender as byte[], true, (e as UartSendEventArgs)?.SessionStringLogOverride);
+            Tools.Logger.ShowSerialData(sender as byte[], true, (e as UartSendEventArgs)?.SessionStringLogOverride,
+                null, (e as UartSendEventArgs)?.PortName ?? Tools.Logger.CaptureMainPortName());
         }
 
         private void Uart_UartDataRecived(object sender, EventArgs e)
@@ -1518,7 +1520,8 @@ namespace llcom_plus
             if (e is UartReceiveEventArgs received && !received.IsCurrent)
                 return;
             var data = sender as byte[];
-            Tools.Logger.ShowData(data, false, null, GetReceiveScriptContext());
+            Tools.Logger.ShowSerialData(data, false, null, GetReceiveScriptContext(),
+                (e as UartReceiveEventArgs)?.Connection?.PortName ?? Tools.Logger.CaptureMainPortName());
             if (!IsSerialSplitModeActive() ||
                 Volatile.Read(ref lastSerialSendTargetSlot) == 1)
                 Tools.Global.NotifyActiveSerialTargetReceived(data);
@@ -3466,6 +3469,8 @@ namespace llcom_plus
             if (item == null || !toSendListItems.Contains(item))
                 return;
 
+            CloseQuickCommandActions();
+
             Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
             RememberQuickSendDeletion(item);
             ExitQuickSendKeyboardNavigation();
@@ -4173,6 +4178,7 @@ namespace llcom_plus
         }
         private void Window_Deactivated(object sender, EventArgs e)
         {
+            CloseQuickCommandActions();
             CloseQuickSendItemSettings();
             CloseNotificationPopup();
             //窗口变为后台,可能在切换编辑器,自动保存脚本
@@ -5825,6 +5831,7 @@ namespace llcom_plus
             if (item == null || anchor == null || !toSendListItems.Contains(item))
                 return;
             ExitQuickSendKeyboardNavigation();
+            CloseQuickCommandActions();
             CloseQuickSendItemSettings();
             WaitRuntimeFilesReady();
             quickSendSettingsAnchor = anchor;
@@ -5851,6 +5858,7 @@ namespace llcom_plus
 
         private void CloseQuickSendItemSettings(bool restoreFocus = false)
         {
+            CloseQuickCommandActions();
             if (QuickSendItemSettingsPopup == null || QuickSendItemSettingsEditor == null)
                 return;
             var anchor = quickSendSettingsAnchor;
@@ -5864,13 +5872,6 @@ namespace llcom_plus
         private void QuickSendItemSettingsEditor_CloseRequested(object sender, EventArgs e)
         {
             CloseQuickSendItemSettings(restoreFocus: true);
-        }
-
-        private void QuickSendItemSettingsEditor_DeleteRequested(object sender, EventArgs e)
-        {
-            var item = QuickSendItemSettingsEditor.Item;
-            CloseQuickSendItemSettings();
-            RemoveQuickSendItem(item);
         }
 
         private void QuickSendItemSettingsEditor_PreviewKeyDown(object sender, KeyEventArgs e)

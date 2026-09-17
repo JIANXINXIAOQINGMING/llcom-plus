@@ -250,6 +250,7 @@ namespace llcom_plus
             }
             RefreshUartSettingControls();
             Tools.Global.UartProfileChangedEvent += Global_UartProfileChangedEvent;
+            Tools.Global.setting.UartProcessingSettingsChanged += LogPrefixSettingsChanged;
         }
 
         private void Global_UartProfileChangedEvent(object sender, EventArgs e)
@@ -343,8 +344,39 @@ namespace llcom_plus
             ErrorColorSwatch.Background = Tools.Logger.GetLogErrorBrush();
         }
 
+        private void LogPrefixSettingsChanged(object sender, EventArgs e)
+        {
+            if (Dispatcher.CheckAccess()) RefreshLogPrefixPreview();
+            else Dispatcher.BeginInvoke(new Action(RefreshLogPrefixPreview));
+        }
+
+        private void RefreshLogPrefixPreview()
+        {
+            var settings = Tools.Global.setting;
+            if (settings == null || LogPrefixPreviewText == null) return;
+            var profile = settings.GetLogPrefixProfile();
+            var port = string.IsNullOrWhiteSpace(settings.ActiveUartProfileName) ? "COM1" : settings.ActiveUartProfileName;
+            var time = new DateTime(2026, 1, 1, 12, 34, 56, 789);
+            LogPrefixPreviewText.Text = Model.Settings.FormatLogPrefix(time, port, true, profile) + "AT+VER?" + Environment.NewLine +
+                Model.Settings.FormatLogPrefix(time.AddMilliseconds(120), port, false, profile) + "OK";
+        }
+
+        private void ResetLogPrefixButton_Click(object sender, RoutedEventArgs e)
+        {
+            var settings = Tools.Global.setting;
+            if (settings == null) return;
+            settings.LogShowDate = true;
+            settings.LogShowTime = true;
+            settings.LogShowMilliseconds = true;
+            settings.LogShowPort = false;
+            settings.LogTxLabel = "←";
+            settings.LogRxLabel = "→";
+            RefreshLogPrefixPreview();
+        }
+
         private void RefreshUartSettingControls()
         {
+            RefreshLogPrefixPreview();
             refreshingUartControls = true;
             try
             {
@@ -379,6 +411,7 @@ namespace llcom_plus
                 //说明软件关了
                 Tools.Global.UartProfileChangedEvent -= Global_UartProfileChangedEvent;
                 Tools.Global.ThemeChanged -= Global_ThemeChanged;
+                Tools.Global.setting.UartProcessingSettingsChanged -= LogPrefixSettingsChanged;
                 e.Cancel = false;
             }
             else

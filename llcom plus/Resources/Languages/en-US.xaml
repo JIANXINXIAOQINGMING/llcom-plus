@@ -64,7 +64,10 @@
     <system:String x:Key="QuickSendRecvScriptPara">Para</system:String>
     <system:String x:Key="QuickSendButtonTip">Send this row.</system:String>
     <system:String x:Key="QuickSendDragName">Reorder command</system:String>
-    <system:String x:Key="QuickSendDragHint">Drag the six-dot handle on the left to reorder a command.</system:String>
+    <system:String x:Key="QuickSendDragHint">Click the six-dot handle to copy or delete; drag it to reorder.</system:String>
+    <system:String x:Key="QuickSendDuplicate">Copy</system:String>
+    <system:String x:Key="QuickSendDeleteShort">Delete</system:String>
+    <system:String x:Key="QuickSendHandleActions">Command actions</system:String>
     <system:String x:Key="QuickSendDragTip">Drag to reorder; Esc cancels. Or focus this handle and press Alt + Up / Down.</system:String>
     <system:String x:Key="QuickSendAppendCrlfTip">When checked, clicking this quick send item appends CRLF.</system:String>
     <system:String x:Key="QuickSendDisableSuggestionTip">When checked, this quick send item will not appear in send box suggestions.</system:String>
@@ -538,6 +541,14 @@
     <system:String x:Key="ShowSymbol">Replace invisible characters</system:String>
     <system:String x:Key="ShowSymbolTooltip">Replace tabs and other invisible characters with visible text. Only supports UTF8. Line ending markers have a separate setting.</system:String>
     <system:String x:Key="ShowLineEndings">Show CR/LF markers</system:String>
+    <system:String x:Key="SettingLogPrefix">Log prefix</system:String>
+    <system:String x:Key="SettingLogDate">Date</system:String>
+    <system:String x:Key="SettingLogTime">Time</system:String>
+    <system:String x:Key="SettingLogMilliseconds">Milliseconds</system:String>
+    <system:String x:Key="SettingLogDirectionTip">Custom direction label, up to 16 characters. Leave empty to hide. Single-line text only.</system:String>
+    <system:String x:Key="SettingLogPrefixTip">Changes this COM's packet-log view and retained history only. Continuous text mode, wire data and log files are unchanged.</system:String>
+    <system:String x:Key="SettingLogPrefixPreview">Preview (sample time)</system:String>
+    <system:String x:Key="SettingLogPrefixReset">Restore default prefix</system:String>
     <system:String x:Key="ShowLineEndingsTooltip">Show literal \r and \n markers. Uncheck to hide the markers while preserving actual line breaks. Affects only this port's view, not transmitted data or log files.</system:String>
     <system:String x:Key="SessionLog">Auto-save logs</system:String>
     <system:String x:Key="SessionLogTip">Automatically record serial sessions; logging starts immediately if the port is already open. Logs are grouped by port in STRING and HEX folders.</system:String>

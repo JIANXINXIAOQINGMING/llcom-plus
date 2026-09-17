@@ -35,6 +35,7 @@ try {
     $app.ShutdownMode = [Windows.ShutdownMode]::OnExplicitShutdown
     # Construct only: never call Show, start the normal application, or open a COM.
     $window = [Activator]::CreateInstance($assembly.GetType('llcom_plus.MainWindow', $true))
+    $window.FindName('QuickSendTab').IsSelected = $true
     $type = $window.GetType()
     $rows = $type.GetField('toSendListItems', $flags).GetValue($window)
     $window.FindName('toSendList').ItemsSource = $rows
@@ -79,7 +80,7 @@ try {
         $original.responseRetries = 0
     }
     [void]$setEditorItem.Invoke($editor, [object[]]@($original))
-    Invoke-Edit 'QuickCommandDuplicate_Click' ([object[]]@($null, [EventArgs]::Empty))
+    Invoke-Edit 'DuplicateQuickCommand' ([object[]]@($original))
     $copy = $rows[1]
     Assert-Edit ($rows.Count -eq 2 -and -not [object]::ReferenceEquals($copy, $original)) 'Duplicate creates a distinct row immediately after its source.'
     foreach ($property in @('text','hex','appendCrlf','commit','recvScriptPath','recvScriptPara','disableSuggestion','responseMode','expectedResponse','responseTimeoutMs','responseRetries')) {
@@ -89,16 +90,47 @@ try {
     }
     Write-Host 'PASS Duplicate retains all command and response settings.'
 
-    Assert-Edit ($null -ne $editor.FindName('DuplicateCommandButton') -and $null -ne $editor.FindName('DeleteCommandButton') -and
+    $actions = $window.FindName('QuickCommandActionsMenu')
+    Assert-Edit ($null -eq $editor.FindName('DuplicateCommandButton') -and $null -eq $editor.FindName('DeleteCommandButton') -and
+        $null -ne $actions.FindName('CopyButton') -and $null -ne $actions.FindName('DeleteButton') -and
         $null -eq $editor.GetType().GetEvent('MoveUpRequested') -and $null -eq $editor.GetType().GetEvent('MoveDownRequested')) `
-        'Compact command actions retain copy/delete without redundant move buttons.'
+        'Copy/delete live in the handle radial menu, not in the settings panel.'
     $reorderHint = $editor.FindName('ReorderHint')
     Assert-Edit ($null -ne $reorderHint -and -not [string]::IsNullOrWhiteSpace($reorderHint.Text) -and
         $null -eq $type.GetMethod('TextBlock_MouseRightButtonDown', $flags) -and
         $null -ne $type.GetMethod('QuickSendDragHandle_MouseDown', $flags)) `
         'Command settings show a concise drag-handle hint instead of the old numbered reorder action.'
 
-    Invoke-Edit 'RemoveQuickSendItem' ([object[]]@($copy))
+    function Set-RadialTarget($item) {
+        $anchor = New-Object Windows.Controls.Button
+        $anchor.Tag = $item
+        $type.GetField('quickActionsAnchor', $flags).SetValue($window, $anchor)
+        $type.GetField('quickActionsItem', $flags).SetValue($window, $item)
+        $type.GetField('quickActionsPage', $flags).SetValue($window, $settings.quickSendSelect)
+        $type.GetField('quickActionsGeneration', $flags).SetValue($window, $type.GetField('quickReorderGeneration', $flags).GetValue($window))
+    }
+    Set-RadialTarget $original
+    [void]$setEditorItem.Invoke($editor, [object[]]@($null))
+    $actions.FindName('CopyButton').RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    Assert-Edit ($rows.Count -eq 3 -and $rows[1].text -eq $original.text -and
+        -not [object]::ReferenceEquals($rows[1],$original)) 'The actual radial Copy button duplicates its captured command, not the editor selection.'
+    $rows.RemoveAt(1) # Remove this fixture copy before exercising deletion/undo.
+    Invoke-Edit 'QuickCommandActions_Copy' ([object[]]@($null, [EventArgs]::Empty))
+    Assert-Edit ($rows.Count -eq 2) 'A closed radial menu cannot replay its previous action.'
+    Set-RadialTarget $original
+    $type.GetField('quickActionsPage', $flags).SetValue($window, ($settings.quickSendSelect + 1))
+    Invoke-Edit 'QuickCommandActions_Delete' ([object[]]@($null, [EventArgs]::Empty))
+    Assert-Edit ($rows.Count -eq 2) 'A stale page cannot delete a command through the radial menu.'
+    Set-RadialTarget $original
+    Invoke-Edit 'InvalidateQuickReorder'
+    Invoke-Edit 'QuickCommandActions_Delete' ([object[]]@($null, [EventArgs]::Empty))
+    Assert-Edit ($rows.Count -eq 2) 'Unloading/reloading the list cancels a pending radial action.'
+    Set-RadialTarget $original
+    $type.GetField('quickActionsAnchor', $flags).GetValue($window).Tag = $copy
+    Invoke-Edit 'QuickCommandActions_Delete' ([object[]]@($null, [EventArgs]::Empty))
+    Assert-Edit ($rows.Count -eq 2) 'A recycled row container cannot apply its old radial command.'
+    Set-RadialTarget $copy
+    $actions.FindName('DeleteButton').RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     Assert-Edit ($rows.Count -eq 1 -and $window.FindName('UndoQuickCommandButton').IsEnabled) 'Deletion enables one-step undo without deleting another row.'
     Invoke-Edit 'UndoQuickCommand_Click' ([object[]]@($null, $null))
     Assert-Edit ($rows.Count -eq 2 -and $rows[1].text -eq '41 54' -and $rows[1].hex -and -not $window.FindName('UndoQuickCommandButton').IsEnabled) 'Undo restores the deleted command once with its settings.'
@@ -199,6 +231,86 @@ try {
         try { $encoder.Save($stream) } finally { $stream.Dispose() }
         Write-Host "RENDER $previewPath"
     }
+    function Test-RadialMenu([string]$theme, [string]$language) {
+        $popup = $window.FindName('QuickCommandActionsPopup')
+        $menu = $popup.Child
+        $popup.Child = $null
+        $radialSurface = New-Object Windows.Controls.Border
+        $radialSurface.Padding = New-Object Windows.Thickness(10)
+        $radialSurface.Background = $app.TryFindResource('AppWindowBackgroundBrush')
+        $radialSurface.Child = $menu
+        $hoverKey = [Windows.UIElement].GetField('IsMouseOverPropertyKey', [Reflection.BindingFlags]'NonPublic,Static').GetValue($null)
+        try {
+            $previewWidth = [int]$menu.Width + 20
+            $previewHeight = [int]$menu.Height + 20
+            Assert-Edit ($menu.Width -le 88 -and $menu.Height -le 152) 'Radial actions use the compact footprint without scaling down label text.'
+            $radialSurface.Measure((New-Object Windows.Size($previewWidth,$previewHeight)))
+            $radialSurface.Arrange((New-Object Windows.Rect(0,0,$previewWidth,$previewHeight)))
+            $radialSurface.UpdateLayout()
+            $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::Background)
+            foreach ($probe in @(@(40,42,'CopyButton'), @(40,106,'DeleteButton'), @(20,76,''), @(60,76,''), @(86,2,''))) {
+                # Offscreen visuals have IsVisible=false because no HWND is
+                # created. Validate the actual template hit-test clips instead.
+                $hitName = ''
+                foreach ($buttonName in @('CopyButton','DeleteButton')) {
+                    $button = $menu.FindName($buttonName)
+                    [void]$button.ApplyTemplate()
+                    $clip = [Windows.Media.VisualTreeHelper]::GetChild($button,0).Clip
+                    Assert-Edit ($null -ne $clip) 'Radial button template clips its real interactive surface.'
+                    $point = $menu.TranslatePoint((New-Object Windows.Point($probe[0],$probe[1])), $button)
+                    if ($clip.FillContains($point)) { $hitName = $buttonName }
+                }
+                Assert-Edit ($hitName -eq $probe[2]) "Radial sector hit-testing respects the center hole and separator ($theme $($probe[0]),$($probe[1]))."
+            }
+            $deleteButton = $menu.FindName('DeleteButton')
+            Assert-Edit ($deleteButton.Foreground.ToString() -eq $app.TryFindResource('AppDangerBrush').ToString()) "Radial delete keeps its danger color ($theme)."
+            foreach ($buttonName in @('CopyButton','DeleteButton')) {
+                $button = $menu.FindName($buttonName)
+                $label = $button.Content.Children[1]
+                $face = New-Object Windows.Media.Typeface($label.FontFamily,$label.FontStyle,$label.FontWeight,$label.FontStretch)
+                $formatted = New-Object Windows.Media.FormattedText($label.Text,[Globalization.CultureInfo]::GetCultureInfo($language),$label.FlowDirection,$face,$label.FontSize,$label.Foreground)
+                $position = $label.TranslatePoint((New-Object Windows.Point(0,0)),$button)
+                $glyphs = $formatted.BuildGeometry($position)
+                $clip = [Windows.Media.VisualTreeHelper]::GetChild($button,0).Clip
+                $clippedGlyphs = [Windows.Media.Geometry]::Combine($glyphs,$clip,[Windows.Media.GeometryCombineMode]::Exclude,$null)
+                Assert-Edit ($clippedGlyphs.GetArea() -lt 0.1) "The compact arc does not crop label glyphs ($theme $language $buttonName)."
+            }
+            foreach ($state in @('Normal','Copy','Delete')) {
+                $menu.FindName('CopyButton').SetValue($hoverKey, ($state -eq 'Copy'))
+                $deleteButton.SetValue($hoverKey, ($state -eq 'Delete'))
+                $radialSurface.UpdateLayout()
+                foreach ($buttonName in @('CopyButton','DeleteButton')) {
+                    $button = $menu.FindName($buttonName)
+                    $fill = $button.Template.FindName('SectorFill',$button)
+                    $outline = $button.Template.FindName('Sector',$button)
+                    $expectedOpacity = if (($buttonName -eq 'CopyButton' -and $state -eq 'Copy') -or ($buttonName -eq 'DeleteButton' -and $state -eq 'Delete')) { 0.92 } else { 0.78 }
+                    Assert-Edit ([Math]::Abs($fill.Opacity - $expectedOpacity) -lt 0.001) "Only the sector background fades, with stronger hover contrast ($theme $state $buttonName)."
+                    Assert-Edit ($button.Opacity -eq 1 -and $button.Content.Opacity -eq 1 -and $outline.Opacity -eq 1) 'Radial icons, labels and outline remain fully opaque.'
+                }
+                $bitmap = New-Object Windows.Media.Imaging.RenderTargetBitmap($previewWidth,$previewHeight,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+                $bitmap.Render($radialSurface)
+                if ($state -eq 'Normal') {
+                    $transparentBitmap = New-Object Windows.Media.Imaging.RenderTargetBitmap([int]$menu.Width,[int]$menu.Height,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+                    $transparentBitmap.Render($menu)
+                    $pixel = New-Object byte[] 4
+                    $transparentBitmap.CopyPixels((New-Object Windows.Int32Rect(70,65,1,1)),$pixel,4,0)
+                    Assert-Edit ($pixel[3] -ge 180 -and $pixel[3] -le 205) "Rendered sector pixels preserve real background transparency ($theme $language)."
+                }
+                $encoder = New-Object Windows.Media.Imaging.PngBitmapEncoder
+                $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+                $previewPath = Join-Path $previewDir "radial-$theme-$state-$language.png"
+                $stream = [IO.File]::Open($previewPath,[IO.FileMode]::Create)
+                try { $encoder.Save($stream) } finally { $stream.Dispose() }
+                Write-Host "RENDER $previewPath"
+            }
+        }
+        finally {
+            $menu.FindName('CopyButton').ClearValue($hoverKey)
+            $menu.FindName('DeleteButton').ClearValue($hoverKey)
+            $radialSurface.Child = $null
+            $popup.Child = $menu
+        }
+    }
     function Test-DragHandleAlignment($handle, $container, [string]$theme) {
         # Exercise the real WPF template offscreen, without stealing focus or
         # moving the user's mouse. The icon must stay at the border's center.
@@ -259,6 +371,11 @@ try {
         Assert-Edit ($null -ne $handle -and [Windows.Automation.AutomationProperties]::GetName($handle).Length -gt 0) "An accessible six-dot drag handle is rendered ($theme)."
         Assert-Edit ((Invoke-Reorder 'GetQuickSendNavigationColumnFromSource' ([object[]]@($handle))) -eq -1) 'The drag handle cannot be treated as a serial-send keyboard cell.'
         Test-DragHandleAlignment $handle $container $theme
+        foreach ($language in @('zh-CN','en-US')) {
+            [void]$globalType.GetMethod('LoadLanguageFile').Invoke($null, @($language))
+            Test-RadialMenu $theme $language
+        }
+        [void]$globalType.GetMethod('LoadLanguageFile').Invoke($null, @('zh-CN'))
         [void](Invoke-Reorder 'BeginQuickReorder' ([object[]]@($first)))
         $third = $list.ItemContainerGenerator.ContainerFromItem($rows[2])
         $position = $third.TranslatePoint((New-Object Windows.Point(8, ($third.ActualHeight * 0.75))), $list)

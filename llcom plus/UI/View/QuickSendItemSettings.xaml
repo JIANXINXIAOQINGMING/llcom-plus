@@ -78,19 +78,6 @@
                 </StackPanel>
             </Expander>
             <Border Height="1" Margin="0,12,0,8" Background="{DynamicResource AppGlassBorderBrush}" />
-            <UniformGrid Columns="2">
-                <Button x:Name="DuplicateCommandButton" Content="复制指令" Height="30" Padding="7,0" HorizontalAlignment="Left"
-                        ToolTip="复制本条指令及其设置 / Duplicate command" Click="DuplicateCommandButton_Click"
-                        Style="{StaticResource QuickSendInlineButtonStyle}"/>
-                <Button x:Name="DeleteCommandButton" Height="30" Padding="7,0" HorizontalAlignment="Left"
-                        Style="{StaticResource QuickSendInlineButtonStyle}" Foreground="{DynamicResource AppDangerBrush}"
-                        Click="DeleteCommandButton_Click" AutomationProperties.Name="{DynamicResource QuickSendRemoveItem}">
-                    <StackPanel Orientation="Horizontal">
-                        <fa:FontAwesome Icon="TrashOutline" FontSize="13" VerticalAlignment="Center" />
-                        <TextBlock Margin="7,0,0,0" Text="{DynamicResource QuickSendRemoveItem}" />
-                    </StackPanel>
-                </Button>
-            </UniformGrid>
             <TextBlock x:Name="ReorderHint" Margin="7,7,0,0" Foreground="{DynamicResource AppGlassMutedBrush}"
                        Text="{DynamicResource QuickSendDragHint}" TextWrapping="Wrap" />
         </StackPanel>

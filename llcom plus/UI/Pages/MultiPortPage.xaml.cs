@@ -1178,7 +1178,8 @@ namespace llcom_plus.Pages
                     return;
 
                 var visibilityChanged = profileSnapshot.showSend != profile.showSend ||
-                    profileSnapshot.showLineEndings != profile.showLineEndings;
+                    profileSnapshot.showLineEndings != profile.showLineEndings ||
+                    !Settings.LogPrefixOptionsEqual(profileSnapshot, profile);
                 applyingProfile = true;
                 try
                 {
@@ -1204,7 +1205,8 @@ namespace llcom_plus.Pages
                 if (profile != null)
                 {
                     var visibilityChanged = profileSnapshot.showSend != profile.showSend ||
-                        profileSnapshot.showLineEndings != profile.showLineEndings;
+                        profileSnapshot.showLineEndings != profile.showLineEndings ||
+                        !Settings.LogPrefixOptionsEqual(profileSnapshot, profile);
                     profileSnapshot = CloneProfile(profile);
                     if (useMainUart)
                         Global.uart.SetRuntimeProfileOverride(profileSnapshot);
@@ -2594,7 +2596,8 @@ namespace llcom_plus.Pages
                             ? null
                             : new ReceiveScriptContext { ScriptName = profile.recvScript }
                     },
-                    profile);
+                    profile,
+                    SelectedPortName);
                 if (!displayItem.IsVisible)
                     return;
 
@@ -2626,7 +2629,7 @@ namespace llcom_plus.Pages
                 packedLogItems.Add(item);
                 logCharCount += item.RetainedCharacterCount;
                 if (!item.IsSent || profileSnapshot.showSend)
-                    DataShowPage.AppendHistoryItem(logTextBox, item, ref plainDataParagraph, profileSnapshot.showLineEndings);
+                    DataShowPage.AppendHistoryItem(logTextBox, item, ref plainDataParagraph, profileSnapshot.showLineEndings, profileSnapshot);
                 TrimLog();
                 if (!owner.lockLogs && !owner.IsSearchActive)
                     logTextBox.ScrollToEnd();
@@ -2666,7 +2669,7 @@ namespace llcom_plus.Pages
                 plainDataParagraph = null;
                 foreach (var item in packedLogItems)
                     if (!item.IsSent || profileSnapshot.showSend)
-                        DataShowPage.AppendHistoryItem(logTextBox, item, ref plainDataParagraph, profileSnapshot.showLineEndings);
+                        DataShowPage.AppendHistoryItem(logTextBox, item, ref plainDataParagraph, profileSnapshot.showLineEndings, profileSnapshot);
                 if (!owner.lockLogs && !owner.IsSearchActive)
                     logTextBox.ScrollToEnd();
             }

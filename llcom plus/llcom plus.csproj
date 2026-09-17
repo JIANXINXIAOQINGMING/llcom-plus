@@ -441,6 +441,13 @@
     <Compile Include="UI\View\QuickSendItemSettings.xaml.cs">
       <DependentUpon>QuickSendItemSettings.xaml</DependentUpon>
     </Compile>
+    <Compile Include="UI\View\QuickCommandRadialMenu.xaml.cs">
+      <DependentUpon>QuickCommandRadialMenu.xaml</DependentUpon>
+    </Compile>
+    <Page Include="UI\View\QuickCommandRadialMenu.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="UI\View\QuickSendItemSettings.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>

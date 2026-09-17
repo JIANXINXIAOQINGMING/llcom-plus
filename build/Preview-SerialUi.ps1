@@ -86,7 +86,7 @@ function Test-InlineButtonHover([string]$language, [string]$theme) {
     # exercises the real template triggers without moving the user's mouse.
     $hoverKey = [Windows.UIElement].GetField('IsMouseOverPropertyKey', [Reflection.BindingFlags]'NonPublic,Static').GetValue($null)
     $sharedStyle = $app.TryFindResource('QuickSendInlineButtonStyle')
-    foreach ($name in @('DeleteCommandButton', 'CloseButton')) {
+    foreach ($name in @('CloseButton')) {
         $button = $editor.FindName($name)
         [void]$button.ApplyTemplate()
         $chrome = $button.Template.FindName('Chrome', $button)
@@ -105,10 +105,6 @@ function Test-InlineButtonHover([string]$language, [string]$theme) {
                 $chrome.BorderBrush.ToString() -ne $app.TryFindResource('AppGlassBorderBrush').ToString() -or
                 $chrome.BorderThickness.Left -le 0 -or $chrome.CornerRadius.TopLeft -le 0) {
                 throw "FAIL $name hover background/rounded outline is missing ($language/$theme)"
-            }
-            if ($name -eq 'DeleteCommandButton' -and
-                $button.Foreground.ToString() -ne $app.TryFindResource('AppDangerBrush').ToString()) {
-                throw 'FAIL Delete command lost its danger color'
             }
             if ($button.RenderSize -ne $originalSize) { throw "FAIL $name changes size on hover" }
             Render-Element $editor 350 "command-settings-hover-$name-$language-$theme" -KeepParent
@@ -228,9 +224,16 @@ if ($VerifyInteractions) {
     Assert-Ui ($settingsButton.Focusable -and [int]$columnMethod.Invoke($null, [object[]]@($settingsButton)) -eq 2 -and
         $null -eq $rowContainer.Template.FindName('QuickSendRowHexCheckBox', $rowContainer)) 'Each row has one accessible settings entry instead of separate option columns'
     [void]$setEditorItem.Invoke($editor, [object[]]@($rows[$rows.Count - 1]))
-    Click-UiButton $editor.FindName('DeleteCommandButton')
+    $windowType.GetField('quickActionsItem', $flags).SetValue($window, $rows[$rows.Count - 1])
+    $radialAnchor = New-Object Windows.Controls.Button
+    $radialAnchor.Tag = $rows[$rows.Count - 1]
+    $windowType.GetField('quickActionsAnchor', $flags).SetValue($window, $radialAnchor)
+    $window.FindName('QuickSendTab').IsSelected = $true
+    $windowType.GetField('quickActionsPage', $flags).SetValue($window, $settings.quickSendSelect)
+    $windowType.GetField('quickActionsGeneration', $flags).SetValue($window, $windowType.GetField('quickReorderGeneration', $flags).GetValue($window))
+    Click-UiButton $window.FindName('QuickCommandActionsMenu').FindName('DeleteButton')
     Assert-Ui ($rows.Count -eq $initialRowCount -and
-        $rows[0].text -eq 'UI regression sentinel - never sent') 'Delete inside settings affects only the selected test command'
+        $rows[0].text -eq 'UI regression sentinel - never sent') 'Delete in the radial menu affects only the selected test command'
 
     $first = $rows[0]
     $second = $rows[1]

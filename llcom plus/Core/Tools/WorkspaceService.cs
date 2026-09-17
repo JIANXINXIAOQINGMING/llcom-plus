@@ -78,7 +78,8 @@ namespace llcom_plus.Tools
             "parity", "timeout", "dataBits", "stopBit", "flowControl", "sendThrottlePacketSize",
             "sendThrottleDelayMs", "dtrWakeBeforeSend", "dtrWakeDelayMs", "dtrWakeIdleMs", "bitDelay",
             "maxLength", "sendScript", "recvScript", "terminal", "encoding", "extraEnter", "enterSend",
-            "enableSymbol", "showLineEndings", "rts", "dtr"
+            "enableSymbol", "showLineEndings", "logShowDate", "logShowTime", "logShowMilliseconds",
+            "logShowPort", "logTxLabel", "logRxLabel", "rts", "dtr"
         };
         private static readonly HashSet<string> allowedProfileFields = new HashSet<string>(profileFields, StringComparer.Ordinal);
         private static readonly JsonSerializerSettings jsonSettings = new JsonSerializerSettings
@@ -317,6 +318,14 @@ namespace llcom_plus.Tools
                 {
                     if (property.Value.Type != JTokenType.String) throw new InvalidDataException("无效脚本引用 / Invalid script reference.");
                     ValidateScriptName(property.Value.Value<string>());
+                }
+                else if (name == "logTxLabel" || name == "logRxLabel")
+                {
+                    if (property.Value.Type != JTokenType.String)
+                        throw new InvalidDataException("日志方向标识必须为文本 / Log direction must be text.");
+                    var label = property.Value.Value<string>();
+                    if (label.Length > 16 || Settings.NormalizeLogDirectionLabel(label, "") != label)
+                        throw new InvalidDataException("日志方向标识超长或包含控制字符 / Invalid log direction label.");
                 }
                 else if (name == "baudRate" || name == "showHexFormat" || name == "parity" || name == "timeout" ||
                     name == "dataBits" || name == "stopBit" || name == "flowControl" || name == "sendThrottlePacketSize" ||

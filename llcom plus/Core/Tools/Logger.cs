@@ -25,11 +25,31 @@ namespace llcom_plus.Tools
         //显示日志数据
         public static void ShowData(byte[] data, bool send, string sessionStringText = null, ReceiveScriptContext receiveScriptContext = null)
         {
+            ShowSerialData(data, send, sessionStringText, receiveScriptContext, CaptureMainPortName());
+        }
+
+        internal static string CaptureMainPortName()
+        {
+            // Snapshot the producing port before dispatcher queues or scripts run.
+            // Do not use the active split-pane profile for a real main-port event.
+            try
+            {
+                var port = Global.uart?.IsOpen() == true ? Global.uart.serial.PortName : null;
+                if (!string.IsNullOrWhiteSpace(port)) return port;
+            }
+            catch (InvalidOperationException) { }
+            return Global.setting?.ActiveUartProfileName ?? string.Empty;
+        }
+
+        internal static void ShowSerialData(byte[] data, bool send, string sessionStringText,
+            ReceiveScriptContext receiveScriptContext, string portName)
+        {
             var showData = new DataShowPara
             {
                 data = data,
                 send = send,
-                receiveScriptContext = receiveScriptContext
+                receiveScriptContext = receiveScriptContext,
+                portName = portName
             };
             WriteSessionLog(showData.time, send ? "send" : "recv", data, sessionStringText);
             // Display suppression must never suppress the on-disk session record.
@@ -628,6 +648,7 @@ namespace llcom_plus.Tools
     class DataShowPara : DataShow
     {
         public bool send;
+        public string portName;
         public ReceiveScriptContext receiveScriptContext;
     }
 

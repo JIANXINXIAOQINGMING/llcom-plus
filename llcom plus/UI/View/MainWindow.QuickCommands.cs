@@ -58,20 +58,21 @@ namespace llcom_plus
             ClearQuickSendUndo();
             FinishQuickCommandEdit(restored);
         }
-        private void QuickCommandDuplicate_Click(object sender, EventArgs e)
+        private void DuplicateQuickCommand(ToSendData original)
         {
-            var original = QuickSendItemSettingsEditor.Item;
             var index = toSendListItems.IndexOf(original);
             if (index < 0) return;
             if (toSendListItems.Count >= MaxQuickSendItemsPerPage)
             { Tools.MessageBox.Show("当前页指令数量已达上限。"); return; }
             var copy = CloneQuickCommand(QuickSendBackupItem.FromModel(original));
             CloseQuickSendItemSettings();
+            CloseQuickCommandActions();
             toSendListItems.Insert(index + 1, copy);
             FinishQuickCommandEdit(copy);
         }
         private void FinishQuickCommandEdit(ToSendData item)
         {
+            CloseQuickCommandActions();
             CheckToSendListId();
             SaveSendList(null, EventArgs.Empty);
             toSendList.SelectedItem = item;

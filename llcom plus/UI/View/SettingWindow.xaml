@@ -55,6 +55,36 @@
                             Content="{DynamicResource SettingShowSend}"
                             ToolTip="{DynamicResource SettingShowSendTip}"
                             IsChecked="{Binding showSend}" />
+                        <Expander x:Name="LogPrefixExpander" Margin="5" Header="{DynamicResource SettingLogPrefix}">
+                            <StackPanel Margin="8,6,8,8">
+                                <WrapPanel>
+                                    <CheckBox x:Name="LogPrefixDateCheckBox" Margin="0,3,12,3" Content="{DynamicResource SettingLogDate}" IsChecked="{Binding LogShowDate}" />
+                                    <CheckBox x:Name="LogPrefixTimeCheckBox" Margin="0,3,12,3" Content="{DynamicResource SettingLogTime}" IsChecked="{Binding LogShowTime}" />
+                                    <CheckBox x:Name="LogPrefixMillisecondsCheckBox" Margin="0,3,12,3" Content="{DynamicResource SettingLogMilliseconds}" IsChecked="{Binding LogShowMilliseconds}" IsEnabled="{Binding LogShowTime}" />
+                                    <CheckBox x:Name="LogPrefixPortCheckBox" Margin="0,3,12,3" Content="COM" IsChecked="{Binding LogShowPort}" />
+                                </WrapPanel>
+                                <Grid Margin="0,5,0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Margin="0,0,6,0" VerticalAlignment="Center" Text="TX" />
+                                    <TextBox x:Name="LogPrefixTxTextBox" Grid.Column="1" MinWidth="70" MaxLength="16" Text="{Binding LogTxLabel, UpdateSourceTrigger=PropertyChanged}" ToolTip="{DynamicResource SettingLogDirectionTip}" />
+                                    <TextBlock Grid.Column="2" Margin="12,0,6,0" VerticalAlignment="Center" Text="RX" />
+                                    <TextBox x:Name="LogPrefixRxTextBox" Grid.Column="3" MinWidth="70" MaxLength="16" Text="{Binding LogRxLabel, UpdateSourceTrigger=PropertyChanged}" ToolTip="{DynamicResource SettingLogDirectionTip}" />
+                                </Grid>
+                                <TextBlock Margin="0,4,0,5" Foreground="{DynamicResource AppGlassMutedBrush}" TextWrapping="Wrap" Text="{DynamicResource SettingLogPrefixTip}" />
+                                <Border Padding="8" BorderBrush="{DynamicResource AppGlassBorderBrush}" BorderThickness="1" CornerRadius="8">
+                                    <StackPanel>
+                                        <TextBlock Margin="0,0,0,4" Foreground="{DynamicResource AppGlassMutedBrush}" Text="{DynamicResource SettingLogPrefixPreview}" />
+                                        <TextBlock x:Name="LogPrefixPreviewText" FontFamily="Consolas,Microsoft YaHei" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Button Margin="0,6,0,0" HorizontalAlignment="Right" Click="ResetLogPrefixButton_Click" Content="{DynamicResource SettingLogPrefixReset}" />
+                            </StackPanel>
+                        </Expander>
                         <GroupBox Margin="5" Header="{DynamicResource SettingLogColors}">
                             <StackPanel Margin="6">
                                 <UniformGrid Columns="3">

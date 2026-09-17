@@ -22,6 +22,75 @@ namespace llcom_plus
         private Point quickReorderPointer;
         private bool quickReorderInside;
         private bool quickReorderNativeDrag;
+        private ToSendData quickActionsItem;
+        private Button quickActionsAnchor;
+        private int quickActionsPage;
+        private long quickActionsGeneration;
+
+        private void OpenQuickCommandActions(ToSendData item, Button anchor)
+        {
+            if (windowIsClosing || item == null || anchor == null || !toSendListItems.Contains(item) || !QuickSendTab.IsSelected) return;
+            if (QuickSendItemSettingsPopup.IsOpen && !QuickSendItemSettingsEditor.CommitWorkflowFields()) return;
+            CloseQuickSendItemSettings();
+            CloseQuickCommandActions();
+            quickActionsItem = item;
+            quickActionsAnchor = anchor;
+            quickActionsPage = Global.setting.quickSendSelect;
+            quickActionsGeneration = quickReorderGeneration;
+            QuickCommandActionsMenu.SetCanCopy(toSendListItems.Count < MaxQuickSendItemsPerPage);
+            QuickCommandActionsPopup.PlacementTarget = anchor;
+            var menuCenter = QuickCommandActionsMenu.AnchorCenter;
+            QuickCommandActionsPopup.HorizontalOffset = -anchor.ActualWidth / 2 - menuCenter.X;
+            QuickCommandActionsPopup.VerticalOffset = anchor.ActualHeight / 2 - menuCenter.Y;
+            QuickCommandActionsPopup.IsOpen = true;
+        }
+
+        private bool IsQuickCommandActionCurrent() => quickActionsItem != null && !windowIsClosing &&
+            QuickSendTab.IsSelected && quickActionsPage == Global.setting.quickSendSelect &&
+            quickActionsGeneration == quickReorderGeneration && toSendListItems.Contains(quickActionsItem) &&
+            ReferenceEquals(quickActionsAnchor?.Tag, quickActionsItem);
+
+        private void QuickSendList_ScrollChanged(object sender, ScrollChangedEventArgs e)
+        {
+            if (e.VerticalChange != 0 || e.HorizontalChange != 0 || e.ViewportHeightChange != 0 || e.ViewportWidthChange != 0)
+                CloseQuickCommandActions();
+        }
+
+        private void CloseQuickCommandActions(bool restoreFocus = false)
+        {
+            var anchor = quickActionsAnchor;
+            if (QuickCommandActionsPopup != null) QuickCommandActionsPopup.IsOpen = false;
+            quickActionsItem = null;
+            quickActionsAnchor = null;
+            if (restoreFocus && anchor?.IsVisible == true && !windowIsClosing) anchor.Focus();
+        }
+
+        private void QuickCommandActionsPopup_Closed(object sender, EventArgs e)
+        {
+            quickActionsItem = null;
+            quickActionsAnchor = null;
+        }
+
+        private void QuickCommandActions_Copy(object sender, EventArgs e)
+        {
+            var item = IsQuickCommandActionCurrent() ? quickActionsItem : null;
+            CloseQuickCommandActions();
+            if (item != null) DuplicateQuickCommand(item);
+        }
+
+        private void QuickCommandActions_Delete(object sender, EventArgs e)
+        {
+            var item = IsQuickCommandActionCurrent() ? quickActionsItem : null;
+            CloseQuickCommandActions();
+            if (item != null) RemoveQuickSendItem(item);
+        }
+
+        private void QuickCommandActions_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Escape) return;
+            CloseQuickCommandActions(restoreFocus: true);
+            e.Handled = true;
+        }
 
         // Private, non-serializable identity: no file/text drops, other windows,
         // or stale page contents can impersonate a local reorder operation.
@@ -35,6 +104,7 @@ namespace llcom_plus
 
         private void InvalidateQuickReorder()
         {
+            CloseQuickCommandActions();
             quickReorderGeneration++;
             ResetQuickReorder();
         }
@@ -53,6 +123,7 @@ namespace llcom_plus
 
         private QuickReorderSession BeginQuickReorder(ToSendData item)
         {
+            CloseQuickCommandActions();
             if (item == null || !toSendListItems.Contains(item) || windowIsClosing) return null;
             return quickReorderSession = new QuickReorderSession
             {
@@ -145,7 +216,14 @@ namespace llcom_plus
 
         private void QuickSendDragHandle_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (ReferenceEquals(sender, quickReorderHandle)) { ResetQuickReorder(); e.Handled = true; }
+            if (!ReferenceEquals(sender, quickReorderHandle)) return;
+            var handle = quickReorderHandle;
+            var session = quickReorderSession;
+            var point = e.GetPosition(handle);
+            var open = IsQuickReorderCurrent(session) && new Rect(handle.RenderSize).Contains(point);
+            ResetQuickReorder();
+            if (open) OpenQuickCommandActions(session.Item, handle);
+            e.Handled = true;
         }
 
         private void QuickSendDragHandle_LostCapture(object sender, MouseEventArgs e)
@@ -162,7 +240,16 @@ namespace llcom_plus
         private void QuickSendDragHandle_KeyDown(object sender, KeyEventArgs e)
         {
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
-            if (key == Key.Escape) { ResetQuickReorder(); e.Handled = true; return; }
+            if (key == Key.Escape) { ResetQuickReorder(); CloseQuickCommandActions(); e.Handled = true; return; }
+            if ((key == Key.Enter || key == Key.Space || key == Key.Apps) &&
+                sender is Button actionHandle && actionHandle.Tag is ToSendData actionItem)
+            {
+                ResetQuickReorder();
+                OpenQuickCommandActions(actionItem, actionHandle);
+                if (QuickCommandActionsPopup.IsOpen) QuickCommandActionsMenu.FocusFirstAction();
+                e.Handled = true;
+                return;
+            }
             if (Keyboard.Modifiers != ModifierKeys.Alt || key != Key.Up && key != Key.Down ||
                 !(sender is Button handle) || !(handle.Tag is ToSendData item)) return;
             ResetQuickReorder();
