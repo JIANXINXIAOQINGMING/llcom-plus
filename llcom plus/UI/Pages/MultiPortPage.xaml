@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:fa="http://schemas.fontawesome.io/icons/"
+    xmlns:views="clr-namespace:llcom_plus.Views"
     Title="MultiPortPage"
     Loaded="Page_Loaded"
     Unloaded="Page_Unloaded">
@@ -174,6 +175,7 @@
     <Grid x:Name="RootGrid" Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -196,11 +198,12 @@
 
         <Grid
             x:Name="SlotsGrid"
-            Grid.Row="1"
+            Grid.Row="2"
             ClipToBounds="False" />
+        <views:LogFindBar x:Name="SplitLogFindBar" Grid.Row="1" />
         <ToggleButton
             x:Name="ExternalOptionsButton"
-            Grid.RowSpan="2"
+            Grid.RowSpan="3"
             Margin="0,0,10,10"
             HorizontalAlignment="Right"
             VerticalAlignment="Bottom"
@@ -271,6 +274,12 @@
                             IsChecked="{Binding EnableSymbol}"
                             Style="{StaticResource SplitLogOptionCheckBoxStyle}"
                             ToolTip="{DynamicResource ShowSymbolTooltip}" />
+                        <CheckBox
+                            x:Name="ShowLineEndingsCheckBox"
+                            Content="{DynamicResource ShowLineEndings}"
+                            IsChecked="{Binding ShowLineEndings}"
+                            Style="{StaticResource SplitLogOptionCheckBoxStyle}"
+                            ToolTip="{DynamicResource ShowLineEndingsTooltip}" />
                         <CheckBox
                             x:Name="DisableLogCheckBox"
                             Content="{DynamicResource DisableLog}"

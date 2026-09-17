@@ -45,28 +45,16 @@ namespace llcom_plus.Pages
 
             public string ToPlainText()
             {
-                if (!PackedMode)
+                if (Items == null || Items.Count == 0)
                     return PlainText ?? string.Empty;
 
                 var text = new StringBuilder();
                 foreach (var item in Items ?? new List<DataShow>())
                 {
-                    text.Append(item.TimeText);
-                    text.Append(item.ArrowText);
-                    text.Append(item.DataText);
-                    text.Append(item.RawTitle);
-                    text.Append(item.RawText);
-                    text.Append(item.HexText);
-                    text.AppendLine();
+                    text.Append(item.ToLogText());
                 }
                 return text.ToString();
             }
-        }
-
-        private sealed class PlainLogSegment
-        {
-            public string Text { get; set; } = string.Empty;
-            public bool Sent { get; set; }
         }
 
         public DataShowPage()
@@ -82,9 +70,11 @@ namespace llcom_plus.Pages
         public bool LockLog { get; set; } = false;
         private bool loaded = false;
         private readonly List<DataShow> packedLogItems = new List<DataShow>();
-        private readonly List<PlainLogSegment> plainLogSegments = new List<PlainLogSegment>();
         private Paragraph plainLogParagraph;
         private int plainLogCharCount;
+        private bool displayedShowSend = true;
+        private bool displayedLineEndings = true;
+        private Settings subscribedSettings;
         private Window ownerWindow;
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
@@ -108,6 +98,10 @@ namespace llcom_plus.Pages
                 Rts = Tools.Global.uart.Rts;
                 Dtr = Tools.Global.uart.Dtr;
                 Tools.Global.UartProfileChangedEvent += Global_UartProfileChangedEvent;
+                subscribedSettings = Tools.Global.setting;
+                subscribedSettings.UartProcessingSettingsChanged += Settings_UartProcessingSettingsChanged;
+                displayedShowSend = subscribedSettings.showSend;
+                displayedLineEndings = subscribedSettings.ShowLineEndings;
 
                 LogOptionsButton.DataContext = Tools.Global.setting;
                 HexSendCheckBox.DataContext = Tools.Global.setting;
@@ -115,6 +109,7 @@ namespace llcom_plus.Pages
                 EnterSendCheckBox.DataContext = Tools.Global.setting;
                 DisableLogCheckBox.DataContext = Tools.Global.setting;
                 EnableSymbolCheckBox.DataContext = Tools.Global.setting;
+                ShowLineEndingsCheckBox.DataContext = Tools.Global.setting;
                 SessionLogCheckBox.DataContext = Tools.Global.setting;
                 SessionLogFolderButton.DataContext = Tools.Global.setting;
 
@@ -128,17 +123,25 @@ namespace llcom_plus.Pages
                 lastPackShowMode = Tools.Global.setting.timeout >= 0;
                 MainPackedTextBox.Visibility = lastPackShowMode ? Visibility.Visible : Visibility.Collapsed;
                 MainTextBox.Visibility = lastPackShowMode ? Visibility.Collapsed : Visibility.Visible;
+                // The cached page can be unloaded while split-pane settings change.
+                // Reapply the current filter when it is shown again without discarding history.
+                RebuildPackedLogDocument();
+                RebuildPlainLogDocument();
             });
             StartupProfiler.Mark("DataShowPage.Loaded exit");
         }
 
         private void DataShowPage_Unloaded(object sender, RoutedEventArgs e)
         {
+            CloseLogSearch();
             Unloaded -= DataShowPage_Unloaded;
             Tools.Logger.DataShowTask -= Logger_DataShowTask;
             Tools.Logger.DataClearEvent -= Logger_DataClearEvent;
             Tools.Global.LogColorsChanged -= Global_LogColorsChanged;
             Tools.Global.UartProfileChangedEvent -= Global_UartProfileChangedEvent;
+            if (subscribedSettings != null)
+                subscribedSettings.UartProcessingSettingsChanged -= Settings_UartProcessingSettingsChanged;
+            subscribedSettings = null;
             if (ownerWindow != null)
             {
                 ownerWindow.PreviewMouseDown -= OwnerWindow_PreviewMouseDown;
@@ -201,11 +204,53 @@ namespace llcom_plus.Pages
             {
                 Rts = Tools.Global.uart.Rts;
                 Dtr = Tools.Global.uart.Dtr;
+                RefreshTxVisibility();
             });
+        }
+
+        private void Settings_UartProcessingSettingsChanged(object sender, EventArgs e)
+        {
+            DoInvoke(RefreshTxVisibility);
+        }
+
+        private void RefreshTxVisibility()
+        {
+            var showSend = Tools.Global.setting?.showSend != false;
+            var lineEndings = Tools.Global.setting?.ShowLineEndings != false;
+            var packed = Tools.Global.setting?.timeout >= 0;
+            if (displayedShowSend == showSend && displayedLineEndings == lineEndings && lastPackShowMode == packed)
+                return;
+            displayedShowSend = showSend;
+            displayedLineEndings = lineEndings;
+            lastPackShowMode = packed;
+            MainPackedTextBox.Visibility = packed ? Visibility.Visible : Visibility.Collapsed;
+            MainTextBox.Visibility = packed ? Visibility.Collapsed : Visibility.Visible;
+            RebuildPackedLogDocument();
+            RebuildPlainLogDocument();
+            if (IsSearchActive)
+                ShowLogSearch();
         }
 
         //记录一下上次是不是分包显示的
         bool lastPackShowMode = false;
+
+        public bool IsSearchActive => LogSearchBar?.IsSearchActive == true;
+
+        public void ShowLogSearch()
+        {
+            LogSearchBar.Open(lastPackShowMode ? MainPackedTextBox : MainTextBox);
+        }
+
+        public void CloseLogSearch()
+        {
+            LogSearchBar?.Close();
+        }
+
+        private void LogSearchStateChanged(object sender, EventArgs e)
+        {
+            if (!IsSearchActive && !LockLog)
+                (lastPackShowMode ? MainPackedTextBox : MainTextBox)?.ScrollToEnd();
+        }
 
         public void SelectAllLog()
         {
@@ -231,10 +276,7 @@ namespace llcom_plus.Pages
             return new LogSnapshot
             {
                 PackedMode = lastPackShowMode,
-                PlainText = lastPackShowMode ? string.Empty : GetPlainLogText(),
-                Items = lastPackShowMode
-                    ? packedLogItems.Select(item => item.Clone()).ToList()
-                    : new List<DataShow>()
+                Items = packedLogItems.Select(item => item.Clone()).ToList()
             };
         }
 
@@ -247,7 +289,7 @@ namespace llcom_plus.Pages
             }
 
             var needPack = Tools.Global.setting?.timeout >= 0;
-            if (snapshot.PackedMode != needPack)
+            if (snapshot.Items == null || snapshot.Items.Count == 0)
             {
                 SetLogTextSnapshot(snapshot.ToPlainText());
                 return;
@@ -255,28 +297,13 @@ namespace llcom_plus.Pages
 
             lastPackShowMode = needPack;
             ClearLogDisplay();
-            if (needPack)
-            {
-                foreach (var item in snapshot.Items ?? new List<DataShow>())
-                {
-                    if (item?.IsVisible == true)
-                        AppendPackedLogItem(item.Clone());
-                }
-                MainPackedTextBox.Visibility = Visibility.Visible;
-                MainTextBox.Visibility = Visibility.Collapsed;
-                if (!LockLog)
-                    MainPackedTextBox.ScrollToEnd();
-                return;
-            }
-
-            var text = snapshot.PlainText ?? string.Empty;
-            if (text.Length > MaxPlainTextLogChars)
-                text = text.Substring(text.Length - MaxPlainTextLogChars);
-            SetPlainLogText(text);
-            MainPackedTextBox.Visibility = Visibility.Collapsed;
-            MainTextBox.Visibility = Visibility.Visible;
-            if (!LockLog)
-                MainTextBox.ScrollToEnd();
+            foreach (var item in snapshot.Items)
+                if (item?.IsVisible == true)
+                    AppendPackedLogItem(item.Clone());
+            MainPackedTextBox.Visibility = needPack ? Visibility.Visible : Visibility.Collapsed;
+            MainTextBox.Visibility = needPack ? Visibility.Collapsed : Visibility.Visible;
+            if (!LockLog && !IsSearchActive)
+                (needPack ? MainPackedTextBox : MainTextBox).ScrollToEnd();
         }
 
         public void SetLogTextSnapshot(string text)
@@ -295,39 +322,28 @@ namespace llcom_plus.Pages
                     AppendPackedLogItem(new DataShow(snapshot));
                 MainPackedTextBox.Visibility = Visibility.Visible;
                 MainTextBox.Visibility = Visibility.Collapsed;
-                if (!LockLog)
+                if (!LockLog && !IsSearchActive)
                     MainPackedTextBox.ScrollToEnd();
             }
             else
             {
-                SetPlainLogText(snapshot);
+                if (snapshot.Length > 0)
+                    AppendPackedLogItem(new DataShow(snapshot));
                 MainPackedTextBox.Visibility = Visibility.Collapsed;
                 MainTextBox.Visibility = Visibility.Visible;
-                if (!LockLog)
+                if (!LockLog && !IsSearchActive)
                     MainTextBox.ScrollToEnd();
             }
         }
 
         private string BuildPackedLogText()
         {
-            var text = new StringBuilder();
-            foreach (var item in packedLogItems)
-            {
-                text.Append(item.TimeText);
-                text.Append(item.ArrowText);
-                text.Append(item.DataText);
-                text.Append(item.RawTitle);
-                text.Append(item.RawText);
-                text.Append(item.HexText);
-                text.AppendLine();
-            }
-            return text.ToString();
+            return string.Concat(packedLogItems.Select(item => item.ToLogText()));
         }
 
         private void ClearLogDisplay()
         {
             packedLogItems.Clear();
-            plainLogSegments.Clear();
             plainLogParagraph = null;
             plainLogCharCount = 0;
             MainPackedTextBox.Document.Blocks.Clear();
@@ -339,8 +355,12 @@ namespace llcom_plus.Pages
             if (item?.IsVisible != true)
                 return;
 
+            item = item.LimitHistoryText(MaxPlainTextLogChars);
             packedLogItems.Add(item);
-            MainPackedTextBox.Document.Blocks.Add(CreateLogParagraph(item));
+            plainLogCharCount += item.RetainedCharacterCount;
+            if (Tools.Global.setting?.showSend != false || !item.IsSent)
+                AppendHistoryItem(lastPackShowMode ? MainPackedTextBox : MainTextBox, item, ref plainLogParagraph,
+                    Tools.Global.setting?.ShowLineEndings != false);
             TrimPackedLog();
         }
 
@@ -350,11 +370,34 @@ namespace llcom_plus.Pages
                 return;
 
             MainPackedTextBox.Document.Blocks.Clear();
+            if (!lastPackShowMode)
+                return;
+            plainLogParagraph = null;
             foreach (var item in packedLogItems)
-                MainPackedTextBox.Document.Blocks.Add(CreateLogParagraph(item));
+                if (Tools.Global.setting?.showSend != false || !item.IsSent)
+                    AppendHistoryItem(MainPackedTextBox, item, ref plainLogParagraph, Tools.Global.setting?.ShowLineEndings != false);
         }
 
-        internal static Paragraph CreateLogParagraph(DataShow item)
+        // Render from retained, direction-aware history. Hiding TX never mutates history.
+        internal static void AppendHistoryItem(System.Windows.Controls.RichTextBox target, DataShow item, ref Paragraph plainParagraph,
+            bool showLineEndings = true)
+        {
+            if (!item.IsPlainText)
+            {
+                plainParagraph = null;
+                target.Document.Blocks.Add(CreateLogParagraph(item, showLineEndings));
+                return;
+            }
+            if (plainParagraph == null)
+            {
+                plainParagraph = new Paragraph { Margin = new Thickness(0), FontFamily = new FontFamily("Consolas,Microsoft YaHei,微软雅黑"), FontSize = 15 };
+                target.Document.Blocks.Add(plainParagraph);
+            }
+            AppendLogTextRuns(plainParagraph, item.GetDisplayData(showLineEndings), Tools.Logger.GetLogDataBrush(item.IsSent), !item.IsSent, 15,
+                item.IsSent ? SentColorRole : ReceivedColorRole);
+        }
+
+        internal static Paragraph CreateLogParagraph(DataShow item, bool showLineEndings = true)
         {
             var paragraph = new Paragraph
             {
@@ -376,7 +419,7 @@ namespace llcom_plus.Pages
                 : item.DataTextColor ?? ResourceBrush("AppGlassTextBrush", SystemColors.ControlTextBrush);
             AppendLogTextRuns(
                 paragraph,
-                item.DataText,
+                item.GetDisplayData(showLineEndings),
                 dataBrush,
                 item.IsSerialData && !item.IsSent,
                 15,
@@ -388,7 +431,7 @@ namespace llcom_plus.Pages
                 FontWeight = FontWeights.Bold,
                 Foreground = ResourceBrush("AppGlassTextBrush", SystemColors.ControlTextBrush)
             });
-            AppendLogTextRuns(paragraph, item.RawText, item.RawTextColor, false, 15);
+            AppendLogTextRuns(paragraph, item.GetDisplayRaw(showLineEndings), item.RawTextColor, false, 15);
             AppendLogTextRuns(paragraph, item.HexText, item.HexTextColor, false, null);
             return paragraph;
         }
@@ -428,60 +471,24 @@ namespace llcom_plus.Pages
 
         private void Logger_DataShowTask(object sender, Tools.DataShow e)
         {
-            //先判断下要不要清空
-            var needPack = Tools.Global.setting.timeout >= 0;
-            if (lastPackShowMode != needPack)
+            // Keep direction-aware history even when TX is hidden. View changes never
+            // rerun receive scripts, touch the serial connection, or rewrite session files.
+            var data = e is DataShowRaw raw
+                ? new DataShow(raw.title, raw.data, raw.time, raw.color)
+                : new DataShow(e as DataShowPara);
+            if (data?.IsVisible == true)
             {
-                lastPackShowMode = needPack;
+                if (Tools.Global.setting.timeout < 0 && e is DataShowPara serialData)
+                {
+                    data = data.AsPlainText(Tools.Global.setting.showHexFormat == 2);
+                }
                 DoInvoke(() =>
                 {
-                    ClearLogDisplay();
-                    MainPackedTextBox.Visibility = needPack ? Visibility.Visible : Visibility.Collapsed;
-                    MainTextBox.Visibility = needPack ? Visibility.Collapsed : Visibility.Visible;
+                    RefreshTxVisibility();
+                    AppendPackedLogItem(data);
+                    if (!LockLog && !IsSearchActive)
+                        (lastPackShowMode ? MainPackedTextBox : MainTextBox).ScrollToEnd();
                 });
-            }
-
-            //如果不开回显，就别打印
-            if(!Tools.Global.setting.showSend && e is DataShowPara para && para.send)
-                return;
-
-            //显示到列表
-            if (!needPack && e is not DataShowRaw)//不分包模式
-            {
-                var displayData = e.data;
-                if (e is DataShowPara showPara && !showPara.send)
-                {
-                    displayData = ApplyReceiveScript(displayData, showPara);
-                    if (displayData == null || displayData.Length == 0)
-                        return;
-                }
-
-                var DataText = Tools.Global.setting.showHexFormat switch
-                {
-                    2 => Tools.Global.Byte2Hex(displayData, " ", displayData.Length) + " ",
-                    _ => Tools.Global.Byte2Readable(displayData, displayData.Length),
-                };
-                DoInvoke(() =>
-                {
-                    AppendPlainLogSegment(DataText, e is DataShowPara serialData && serialData.send);
-                    if (!LockLog)
-                        MainTextBox.ScrollToEnd();
-                });
-            }
-            else//分包模式
-            {
-                var data = e is DataShowRaw ? 
-                    new DataShow((e as DataShowRaw).title, e.data, e.time, (e as DataShowRaw).color) :
-                    new DataShow(e as DataShowPara);
-                if (data != null && data.IsVisible)
-                {
-                    DoInvoke(() =>
-                    {
-                        AppendPackedLogItem(data);
-                        if (!LockLog)
-                            MainPackedTextBox.ScrollToEnd();
-                    });
-                }
             }
         }
 
@@ -505,54 +512,7 @@ namespace llcom_plus.Pages
 
         private string GetPlainLogText()
         {
-            return string.Concat(plainLogSegments.Select(segment => segment.Text));
-        }
-
-        private void SetPlainLogText(string text)
-        {
-            plainLogSegments.Clear();
-            plainLogCharCount = 0;
-            var value = text ?? string.Empty;
-            if (value.Length > MaxPlainTextLogChars)
-                value = value.Substring(value.Length - MaxPlainTextLogChars);
-            if (value.Length > 0)
-            {
-                plainLogSegments.Add(new PlainLogSegment { Text = value, Sent = false });
-                plainLogCharCount = value.Length;
-            }
-            RebuildPlainLogDocument();
-        }
-
-        private void AppendPlainLogSegment(string text, bool sent)
-        {
-            if (string.IsNullOrEmpty(text))
-                return;
-
-            var segment = new PlainLogSegment { Text = text, Sent = sent };
-            plainLogSegments.Add(segment);
-            plainLogCharCount += text.Length;
-            EnsurePlainLogParagraph();
-            AppendLogTextRuns(
-                plainLogParagraph,
-                text,
-                Tools.Logger.GetLogDataBrush(sent),
-                !sent,
-                15,
-                sent ? SentColorRole : ReceivedColorRole);
-            TrimPlainTextLog();
-        }
-
-        private void EnsurePlainLogParagraph()
-        {
-            if (plainLogParagraph != null)
-                return;
-            plainLogParagraph = new Paragraph
-            {
-                Margin = new Thickness(0),
-                FontFamily = new FontFamily("Consolas,Microsoft YaHei,微软雅黑"),
-                FontSize = 15
-            };
-            MainTextBox.Document.Blocks.Add(plainLogParagraph);
+            return BuildPackedLogText();
         }
 
         private void RebuildPlainLogDocument()
@@ -561,58 +521,41 @@ namespace llcom_plus.Pages
                 return;
 
             MainTextBox.Document.Blocks.Clear();
+            if (lastPackShowMode)
+                return;
             plainLogParagraph = null;
-            if (plainLogSegments.Count == 0)
-                return;
-
-            EnsurePlainLogParagraph();
-            foreach (var segment in plainLogSegments)
-            {
-                AppendLogTextRuns(
-                    plainLogParagraph,
-                    segment.Text,
-                    Tools.Logger.GetLogDataBrush(segment.Sent),
-                    !segment.Sent,
-                    15,
-                    segment.Sent ? SentColorRole : ReceivedColorRole);
-            }
-        }
-
-        private void TrimPlainTextLog()
-        {
-            if (plainLogCharCount <= MaxPlainTextLogChars)
-                return;
-
-            var charsToRemove = Math.Max(
-                PlainTextTrimChars,
-                plainLogCharCount - MaxPlainTextLogChars);
-            while (charsToRemove > 0 && plainLogSegments.Count > 0)
-            {
-                var first = plainLogSegments[0];
-                if (first.Text.Length <= charsToRemove)
-                {
-                    charsToRemove -= first.Text.Length;
-                    plainLogCharCount -= first.Text.Length;
-                    plainLogSegments.RemoveAt(0);
-                    continue;
-                }
-
-                first.Text = first.Text.Substring(charsToRemove);
-                plainLogCharCount -= charsToRemove;
-                charsToRemove = 0;
-            }
-            RebuildPlainLogDocument();
+            foreach (var item in packedLogItems)
+                if (Tools.Global.setting?.showSend != false || !item.IsSent)
+                    AppendHistoryItem(MainTextBox, item, ref plainLogParagraph, Tools.Global.setting?.ShowLineEndings != false);
         }
 
         private void TrimPackedLog()
         {
-            var removeCount = packedLogItems.Count - MaxPackedLogItems;
-            for (var i = 0; i < removeCount; i++)
+            if (!TrimHistory(packedLogItems, ref plainLogCharCount, MaxPlainTextLogChars, PlainTextTrimChars))
+                return;
+            RebuildPackedLogDocument();
+            RebuildPlainLogDocument();
+        }
+
+        internal static bool TrimHistory(List<DataShow> items, ref int characters, int limit, int trimSize)
+        {
+            if (items.Count <= MaxPackedLogItems && characters <= limit)
+                return false;
+            var target = characters > limit ? Math.Max(0, limit - trimSize) : limit;
+            while (items.Count > 1 && (items.Count > MaxPackedLogItems || characters > target))
             {
-                packedLogItems.RemoveAt(0);
-                if (MainPackedTextBox.Document.Blocks.FirstBlock != null)
-                    MainPackedTextBox.Document.Blocks.Remove(MainPackedTextBox.Document.Blocks.FirstBlock);
+                // Evict whole records to retain direction and ordering; disk logs are independent.
+                characters -= items[0].RetainedCharacterCount;
+                items.RemoveAt(0);
             }
+            // A single large packet must not make the display/history completely empty.
+            // Retain its bounded tail with its TX/RX identity; full bytes remain on disk.
+            if (items.Count == 1 && characters > limit)
+            {
+                items[0] = items[0].LimitHistoryText(limit);
+                characters = items[0].RetainedCharacterCount;
+            }
+            return true;
         }
 
         private static byte[] ApplyReceiveScript(
@@ -743,6 +686,7 @@ namespace llcom_plus.Pages
         {
             public bool IsVisible { get; private set; }
             public bool IsRestoredSnapshot { get; private set; }
+            internal bool IsPlainText { get; private set; }
             public string TimeText { get; set; }
             public string ArrowText { get; set; }
             public string DataText { get; set; }
@@ -760,7 +704,64 @@ namespace llcom_plus.Pages
             public SolidColorBrush HexTextColor { get; set; }
             internal bool IsSerialData { get; set; }
             internal bool IsSent { get; set; }
+            // Preserve both display projections; never remove literal backslash text,
+            // rerun receive scripts, or change the canonical export/session record.
+            private string dataWithLineEndings;
+            private string dataWithoutLineEndings;
+            private string rawWithLineEndings;
+            private string rawWithoutLineEndings;
 
+            internal string GetDisplayData(bool show) => (show ? dataWithLineEndings : dataWithoutLineEndings) ?? DataText;
+            internal string GetDisplayRaw(bool show) => (show ? rawWithLineEndings : rawWithoutLineEndings) ?? RawText;
+
+            // Charge the largest projection to the display budget, including markers.
+            // Compute lengths without allocating another full copy of every record.
+            internal int RetainedCharacterCount
+            {
+                get
+                {
+                    if (IsRestoredSnapshot) return RawText?.Length ?? 0;
+                    var dataLength = Math.Max(DataText?.Length ?? 0,
+                        Math.Max(GetDisplayData(true)?.Length ?? 0, GetDisplayData(false)?.Length ?? 0));
+                    if (IsPlainText) return dataLength;
+                    var rawLength = Math.Max(RawText?.Length ?? 0,
+                        Math.Max(GetDisplayRaw(true)?.Length ?? 0, GetDisplayRaw(false)?.Length ?? 0));
+                    return dataLength + rawLength + (TimeText?.Length ?? 0) + (ArrowText?.Length ?? 0) +
+                        (RawTitle?.Length ?? 0) + (HexText?.Length ?? 0) + Environment.NewLine.Length;
+                }
+            }
+
+            internal DataShow AsPlainText(bool hexSpace)
+            {
+                var result = Clone();
+                result.IsPlainText = true;
+                result.TimeText = result.ArrowText = result.HexText = null;
+                if (hexSpace && !string.IsNullOrEmpty(result.DataText)) result.DataText += " ";
+                return result;
+            }
+
+            internal string ToLogText()
+            {
+                if (IsPlainText)
+                    return DataText ?? string.Empty;
+                if (IsRestoredSnapshot)
+                    return RawText ?? string.Empty;
+                return (TimeText ?? string.Empty) + (ArrowText ?? string.Empty) +
+                    (DataText ?? string.Empty) + (RawTitle ?? string.Empty) +
+                    (RawText ?? string.Empty) + (HexText ?? string.Empty) + Environment.NewLine;
+            }
+
+            internal static DataShow CreatePlain(string text, bool sent)
+            {
+                return new DataShow
+                {
+                    IsVisible = !string.IsNullOrEmpty(text),
+                    IsPlainText = true,
+                    IsSerialData = true,
+                    IsSent = sent,
+                    DataText = text ?? string.Empty
+                };
+            }
 
             internal DataShow Clone()
             {
@@ -768,6 +769,7 @@ namespace llcom_plus.Pages
                 {
                     IsVisible = IsVisible,
                     IsRestoredSnapshot = IsRestoredSnapshot,
+                    IsPlainText = IsPlainText,
                     TimeText = TimeText,
                     ArrowText = ArrowText,
                     DataText = DataText,
@@ -778,8 +780,41 @@ namespace llcom_plus.Pages
                     HexText = HexText,
                     HexTextColor = HexTextColor,
                     IsSerialData = IsSerialData,
-                    IsSent = IsSent
+                    IsSent = IsSent,
+                    dataWithLineEndings = dataWithLineEndings,
+                    dataWithoutLineEndings = dataWithoutLineEndings,
+                    rawWithLineEndings = rawWithLineEndings,
+                    rawWithoutLineEndings = rawWithoutLineEndings
                 };
+            }
+
+            internal DataShow LimitHistoryText(int limit)
+            {
+                if (RetainedCharacterCount <= limit)
+                    return this;
+                var text = ToLogText();
+                var start = Math.Max(0, text.Length - limit);
+                if (start > 0 && char.IsLowSurrogate(text[start]) && char.IsHighSurrogate(text[start - 1]))
+                    start++;
+                var retained = CreatePlain(text.Substring(start), IsSent);
+                retained.IsSerialData = IsSerialData;
+                if (dataWithLineEndings != null || rawWithLineEndings != null)
+                {
+                    retained.dataWithLineEndings = TailDisplayText(true, limit);
+                    retained.dataWithoutLineEndings = TailDisplayText(false, limit);
+                }
+                return retained;
+            }
+
+            private string TailDisplayText(bool show, int limit)
+            {
+                var value = IsPlainText ? GetDisplayData(show) :
+                    (TimeText ?? "") + (ArrowText ?? "") + (GetDisplayData(show) ?? "") +
+                    (RawTitle ?? "") + (GetDisplayRaw(show) ?? "") + (HexText ?? "") + Environment.NewLine;
+                if (value.Length <= limit) return value;
+                var start = value.Length - limit;
+                if (start > 0 && char.IsLowSurrogate(value[start]) && char.IsHighSurrogate(value[start - 1])) start++;
+                return value.Substring(start);
             }
 
             internal static DataShow CreateStatus(string timeText, string direction, string text, SolidColorBrush color)
@@ -843,6 +878,11 @@ namespace llcom_plus.Pages
                         2 => Tools.Global.Byte2Hex(temp, " ", len),
                         _ => Tools.Global.Byte2Readable(temp, len, encoding, enableSymbol),
                     };
+                    if (showHexFormat != 2)
+                    {
+                        dataWithLineEndings = Tools.Global.Byte2LogDisplay(temp, len, encoding, enableSymbol, true);
+                        dataWithoutLineEndings = Tools.Global.Byte2LogDisplay(temp, len, encoding, enableSymbol, false);
+                    }
                     //同时显示模式时，才显示小字hex
                     if (showHexFormat == 0)
                         HexText = "\nHex: " + Tools.Global.Byte2Hex(temp, " ", len);
@@ -860,11 +900,18 @@ namespace llcom_plus.Pages
                 //主要数据
                 if (temp != null && temp.Length > 0)
                 {
-                    RawText = "\n" + Tools.Global.setting.showHexFormat switch
+                    RawText = "\n" + (Tools.Global.setting.showHexFormat switch
                     {
                         2 => Tools.Global.Byte2Hex(temp, " ", len),
                         _ => Tools.Global.Byte2Readable(temp, len),
-                    };
+                    });
+                    if (Tools.Global.setting.showHexFormat != 2)
+                    {
+                        rawWithLineEndings = "\n" + Tools.Global.Byte2LogDisplay(temp, len,
+                            Tools.Global.setting.encoding, Tools.Global.setting.EnableSymbol, true);
+                        rawWithoutLineEndings = "\n" + Tools.Global.Byte2LogDisplay(temp, len,
+                            Tools.Global.setting.encoding, Tools.Global.setting.EnableSymbol, false);
+                    }
                     //同时显示模式时，才显示小字hex
                     if (Tools.Global.setting.showHexFormat == 0)
                         HexText = "\nHex: " + Tools.Global.Byte2Hex(temp, " ", len);
@@ -893,6 +940,13 @@ namespace llcom_plus.Pages
                 using (var fs = new FileStream(saveFilePath, FileMode.Create))
                 using (var sw = new StreamWriter(fs, Encoding.UTF8))
                 {
+                    WriteLogSnapshot(sw, needPack);
+                }
+            }
+        }
+
+        internal void WriteLogSnapshot(TextWriter sw, bool needPack)
+        {
                     if (!needPack)
                     {
                         sw.Write(GetPlainLogText());
@@ -901,6 +955,11 @@ namespace llcom_plus.Pages
                     {
                         foreach (var item in packedLogItems)
                         {
+                            if (item.IsPlainText)
+                            {
+                                sw.Write(item.DataText);
+                                continue;
+                            }
                             if (item.IsRestoredSnapshot)
                             {
                                 sw.Write(item.RawText);
@@ -921,8 +980,6 @@ namespace llcom_plus.Pages
                         sw.WriteLine("===== NOTIFICATIONS =====");
                         sw.Write(notificationText);
                     }
-                }
-            }
         }
 
         private void SessionLogFolderButton_Click(object sender, RoutedEventArgs e)

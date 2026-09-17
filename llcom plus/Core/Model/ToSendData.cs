@@ -20,10 +20,49 @@ namespace llcom_plus.Model
         private string _recvScriptPara = "";
         private bool _appendCrlf;
         private bool _disableSuggestion;
+        private int _responseMode;
+        private string _expectedResponse = "";
+        private int _responseTimeoutMs = 5000;
+        private int _responseRetries;
+        private bool _skipInWorkflow;
         // View-only state; never add derived UI fields to saved/imported data.
         [Newtonsoft.Json.JsonIgnore]
         public bool HasCustomOptions => hex || !appendCrlf || disableSuggestion ||
-            !string.IsNullOrWhiteSpace(recvScriptPath) || !string.IsNullOrWhiteSpace(recvScriptPara);
+            !string.IsNullOrWhiteSpace(recvScriptPath) || !string.IsNullOrWhiteSpace(recvScriptPara) ||
+            responseMode != 0 || !string.IsNullOrEmpty(expectedResponse) || skipInWorkflow ||
+            responseTimeoutMs != 5000 || responseRetries != 0;
+
+        // Additive fields keep legacy quick-send files as single-send commands.
+        public int responseMode
+        {
+            get => _responseMode;
+            set { _responseMode = value; Changed(nameof(responseMode)); }
+        }
+        public string expectedResponse
+        {
+            get => _expectedResponse;
+            set { _expectedResponse = value ?? ""; Changed(nameof(expectedResponse)); }
+        }
+        public int responseTimeoutMs
+        {
+            get => _responseTimeoutMs;
+            set { _responseTimeoutMs = value; Changed(nameof(responseTimeoutMs)); }
+        }
+        public int responseRetries
+        {
+            get => _responseRetries;
+            set { _responseRetries = value; Changed(nameof(responseRetries)); }
+        }
+        public bool skipInWorkflow
+        {
+            get => _skipInWorkflow;
+            set { _skipInWorkflow = value; Changed(nameof(skipInWorkflow)); }
+        }
+        private void Changed(string property)
+        {
+            DataChanged?.Invoke(0, EventArgs.Empty);
+            OnPropertyChanged(property);
+        }
         public int id
         {
             get
@@ -129,7 +168,9 @@ namespace llcom_plus.Model
             this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
             if (propertyName == nameof(hex) || propertyName == nameof(appendCrlf) ||
                 propertyName == nameof(disableSuggestion) || propertyName == nameof(recvScriptPath) ||
-                propertyName == nameof(recvScriptPara))
+                propertyName == nameof(recvScriptPara) || propertyName == nameof(responseMode) ||
+                propertyName == nameof(expectedResponse) || propertyName == nameof(responseTimeoutMs) ||
+                propertyName == nameof(responseRetries) || propertyName == nameof(skipInWorkflow))
                 this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasCustomOptions)));
         }
     }

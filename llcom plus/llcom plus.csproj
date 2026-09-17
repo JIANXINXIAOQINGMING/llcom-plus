@@ -288,6 +288,32 @@
     <Compile Include="Core\Tools\EditorTheme.cs" />
     <Compile Include="Core\Tools\SshCli.cs" />
     <Compile Include="Core\Tools\SerialPinMonitor.cs" />
+    <Compile Include="Core\Tools\SerialTraceHub.cs" />
+    <Compile Include="Core\Tools\LogTextSearch.cs" />
+    <Compile Include="Core\Tools\QuickSendWorkflow.cs" />
+    <Compile Include="UI\View\LogFindBar.xaml.cs">
+      <DependentUpon>LogFindBar.xaml</DependentUpon>
+    </Compile>
+    <Page Include="UI\View\LogFindBar.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Compile Include="UI\View\MainWindow.LogAnalysis.cs" />
+    <Compile Include="UI\View\MainWindow.QuickWorkflow.cs" />
+    <Compile Include="Core\Tools\SerialTraceQuery.cs" />
+    <Compile Include="Core\Tools\PlotWorkflow.cs" />
+    <Compile Include="Core\Tools\SerialTestRunner.cs" />
+    <Compile Include="Core\Tools\WorkspaceService.cs" />
+    <Compile Include="UI\View\MainWindow.Toolbox.cs" />
+    <Compile Include="UI\View\MainWindow.Workspaces.cs" />
+    <Compile Include="UI\View\MainWindow.QuickCommands.cs" />
+    <Compile Include="UI\View\MainWindow.QuickReorder.cs" />
+    <Compile Include="UI\Pages\WorkspacePage.xaml.cs">
+      <DependentUpon>WorkspacePage.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\Pages\LogAnalysisPage.xaml.cs">
+      <DependentUpon>LogAnalysisPage.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Core\Tools\StartupProfiler.cs" />
     <Compile Include="Core\Tools\TaskbarIntegration.cs" />
     <Compile Include="Core\Tools\Win32.cs" />
@@ -401,6 +427,14 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="UI\View\HttpToolWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\Pages\LogAnalysisPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\Pages\WorkspacePage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>

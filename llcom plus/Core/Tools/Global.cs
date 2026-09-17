@@ -59,6 +59,8 @@ namespace llcom_plus.Tools
         public bool ApplySendProcessing { get; set; } = true;
         public string SessionStringLogOverride { get; set; }
         public string SourceText { get; set; }
+        // Optional whole-job lease: automation must not follow a changed COM selection.
+        public string ExpectedTargetIdentity { get; set; }
     }
 
     /// <summary>
@@ -496,6 +498,9 @@ namespace llcom_plus.Tools
             if (snapshot == null || isMainWindowsClosed)
                 return;
 
+            SerialTraceHub.RecordEvent(snapshot.PortName, "", SerialTraceKind.Pin,
+                $"{string.Join(", ", snapshot.ChangedLines ?? Array.Empty<string>())} | CTS={snapshot.Cts} DSR={snapshot.Dsr} DCD={snapshot.Dcd} RI={snapshot.Ri}",
+                snapshot.Timestamp);
             SerialPinStatusChangedEvent?.Invoke(null, snapshot);
         }
 
@@ -523,6 +528,11 @@ namespace llcom_plus.Tools
                 Category = category,
                 PortName = portName ?? string.Empty
             };
+            if (category != AppNotificationCategory.SerialPin)
+                SerialTraceHub.RecordEvent(notification.PortName, "",
+                    level == AppNotificationLevel.Error ? SerialTraceKind.Error : SerialTraceKind.Info,
+                    notification.Title + (notification.Message.Length == 0 ? "" : " | " + notification.Message),
+                    notification.Timestamp);
             var handlers = AppNotificationEvent;
             if (handlers == null)
                 return;
@@ -627,7 +637,8 @@ namespace llcom_plus.Tools
                 IsHex = request.IsHex,
                 ApplySendProcessing = request.ApplySendProcessing,
                 SessionStringLogOverride = request.SessionStringLogOverride,
-                SourceText = request.SourceText
+                SourceText = request.SourceText,
+                ExpectedTargetIdentity = request.ExpectedTargetIdentity
             }, token);
         }
 
@@ -1425,6 +1436,40 @@ namespace llcom_plus.Tools
             }
             if (plainBytes.Count > 0)
                 text.Append(encoding.GetString(plainBytes.ToArray()));
+            return text.ToString();
+        }
+
+        // Display-only formatting: never use this projection for wire bytes or file logs.
+        // Decode first so CR/LF detection also works with multibyte encodings such as UTF-16.
+        internal static string Byte2LogDisplay(byte[] bytes, int length, int encodingCodePage,
+            bool enableSymbol, bool showLineEndings)
+        {
+            if (bytes == null) return string.Empty;
+            if (length < 0 || length > bytes.Length) length = bytes.Length;
+            var decoded = GetEncoding(encodingCodePage).GetString(bytes, 0, length);
+            var text = new StringBuilder(decoded.Length);
+            for (var index = 0; index < decoded.Length; index++)
+            {
+                var character = decoded[index];
+                if (character == '\r' && index + 1 < decoded.Length && decoded[index + 1] == '\n')
+                {
+                    if (showLineEndings) text.Append("\\r\\n");
+                    text.Append("\r\n");
+                    index++;
+                    continue;
+                }
+                if (character == '\r' || character == '\n')
+                {
+                    if (showLineEndings) text.Append(character == '\r' ? "\\r" : "\\n");
+                    text.Append(character);
+                }
+                else if (enableSymbol && encodingCodePage == 65001 && (character <= 0x1f || character == 0x7f))
+                {
+                    text.Append(Byte2VisibleSymbol((byte)character));
+                    if (character == '\t') text.Append(character);
+                }
+                else text.Append(character);
+            }
             return text.ToString();
         }
 

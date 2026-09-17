@@ -25,9 +25,6 @@ namespace llcom_plus.Tools
         //显示日志数据
         public static void ShowData(byte[] data, bool send, string sessionStringText = null, ReceiveScriptContext receiveScriptContext = null)
         {
-            //不刷新日志
-            if (Tools.Global.setting.DisableLog)
-                return;
             var showData = new DataShowPara
             {
                 data = data,
@@ -35,6 +32,9 @@ namespace llcom_plus.Tools
                 receiveScriptContext = receiveScriptContext
             };
             WriteSessionLog(showData.time, send ? "send" : "recv", data, sessionStringText);
+            // Display suppression must never suppress the on-disk session record.
+            if (Tools.Global.setting.DisableLog)
+                return;
             DataShowTask?.Invoke(null, showData);
         }
 

@@ -40,6 +40,7 @@ namespace llcom_plus.Model
         public bool extraEnter { get; set; } = false;
         public bool enterSend { get; set; } = false;
         public bool enableSymbol { get; set; } = true;
+        public bool showLineEndings { get; set; } = true;
         public bool rts { get; set; } = false;
         public bool dtr { get; set; } = false;
     }
@@ -157,6 +158,7 @@ namespace llcom_plus.Model
         private bool _extraEnter = false;
         private bool _enterSend = false;
         private bool _enableSymbol = true;
+        private bool _showLineEndings = true;
         private bool _showSerialByteCounts = true;
         private bool _sessionLogEnabled = false;
         private string _sessionLogFolder = "";
@@ -621,6 +623,75 @@ namespace llcom_plus.Model
             }
         }
 
+        /// <summary>
+        /// Applies one validated workspace in one settings-file transaction. The host
+        /// must first stop jobs/close every COM and suppress quick-send DataChanged
+        /// persistence while materializing the new rows. No connection is opened here.
+        /// Layout controls are refreshed by the host only after this method succeeds.
+        /// </summary>
+        internal void ApplyWorkspaceConfiguration(Tools.WorkspaceSnapshot workspace)
+        {
+            var incoming = Tools.WorkspaceService.Clone(workspace);
+            var nextRows = incoming.GetQuickSendState().CreateModelLists();
+            lock (saveLock)
+            {
+                EnsureUartProfiles();
+                var oldProfiles = uartProfiles.ToDictionary(p => p.Key,
+                    p => CreateNormalizedUartProfileSnapshot(p.Value), StringComparer.OrdinalIgnoreCase);
+                var oldPending = _uartProfilesPendingWrite.ToArray();
+                var oldCurrent = GetCurrentUartProfileSnapshot();
+                var oldActive = _activeUartProfileName;
+                var oldUsesMain = _activeUartProfileUsesMainUart;
+                var oldSplitCount = _serialSplitScreenCount;
+                var oldSuspend = _suspendSave;
+                GetQuickSendStateSnapshot(out var oldRows, out var oldNames, out var oldSelected);
+                try
+                {
+                    _suspendSave = true;
+                    foreach (var port in incoming.SerialProfiles.Keys)
+                    {
+                        uartProfiles[port] = incoming.GetPortProfile(port);
+                        _uartProfilesPendingWrite.Add(port);
+                    }
+                    var active = incoming.Layout.Ports.First(p => p.Slot == incoming.Layout.ActiveSlot);
+                    _activeUartProfileName = active.PortName.ToUpperInvariant();
+                    _activeUartProfileUsesMainUart = active.Slot == 1;
+                    if (!string.IsNullOrEmpty(_activeUartProfileName))
+                        ApplyUartProfile(uartProfiles[_activeUartProfileName]);
+                    _serialSplitScreenCount = incoming.Layout.SplitCount;
+                    lock (quickSendStateLock)
+                    {
+                        quickSendList = CopyQuickSendLists(nextRows);
+                        quickListNames = incoming.PageNames.ToList();
+                        _quickSendSelect = incoming.SelectedPage;
+                        EnsureQuickSendListStateUnsafe();
+                    }
+                    _suspendSave = false;
+                    // Do not copy stale previous-port controls over the imported profile.
+                    Save(false);
+                }
+                catch
+                {
+                    _suspendSave = true;
+                    uartProfiles = oldProfiles;
+                    _uartProfilesPendingWrite.Clear();
+                    foreach (var port in oldPending) _uartProfilesPendingWrite.Add(port);
+                    _activeUartProfileName = oldActive;
+                    _activeUartProfileUsesMainUart = oldUsesMain;
+                    ApplyUartProfile(oldCurrent);
+                    _serialSplitScreenCount = oldSplitCount;
+                    lock (quickSendStateLock)
+                    {
+                        quickSendList = oldRows;
+                        quickListNames = oldNames;
+                        _quickSendSelect = oldSelected;
+                    }
+                    throw;
+                }
+                finally { _suspendSave = oldSuspend; }
+            }
+        }
+
         public UartPortProfile GetUartProfileForPort(string portName)
         {
             return GetUartProfileSnapshot(portName);
@@ -674,6 +745,7 @@ namespace llcom_plus.Model
                 extraEnter = profile.extraEnter,
                 enterSend = profile.enterSend,
                 enableSymbol = profile.enableSymbol,
+                showLineEndings = profile.showLineEndings,
                 rts = profile.rts,
                 dtr = profile.dtr
             };
@@ -757,6 +829,7 @@ namespace llcom_plus.Model
                 extraEnter = _extraEnter,
                 enterSend = _enterSend,
                 enableSymbol = _enableSymbol,
+                showLineEndings = _showLineEndings,
                 rts = storedActiveProfile?.rts ?? Tools.Global.uart?.Rts ?? false,
                 dtr = storedActiveProfile?.dtr ?? Tools.Global.uart?.Dtr ?? false
             };
@@ -822,6 +895,7 @@ namespace llcom_plus.Model
                 extraEnter = profile.extraEnter;
                 enterSend = profile.enterSend;
                 EnableSymbol = profile.enableSymbol;
+                ShowLineEndings = profile.showLineEndings;
                 if (ControlsGlobalUart && Tools.Global.uart != null)
                 {
                     Tools.Global.uart.Rts = profile.rts;
@@ -863,6 +937,7 @@ namespace llcom_plus.Model
                 merged.extraEnter = _extraEnter;
                 merged.enterSend = _enterSend;
                 merged.enableSymbol = _enableSymbol;
+                merged.showLineEndings = _showLineEndings;
                 return CreateNormalizedUartProfileSnapshot(merged);
             }
         }
@@ -999,7 +1074,9 @@ namespace llcom_plus.Model
                     string.IsNullOrWhiteSpace(item.recvScriptPath) &&
                     string.IsNullOrWhiteSpace(item.recvScriptPara) &&
                     item.appendCrlf &&
-                    !item.disableSuggestion);
+                    !item.disableSuggestion &&
+                    item.responseMode == 0 && string.IsNullOrEmpty(item.expectedResponse) &&
+                    item.responseTimeoutMs == 5000 && item.responseRetries == 0 && !item.skipInWorkflow);
         }
 
         private static bool IsDefaultQuickSendButton(string value)
@@ -1730,6 +1807,16 @@ namespace llcom_plus.Model
             set
             {
                 _enableSymbol = value;
+                SaveUartProcessingSetting();
+            }
+        }
+
+        public bool ShowLineEndings
+        {
+            get => _showLineEndings;
+            set
+            {
+                _showLineEndings = value;
                 SaveUartProcessingSetting();
             }
         }

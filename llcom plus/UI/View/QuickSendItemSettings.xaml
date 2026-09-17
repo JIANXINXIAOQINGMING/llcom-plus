@@ -6,6 +6,7 @@
              Foreground="{DynamicResource AppGlassTextBrush}">
     <Border Padding="15" CornerRadius="10" BorderThickness="1"
             Background="{DynamicResource AppPopupBackground}" BorderBrush="{DynamicResource AppGlassBorderBrush}">
+        <ScrollViewer MaxHeight="580" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel KeyboardNavigation.TabNavigation="Cycle">
             <DockPanel LastChildFill="True">
                 <Button x:Name="CloseButton" DockPanel.Dock="Right" Width="28" Height="28" Padding="0"
@@ -46,15 +47,53 @@
                      VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
                      Text="{Binding recvScriptPara, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                      AutomationProperties.Name="{DynamicResource QuickSendSettingsParameters}" />
-            <Border Height="1" Margin="0,12,0,8" Background="{DynamicResource AppGlassBorderBrush}" />
-            <Button x:Name="DeleteCommandButton" Height="30" Padding="7,0" HorizontalAlignment="Left"
-                    Style="{StaticResource QuickSendInlineButtonStyle}" Foreground="{DynamicResource AppDangerBrush}"
-                    Click="DeleteCommandButton_Click" AutomationProperties.Name="{DynamicResource QuickSendRemoveItem}">
-                <StackPanel Orientation="Horizontal">
-                    <fa:FontAwesome Icon="TrashOutline" FontSize="13" VerticalAlignment="Center" />
-                    <TextBlock Margin="7,0,0,0" Text="{DynamicResource QuickSendRemoveItem}" />
+            <Expander Header="流程：等待回复" Margin="0,12,0,0" IsExpanded="False">
+                <StackPanel Margin="0,8,0,0">
+                    <TextBlock Text="仅“运行本页流程”使用；单条发送不受影响。" TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppGlassMutedBrush}" Margin="0,0,0,8"/>
+                    <CheckBox Content="流程中跳过这条指令" IsChecked="{Binding skipInWorkflow, Mode=TwoWay}" Margin="0,0,0,8"/>
+                    <ComboBox x:Name="ResponseModeComboBox" SelectedIndex="{Binding responseMode, Mode=TwoWay}"
+                              AutomationProperties.Name="流程回复匹配方式" Margin="0,0,0,8">
+                        <ComboBoxItem Content="不等待回复，发送后继续"/>
+                        <ComboBoxItem Content="收到包含指定文本的回复后继续"/>
+                        <ComboBoxItem Content="收到完整的一行后继续（推荐 OK）"/>
+                        <ComboBoxItem Content="回复匹配正则表达式后继续"/>
+                    </ComboBox>
+                    <TextBlock Text="预期回复（区分大小写）" Margin="0,0,0,5"/>
+                    <TextBox x:Name="ExpectedResponseTextBox" Height="54" MaxLength="1024" AcceptsReturn="True"
+                             TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"
+                             Text="{Binding expectedResponse, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             AutomationProperties.Name="预期回复"/>
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="8"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="超时（ms）" Margin="0,0,0,5"/>
+                            <TextBox x:Name="ResponseTimeoutTextBox" Text="{Binding responseTimeoutMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="回复超时毫秒"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock Text="超时重试次数" Margin="0,0,0,5"/>
+                            <TextBox x:Name="ResponseRetriesTextBox" Text="{Binding responseRetries, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}"
+                                     AutomationProperties.Name="超时重试次数" ToolTip="0 表示不重试；仅对可重复执行的指令启用重试。"/>
+                        </StackPanel>
+                    </Grid>
                 </StackPanel>
-            </Button>
+            </Expander>
+            <Border Height="1" Margin="0,12,0,8" Background="{DynamicResource AppGlassBorderBrush}" />
+            <UniformGrid Columns="2">
+                <Button x:Name="DuplicateCommandButton" Content="复制指令" Height="30" Padding="7,0" HorizontalAlignment="Left"
+                        ToolTip="复制本条指令及其设置 / Duplicate command" Click="DuplicateCommandButton_Click"
+                        Style="{StaticResource QuickSendInlineButtonStyle}"/>
+                <Button x:Name="DeleteCommandButton" Height="30" Padding="7,0" HorizontalAlignment="Left"
+                        Style="{StaticResource QuickSendInlineButtonStyle}" Foreground="{DynamicResource AppDangerBrush}"
+                        Click="DeleteCommandButton_Click" AutomationProperties.Name="{DynamicResource QuickSendRemoveItem}">
+                    <StackPanel Orientation="Horizontal">
+                        <fa:FontAwesome Icon="TrashOutline" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock Margin="7,0,0,0" Text="{DynamicResource QuickSendRemoveItem}" />
+                    </StackPanel>
+                </Button>
+            </UniformGrid>
+            <TextBlock x:Name="ReorderHint" Margin="7,7,0,0" Foreground="{DynamicResource AppGlassMutedBrush}"
+                       Text="{DynamicResource QuickSendDragHint}" TextWrapping="Wrap" />
         </StackPanel>
+        </ScrollViewer>
     </Border>
 </UserControl>

@@ -7,6 +7,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -25,9 +26,15 @@ namespace llcom_plus.Pages
         private bool suppressSave = false;
         private bool suppressSelectionHeader = false;
         private CancellationTokenSource loopCts = null;
+        internal bool IsWorkflowRunning => loopCts != null;
         private string lastStorageNotificationMessage = string.Empty;
+        private ActiveSerialTarget runTarget;
+        private const int MaximumReportRows = 2000;
+        private readonly List<SerialTestReportRow> reportRows = new List<SerialTestReportRow>();
+        private long reportTotal, reportPassed, reportFailed, reportSent, reportCancelled;
 
         public ObservableCollection<CircularSendItem> Items { get; } = new ObservableCollection<CircularSendItem>();
+        public ObservableCollection<CircularTestResultItem> ReportItems { get; } = new ObservableCollection<CircularTestResultItem>();
 
         public CircularSendPage()
         {
@@ -170,6 +177,7 @@ namespace llcom_plus.Pages
 
         private void AddRowButton_Click(object sender, RoutedEventArgs e)
         {
+            if (loopCts != null) return;
             AddItem(new CircularSendItem());
             RefreshIndexes();
             SaveItems();
@@ -284,6 +292,7 @@ namespace llcom_plus.Pages
 
         private void ImportQuickSendButton_Click(object sender, RoutedEventArgs e)
         {
+            if (loopCts != null) return;
             var imported = 0;
             var seen = new HashSet<string>(
                 Items.Where(item => !string.IsNullOrWhiteSpace(item.Command))
@@ -366,9 +375,6 @@ namespace llcom_plus.Pages
             if (loopCts != null)
                 return;
 
-            if (!Global.EnsureActiveSerialTargetOpen())
-                return;
-
             if (!TryReadRunTimes(out var runTimes) || !TryReadDefaultDelay(out var defaultDelay))
                 return;
 
@@ -379,13 +385,16 @@ namespace llcom_plus.Pages
                 return;
             }
 
+            if (!CaptureRunTarget(plan.Any(step => step.Options.Mode != SerialTestMatchMode.None))) return;
             SaveItems();
+            ResetReport();
             loopCts = new CancellationTokenSource();
             SetRunning(true);
             try
             {
                 await RunLoopAsync(plan, runTimes, loopCts.Token);
-                StatusTextBlock.Text = TryFindResource("CircularSendDone") as string ?? "发送完成";
+                StatusTextBlock.Text = reportFailed > 0 ? "测试完成（有失败步骤）" :
+                    TryFindResource("CircularSendDone") as string ?? "发送完成";
             }
             catch (OperationCanceledException)
             {
@@ -400,6 +409,7 @@ namespace llcom_plus.Pages
             {
                 loopCts?.Dispose();
                 loopCts = null;
+                runTarget = null;
                 SetRunning(false);
             }
         }
@@ -434,24 +444,43 @@ namespace llcom_plus.Pages
                     step.Source.Status = string.Format(
                         TryFindResource("CircularSendSendingStatus") as string ?? "第 {0} 轮发送中",
                         round);
+                    SerialTestResult result;
                     try
                     {
-                        await SendStepAsync(step, token);
+                        if (step.Options.Mode == SerialTestMatchMode.None)
+                        {
+                            await SendStepAsync(step, token);
+                            result = new SerialTestResult { Success = true, Attempts = 1, Outcome = "Sent",
+                                Details = "发送完成（未验证响应）" };
+                        }
+                        else
+                        {
+                            if (runTarget == null) throw new InvalidOperationException("请先选择测试串口。");
+                            var captured = runTarget;
+                            result = await SerialTestRunner.ExecuteAsync(step.Options, captured.Identity,
+                                sendToken => Dispatcher.Invoke(new Func<Task>(() => SendStepAsync(step, sendToken))),
+                                () => captured.IsOpen, token);
+                        }
                         token.ThrowIfCancellationRequested();
                     }
                     catch (OperationCanceledException)
                     {
                         step.Source.Status = TryFindResource("CircularSendStopped") as string ?? "已停止";
+                        AddReport(step, round, new SerialTestResult { Outcome = "Cancelled", Details = "用户停止或页面已离开；未执行后续步骤。" });
                         throw;
                     }
-                    catch
+                    catch (Exception ex)
                     {
                         step.Source.Status = TryFindResource("CircularSendFailed") as string ?? "发送失败";
+                        AddReport(step, round, new SerialTestResult { Outcome = "SendFailed", Details = ex.Message });
                         throw;
                     }
-                    step.Source.Status = string.Format(
-                        TryFindResource("CircularSendSentStatus") as string ?? "第 {0} 轮已发送",
-                        round);
+                    AddReport(step, round, result);
+                    step.Source.Status = result.Validated
+                        ? (result.Success ? "验证通过" : "验证失败")
+                        : string.Format(TryFindResource("CircularSendSentStatus") as string ?? "第 {0} 轮已发送", round);
+                    if (!result.Success && !step.Options.ContinueOnFailure)
+                        throw new InvalidOperationException($"第 {round} 轮，步骤 #{step.Source.Index}：{result.Details}");
                     StatusTextBlock.Text = string.Format(
                         TryFindResource("CircularSendRunning") as string ?? "第 {0} 轮，#{1}",
                         round,
@@ -490,13 +519,16 @@ namespace llcom_plus.Pages
 
             try
             {
-                if (!Global.EnsureActiveSerialTargetOpen())
-                    return;
-
-                button.IsEnabled = false;
                 var step = new CircularSendStep(item, item.Command.Trim(), item.Hex, 0);
-                await SendStepAsync(step, CancellationToken.None);
-                item.Status = TryFindResource("CircularSendSentOnce") as string ?? "已发送";
+                if (!CaptureRunTarget(step.Options.Mode != SerialTestMatchMode.None)) return;
+                loopCts = new CancellationTokenSource();
+                SetRunning(true);
+                ResetReport();
+                await RunLoopAsync(new List<CircularSendStep> { step }, 1, loopCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                item.Status = TryFindResource("CircularSendStopped") as string ?? "已停止";
             }
             catch (Exception ex)
             {
@@ -505,7 +537,8 @@ namespace llcom_plus.Pages
             }
             finally
             {
-                button.IsEnabled = true;
+                loopCts?.Dispose(); loopCts = null; runTarget = null;
+                SetRunning(false);
             }
         }
 
@@ -523,7 +556,8 @@ namespace llcom_plus.Pages
                 SessionStringLogOverride = step.Hex ? step.Command : null,
                 // Preserve the source so each captured COM profile supplies its own
                 // text encoding before the ordinary send script and CRLF processing.
-                SourceText = step.Command
+                SourceText = step.Command,
+                ExpectedTargetIdentity = runTarget?.Identity
             };
 
             if (!await Global.RequestSendDataAsync(request, token))
@@ -538,7 +572,12 @@ namespace llcom_plus.Pages
                 if (!TryReadDelay(item, defaultDelay, out var delay))
                     return null;
 
-                plan.Add(new CircularSendStep(item, item.Command.Trim(), item.Hex, delay));
+                try { plan.Add(new CircularSendStep(item, item.Command.Trim(), item.Hex, delay)); }
+                catch (ArgumentException ex)
+                {
+                    Tools.MessageBox.Show($"步骤 #{item.Index}：{ex.Message}");
+                    return null;
+                }
             }
             return plan;
         }
@@ -590,6 +629,61 @@ namespace llcom_plus.Pages
             StopButton.IsEnabled = running;
             CommandDataGrid.IsReadOnly = running;
             EnableAllCheckBox.IsEnabled = !running;
+            CircularToolbar.IsEnabled = !running;
+            StepOptionsPanel.IsEnabled = !running;
+            RunTimesTextBox.IsEnabled = !running;
+            DefaultDelayTextBox.IsEnabled = !running;
+        }
+
+        private bool CaptureRunTarget(bool responseValidation)
+        {
+            var target = Global.CaptureActiveSerialTarget();
+            if (target == null || !target.IsOpen)
+            {
+                Tools.MessageBox.Show("请先手动打开需要测试的串口。测试不会自动连接或唤醒其它 COM。");
+                return false;
+            }
+            if (responseValidation && target.Identity.StartsWith("serial-all:", StringComparison.Ordinal))
+            {
+                Tools.MessageBox.Show("响应验证不支持“全部”广播目标，请选择一个具体的 COM。");
+                return false;
+            }
+            runTarget = target;
+            return true;
+        }
+
+        private void ResetReport()
+        {
+            reportRows.Clear(); ReportItems.Clear();
+            reportTotal = reportPassed = reportFailed = reportSent = reportCancelled = 0;
+            ReportSummaryTextBlock.Text = "测试运行中。响应耗时从发送请求到匹配数据到达，由软件观测（包含排队/唤醒等待）。";
+        }
+
+        private void AddReport(CircularSendStep step, int round, SerialTestResult result)
+        {
+            reportTotal++;
+            if (result.Outcome == "Cancelled") reportCancelled++;
+            else if (!result.Success) reportFailed++;
+            else if (result.Validated) reportPassed++;
+            else reportSent++;
+            var row = new SerialTestReportRow { Timestamp = DateTime.Now, Round = round,
+                Step = step.Source.Index, Port = runTarget?.DisplayName ?? "", Command = step.Command, Result = result };
+            if (reportRows.Count >= MaximumReportRows) { reportRows.RemoveAt(0); ReportItems.RemoveAt(0); }
+            reportRows.Add(row); ReportItems.Add(new CircularTestResultItem(row));
+            long checkedCount = reportPassed + reportFailed;
+            string successRate = checkedCount == 0 ? "—" : (100.0 * reportPassed / checkedCount).ToString("0.0") + "%";
+            ReportSummaryTextBlock.Text = $"已执行 {reportTotal} 步 · 验证通过 {reportPassed} · 失败 {reportFailed} · 仅发送 {reportSent} · 停止 {reportCancelled} · 验证成功率 {successRate}" +
+                $"\r\n报告保留最近 {MaximumReportRows} 步；当前保留 {reportRows.Count} 步。响应耗时为软件观测值，包含排队及唤醒等待。";
+        }
+
+        private void ExportReportButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (reportRows.Count == 0) { Tools.MessageBox.Show("暂无测试结果，请先运行测试。"); return; }
+            var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "CSV (*.csv)|*.csv", DefaultExt = ".csv",
+                FileName = "serial-test-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".csv" };
+            if (dialog.ShowDialog() != true) return;
+            try { File.WriteAllText(dialog.FileName, SerialTestReport.ToCsv(reportRows), new UTF8Encoding(true)); }
+            catch (Exception ex) { Tools.MessageBox.Show("导出报告失败：" + ex.Message); }
         }
     }
 
@@ -601,6 +695,15 @@ namespace llcom_plus.Pages
         private bool hex;
         private string delayMs = "";
         private string status = "";
+        private int expectationMode;
+        private string expectedResponse = "", responseTimeoutMs = "1000", retryCount = "0";
+        private bool continueOnFailure;
+
+        public int ExpectationMode { get => expectationMode; set { expectationMode = value; OnPropertyChanged(nameof(ExpectationMode)); } }
+        public string ExpectedResponse { get => expectedResponse; set { expectedResponse = value ?? ""; OnPropertyChanged(nameof(ExpectedResponse)); } }
+        public string ResponseTimeoutMs { get => responseTimeoutMs; set { responseTimeoutMs = value ?? ""; OnPropertyChanged(nameof(ResponseTimeoutMs)); } }
+        public string RetryCount { get => retryCount; set { retryCount = value ?? ""; OnPropertyChanged(nameof(RetryCount)); } }
+        public bool ContinueOnFailure { get => continueOnFailure; set { continueOnFailure = value; OnPropertyChanged(nameof(ContinueOnFailure)); } }
 
         public event PropertyChangedEventHandler PropertyChanged;
         public event EventHandler Changed;
@@ -683,11 +786,33 @@ namespace llcom_plus.Pages
             Command = command;
             Hex = hex;
             DelayMs = delayMs;
+            if (!int.TryParse(source.ResponseTimeoutMs, out var timeout)) throw new ArgumentException("响应超时请输入整数毫秒。");
+            if (!int.TryParse(source.RetryCount, out var retries)) throw new ArgumentException("重试次数请输入整数，默认 0。");
+            Options = new SerialTestOptions(source.ExpectationMode, source.ExpectedResponse, timeout, retries, source.ContinueOnFailure);
         }
 
         public CircularSendItem Source { get; }
         public string Command { get; }
         public bool Hex { get; }
         public int DelayMs { get; }
+        internal SerialTestOptions Options { get; }
+    }
+
+    public sealed class CircularTestResultItem
+    {
+        internal CircularTestResultItem(SerialTestReportRow row)
+        {
+            StepLabel = row.Round + " / " + row.Step; Port = row.Port;
+            Outcome = row.Result.Outcome == "Passed" ? "通过" : row.Result.Outcome == "Sent" ? "已发送" :
+                row.Result.Outcome == "Cancelled" ? "已停止" : row.Result.Outcome == "Timeout" ? "超时" : "失败";
+            ResponseMs = row.Result.ResponseMs?.ToString("0.0") ?? "—";
+            Attempts = row.Result.Attempts; Details = row.Result.Details;
+        }
+        public string StepLabel { get; }
+        public string Port { get; }
+        public string Outcome { get; }
+        public string ResponseMs { get; }
+        public int Attempts { get; }
+        public string Details { get; }
     }
 }

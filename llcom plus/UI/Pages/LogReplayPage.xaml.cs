@@ -33,6 +33,7 @@ namespace llcom_plus.Pages
         private readonly object receiveLock = new object();
         private readonly List<byte> receiveBuffer = new List<byte>();
         private CancellationTokenSource replayCts = null;
+        internal bool IsWorkflowRunning => replayCts != null || loadCts != null;
         private CancellationTokenSource loadCts = null;
         private long nextLoadRunId = 0;
         private long activeLoadRunId = 0;

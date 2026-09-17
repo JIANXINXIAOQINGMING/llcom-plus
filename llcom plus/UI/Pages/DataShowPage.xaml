@@ -6,6 +6,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:fa="http://schemas.fontawesome.io/icons/"
     xmlns:local="clr-namespace:llcom_plus.Pages"
+    xmlns:views="clr-namespace:llcom_plus.Views"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Title="DataShowPage"
     adonisExtensions:RippleExtension.FadeInDuration="0"
@@ -64,8 +65,14 @@
         </Style>
     </Page.Resources>
     <Grid x:Name="mainGrid" Background="Transparent">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <views:LogFindBar x:Name="LogSearchBar" SearchStateChanged="LogSearchStateChanged" />
         <RichTextBox
             Name="MainTextBox"
+            Grid.Row="1"
             Background="Transparent"
             BorderThickness="0"
             FontFamily="Consolas,Microsoft YaHei,微软雅黑"
@@ -90,6 +97,7 @@
         </RichTextBox>
         <RichTextBox
             Name="MainPackedTextBox"
+            Grid.Row="1"
             Background="Transparent"
             BorderThickness="0"
             FontFamily="Consolas,Microsoft YaHei,微软雅黑"
@@ -113,6 +121,7 @@
         </RichTextBox>
         <ToggleButton
             Name="LogOptionsButton"
+            Grid.Row="1"
             Margin="0,0,18,3"
             HorizontalAlignment="Right"
             VerticalAlignment="Bottom"
@@ -124,6 +133,7 @@
         </ToggleButton>
         <Popup
             Name="LogOptionsPopup"
+            Grid.Row="1"
             AllowsTransparency="True"
             HorizontalOffset="-6"
             IsOpen="{Binding IsChecked, ElementName=LogOptionsButton, Mode=TwoWay}"
@@ -179,6 +189,12 @@
                             IsChecked="{Binding EnableSymbol}"
                             Style="{StaticResource LogOptionCheckBoxStyle}"
                             ToolTip="{DynamicResource ShowSymbolTooltip}" />
+                        <CheckBox
+                            Name="ShowLineEndingsCheckBox"
+                            Content="{DynamicResource ShowLineEndings}"
+                            IsChecked="{Binding ShowLineEndings}"
+                            Style="{StaticResource LogOptionCheckBoxStyle}"
+                            ToolTip="{DynamicResource ShowLineEndingsTooltip}" />
                         <CheckBox
                             Name="DisableLogCheckBox"
                             Content="{DynamicResource DisableLog}"

@@ -53,6 +53,7 @@
                         <CheckBox
                             Margin="5"
                             Content="{DynamicResource SettingShowSend}"
+                            ToolTip="{DynamicResource SettingShowSendTip}"
                             IsChecked="{Binding showSend}" />
                         <GroupBox Margin="5" Header="{DynamicResource SettingLogColors}">
                             <StackPanel Margin="6">

@@ -52,6 +52,7 @@ namespace llcom_plus.Model
             internal int IdleMilliseconds;
             internal bool SendInProgress;
             internal bool Initializing;
+            internal Action<string> Trace;
         }
 
         private sealed class RestoreTimerState
@@ -98,7 +99,8 @@ namespace llcom_plus.Model
             Func<bool> isConnectionCurrent,
             UartPortProfile profile,
             CancellationToken cancellationToken,
-            Action send)
+            Action send,
+            Action<string> trace = null)
         {
             ExecuteWithWakeCore(
                 port,
@@ -107,7 +109,7 @@ namespace llcom_plus.Model
                 profile,
                 cancellationToken,
                 send,
-                port == null ? null : new SerialPortDtrLine(port));
+                port == null ? null : new SerialPortDtrLine(port), trace);
         }
 
         internal void RenewAfterReceive(
@@ -166,7 +168,8 @@ namespace llcom_plus.Model
             UartPortProfile profile,
             CancellationToken cancellationToken,
             Action send,
-            IDtrLine dtrLine)
+            IDtrLine dtrLine,
+            Action<string> trace = null)
         {
             if (send == null)
                 throw new ArgumentNullException(nameof(send));
@@ -189,21 +192,26 @@ namespace llcom_plus.Model
                 if (connectionKey == null || dtrLine == null || isConnectionCurrent == null)
                     throw new IOException("Serial port is not open.");
 
+                TraceSafely(trace, "DTR wake requested / 请求唤醒");
                 bool wakeDelayRequired;
-                var wakeSession = BeginSend(
-                    connectionKey,
-                    connectionGeneration,
-                    isConnectionCurrent,
-                    dtrLine,
-                    profile,
-                    cancellationToken,
-                    out wakeDelayRequired);
+                WakeSession wakeSession = null;
                 try
                 {
+                    wakeSession = BeginSend(
+                        connectionKey,
+                        connectionGeneration,
+                        isConnectionCurrent,
+                        dtrLine,
+                        profile,
+                        cancellationToken,
+                        out wakeDelayRequired);
+                    if (wakeSession != null) wakeSession.Trace = trace;
+                    else TraceSafely(trace, "DTR held by user; no automatic restore / DTR 已手动保持，不自动恢复");
                     if (wakeSession != null)
                     {
                         if (wakeDelayRequired)
                         {
+                            TraceSafely(trace, $"DTR asserted; waiting / 等待唤醒 {Settings.NormalizeDtrWakeDelayMilliseconds(profile.dtrWakeDelayMs)} ms");
                             WaitForWakeDelay(
                                 wakeSession,
                                 Settings.NormalizeDtrWakeDelayMilliseconds(profile.dtrWakeDelayMs),
@@ -220,7 +228,16 @@ namespace llcom_plus.Model
 
                     // Exactly one invocation: a failure may mean the driver accepted a
                     // prefix, so replaying arbitrary application data would be unsafe.
+                    TraceSafely(trace, "Wake wait complete; sending / 唤醒等待完成，开始发送");
                     send();
+                    TraceSafely(trace, wakeSession != null
+                        ? "Write drained; waiting for idle / 发送缓冲已清空，等待空闲"
+                        : "Write drained; manual DTR unchanged / 发送缓冲已清空，保持手动 DTR");
+                }
+                catch (Exception ex)
+                {
+                    TraceSafely(trace, "Wake/send failed / 唤醒或发送失败: " + ex.Message);
+                    throw;
                 }
                 finally
                 {
@@ -228,6 +245,11 @@ namespace llcom_plus.Model
                         CompleteSend(wakeSession);
                 }
             }
+        }
+
+        private static void TraceSafely(Action<string> trace, string message)
+        {
+            try { trace?.Invoke(message); } catch { }
         }
 
         private WakeSession BeginSend(
@@ -501,6 +523,7 @@ namespace llcom_plus.Model
             var connectionIsCurrent = IsCurrent(session.IsConnectionCurrent);
             Timer retiredTimer = null;
             Exception restoreError = null;
+            bool restored = false;
             if (!connectionIsCurrent)
             {
                 lock (stateLock)
@@ -536,6 +559,7 @@ namespace llcom_plus.Model
                     try
                     {
                         lineToRestore.Enabled = restoreValue;
+                        restored = true;
                     }
                     catch (Exception ex)
                     {
@@ -548,7 +572,12 @@ namespace llcom_plus.Model
             // A restore failure must not turn a successful send into an apparent send
             // failure and tempt a caller to duplicate arbitrary data.
             if (restoreError != null)
+            {
                 Log($"[DtrWake]idle restore skipped: {restoreError.Message}");
+                TraceSafely(session.Trace, "DTR idle restore failed / 空闲恢复失败: " + restoreError.Message);
+            }
+            else if (restored)
+                TraceSafely(session.Trace, "DTR restored after idle / 空闲后已恢复 DTR");
         }
 
         private void ApplyUserDtrCore(
@@ -1552,13 +1581,27 @@ namespace llcom_plus.Model
             lock (sendLock)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                Tools.SerialTraceHub.RecordEvent(lease?.PortName, lease?.Identity, Tools.SerialTraceKind.Info,
+                    $"TX request / 发送请求: {data.Length} bytes, baud={profile.baudRate}, flow={profile.flowControl}, DTR={profile.dtr}, RTS={profile.rts}, wake={profile.dtrWakeBeforeSend}");
+                try
+                {
                 dtrWakeController.ExecuteWithWake(
                     lease?.Port,
                     lease?.Generation ?? 0,
                     () => IsConnectionOpen(lease),
                     profile,
                     cancellationToken,
-                    () => WriteData(lease, data, profile, cancellationToken, committedBytes));
+                    () => WriteData(lease, data, profile, cancellationToken, committedBytes),
+                    message => Tools.SerialTraceHub.RecordEvent(lease?.PortName, lease?.Identity,
+                        Tools.SerialTraceKind.Wake, message));
+                }
+                catch (Exception ex)
+                {
+                    Tools.SerialTraceHub.RecordEvent(lease?.PortName, lease?.Identity,
+                        ex is OperationCanceledException ? Tools.SerialTraceKind.Info : Tools.SerialTraceKind.Error,
+                        "TX incomplete / 发送未完成: " + ex.Message);
+                    throw;
+                }
                 Tools.Global.setting.SentCount += data.Length;
             }
 
@@ -1645,6 +1688,8 @@ namespace llcom_plus.Model
                     port.Write(data, offset, count);
                 }
 
+                Tools.SerialTraceHub.RecordBuffer(portName, lease.Identity, true,
+                    data, offset, count, lease.Profile.encoding);
                 invokingCommittedCallback = true;
                 committedBytes?.Invoke(count);
                 invokingCommittedCallback = false;
@@ -1803,6 +1848,8 @@ namespace llcom_plus.Model
                 {
                     try
                     {
+                        byte[] traceBlock;
+                        int traceCount;
                         lock (receiveLock)
                         {
                             if (!directReceiveMode ||
@@ -1818,7 +1865,7 @@ namespace llcom_plus.Model
                             if (length <= 0)
                                 break;
 
-                            var block = new byte[length];
+                            var block = new byte[Math.Min(length, 65536)];
                             var read = eventPort.Read(block, 0, block.Length);
                             if (read <= 0)
                                 break;
@@ -1826,7 +1873,11 @@ namespace llcom_plus.Model
                                 result.AddRange(block);
                             else
                                 result.AddRange(block.Take(read));
+                            traceBlock = block;
+                            traceCount = read;
                         }
+                        Tools.SerialTraceHub.RecordBuffer(connection.PortName, connection.Identity,
+                            false, traceBlock, 0, traceCount, profile.encoding);
                         RenewDtrWakeAfterReceive(eventPort);
                     }
                     catch (Exception ex)
@@ -1945,6 +1996,8 @@ namespace llcom_plus.Model
                 {
                     try
                     {
+                        byte[] traceBlock;
+                        int traceCount;
                         lock (receiveLock)
                         {
                             if (directReceiveMode ||
@@ -1958,15 +2011,19 @@ namespace llcom_plus.Model
                             int length = readPort.BytesToRead;
                             if (length == 0)//没数据，退出去
                                 break;
-                            byte[] rev = new byte[length];
-                            var read = readPort.Read(rev, 0, length);//读数据
+                            byte[] rev = new byte[Math.Min(length, 65536)];
+                            var read = readPort.Read(rev, 0, rev.Length);//读数据
                             if (read <= 0)
                                 break;
                             if (read == rev.Length)
                                 result.AddRange(rev);//加到list末尾
                             else
                                 result.AddRange(rev.Take(read));
+                            traceBlock = rev;
+                            traceCount = read;
                         }
+                        Tools.SerialTraceHub.RecordBuffer(connection.PortName, connection.Identity,
+                            false, traceBlock, 0, traceCount, profile.encoding);
                         RenewDtrWakeAfterReceive(readPort);
                     }
                     catch (Exception ex)

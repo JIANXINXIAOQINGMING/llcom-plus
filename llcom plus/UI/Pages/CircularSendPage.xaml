@@ -23,6 +23,8 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- The selected tool in the navigation already supplies the page title. -->
@@ -48,9 +50,13 @@
             <Button
                 Width="136"
                 Height="36"
+                Margin="0,0,8,0"
                 Click="ImportQuickSendButton_Click"
                 Content="{DynamicResource CircularSendImportQuickSend}"
                 Style="{StaticResource CircularActionButtonStyle}" />
+            <Button Height="36" Padding="10,3" Click="ExportReportButton_Click"
+                    Content="导出测试报告" ToolTip="导出本次保留的步骤结果为 CSV，不会发送数据"
+                    Style="{StaticResource CircularActionButtonStyle}" />
         </WrapPanel>
 
         <TextBlock
@@ -73,9 +79,10 @@
             HeadersVisibility="Column"
             HorizontalAlignment="Stretch"
             ItemsSource="{Binding Items}"
+            SelectedIndex="0"
             SelectionMode="Single"
             SizeChanged="CommandDataGrid_SizeChanged"
-            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            ScrollViewer.HorizontalScrollBarVisibility="Auto">
             <DataGrid.Columns>
                 <DataGridCheckBoxColumn Width="44" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}">
                     <DataGridCheckBoxColumn.Header>
@@ -114,7 +121,7 @@
                         <TextBlock Text="{DynamicResource CircularSendDelay}" />
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
-                <DataGridTextColumn Width="52" Binding="{Binding Status}" IsReadOnly="True">
+                <DataGridTextColumn Width="88" Binding="{Binding Status}" IsReadOnly="True">
                     <DataGridTextColumn.Header>
                         <TextBlock Text="{DynamicResource CircularSendStatus}" />
                     </DataGridTextColumn.Header>
@@ -143,8 +150,55 @@
             </DataGrid.Columns>
         </DataGrid>
 
+        <Expander Grid.Row="3" Header="步骤验证 · 选中一行设置预期响应" Margin="0,8,0,0" IsExpanded="True">
+            <StackPanel x:Name="StepOptionsPanel" Margin="4,6" DataContext="{Binding SelectedItem, ElementName=CommandDataGrid}">
+                <WrapPanel>
+                    <TextBlock Text="响应匹配" VerticalAlignment="Center" Margin="0,0,6,6" />
+                    <ComboBox Width="112" Height="32" Margin="0,0,12,6" SelectedIndex="{Binding ExpectationMode, UpdateSourceTrigger=PropertyChanged}">
+                        <ComboBoxItem Content="不验证" />
+                        <ComboBoxItem Content="包含文本" />
+                        <ComboBoxItem Content="整行等于" />
+                        <ComboBoxItem Content="正则表达式" />
+                    </ComboBox>
+                    <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="预期响应" VerticalAlignment="Center" Margin="0,0,6,6" />
+                    <TextBox MinWidth="150" Width="220" Height="32" Margin="0,0,12,6"
+                             Text="{Binding ExpectedResponse, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="例如 OK。文本区分大小写；整行等于会等待行结束；正则支持 (?i)。" />
+                    </StackPanel>
+                </WrapPanel>
+                <WrapPanel>
+                    <TextBlock Text="超时 (ms)" VerticalAlignment="Center" Margin="0,0,6,6" />
+                    <TextBox Width="72" Height="32" Margin="0,0,12,6" Text="{Binding ResponseTimeoutMs, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Text="超时重试" VerticalAlignment="Center" Margin="0,0,6,6" />
+                    <TextBox Width="48" Height="32" Margin="0,0,12,6" Text="{Binding RetryCount, UpdateSourceTrigger=PropertyChanged}" />
+                    <CheckBox Content="响应验证失败后继续下一步" VerticalAlignment="Center" Margin="0,0,0,6"
+                              IsChecked="{Binding ContinueOnFailure, UpdateSourceTrigger=PropertyChanged}" />
+                </WrapPanel>
+                <TextBlock Foreground="{DynamicResource AppGlassMutedBrush}" TextWrapping="Wrap" FontSize="11"
+                           Text="重试可能重复执行指令，默认 0。只验证当前捕获的单个 COM；接收内容按规则匹配，不会自动区分同端口的主动上报。" />
+            </StackPanel>
+        </Expander>
+
+        <Expander Grid.Row="4" Header="本次测试结果" Margin="0,4,0,0">
+            <StackPanel>
+                <TextBlock x:Name="ReportSummaryTextBlock" Margin="4,4" TextWrapping="Wrap" Text="暂无测试结果。" />
+                <DataGrid Height="150" ItemsSource="{Binding ReportItems}" IsReadOnly="True" AutoGenerateColumns="False"
+                          CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="轮 / 步" Width="64" Binding="{Binding StepLabel}" />
+                        <DataGridTextColumn Header="串口" Width="65" Binding="{Binding Port}" />
+                        <DataGridTextColumn Header="结果" Width="78" Binding="{Binding Outcome}" />
+                        <DataGridTextColumn Header="响应 ms" Width="70" Binding="{Binding ResponseMs}" />
+                        <DataGridTextColumn Header="次数" Width="44" Binding="{Binding Attempts}" />
+                        <DataGridTextColumn Header="详情" Width="*" Binding="{Binding Details}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </StackPanel>
+        </Expander>
+
         <WrapPanel
-            Grid.Row="3"
+            Grid.Row="5"
             Margin="0,12,0,0"
             HorizontalAlignment="Right"
             ItemHeight="44">

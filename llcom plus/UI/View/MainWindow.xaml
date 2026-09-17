@@ -237,7 +237,7 @@
                             <Border
                                 Grid.Row="0"
                                 HorizontalAlignment="Left"
-                                Margin="0,0,0,18"
+                                Margin="0,0,180,18"
                                 Padding="0"
                                 Background="Transparent"
                                 BorderThickness="0">
@@ -461,7 +461,18 @@
             Margin="10,10,6,6"
             Padding="6"
             Style="{StaticResource GlassPanelStyle}" Grid.ColumnSpan="2">
-            <Frame
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" MinHeight="70" />
+                </Grid.RowDefinitions>
+                <DockPanel Margin="4,0,4,5">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Content="查找" ToolTip="查找当前日志（Ctrl+F）" Click="MainLogFind_Click" Padding="10,3" Margin="0,0,5,0" />
+                    </StackPanel>
+                    <TextBlock Text="收发日志" VerticalAlignment="Center" Foreground="{DynamicResource AppGlassMutedBrush}" />
+                </DockPanel>
+            <Frame Grid.Row="1"
                 Name="dataShowFrame"
                 Background="Transparent"
                 BorderBrush="#00000000"
@@ -473,6 +484,7 @@
                 NavigationUIVisibility="Hidden"
                 PreviewKeyDown="uartDataFlowDocument_PreviewKeyDown"
                 PreviewTextInput="uartDataFlowDocument_PreviewTextInput" />
+            </Grid>
         </Border>
         <Border
             Grid.Row="0"
@@ -856,7 +868,7 @@
             Style="{StaticResource GlassTabControlStyle}"
             ItemContainerStyle="{StaticResource GlassTabItemStyle}"
             SelectionChanged="MainTabControl_SelectionChanged">
-                <TabItem Name="QuickSendTab" Header="{DynamicResource QuickSendCard}" Margin="0,3,0,-9" Width="118">
+                <TabItem Name="QuickSendTab" Header="{DynamicResource QuickSendCard}" Margin="0,3,0,-9" Width="104">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="auto" />
@@ -864,6 +876,12 @@
                             <RowDefinition Height="auto" />
                         </Grid.RowDefinitions>
                         <Grid.Resources>
+                            <Style x:Key="QuickSendDragHandleStyle" BasedOn="{StaticResource QuickSendInlineButtonStyle}" TargetType="{x:Type Button}">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0" />
+                                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                            </Style>
                             <Style x:Key="QuickSendCommandButtonStyle" BasedOn="{StaticResource GlassButtonStyle}" TargetType="{x:Type Button}">
                                 <Setter Property="Height" Value="32" />
                                 <Setter Property="MinWidth" Value="34" />
@@ -981,9 +999,23 @@
                                                     <ColumnDefinition Width="84" />
                                                     <ColumnDefinition Width="38" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Margin="2" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                           Cursor="Cross" MouseRightButtonDown="TextBlock_MouseRightButtonDown"
-                                                           Tag="{Binding}" Text="{Binding id}" ToolTip="{DynamicResource QuickSendIdTip}" />
+                                                <Button x:Name="QuickSendRowDragHandle" Grid.Column="0" Width="24" Height="30" Padding="0"
+                                                        HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="SizeAll" Tag="{Binding}"
+                                                        Style="{StaticResource QuickSendDragHandleStyle}"
+                                                        Foreground="{DynamicResource AppGlassMutedBrush}"
+                                                        ToolTip="{DynamicResource QuickSendDragTip}"
+                                                        AutomationProperties.Name="{DynamicResource QuickSendDragName}"
+                                                        AutomationProperties.HelpText="{DynamicResource QuickSendDragTip}"
+                                                        PreviewMouseLeftButtonDown="QuickSendDragHandle_MouseDown"
+                                                        PreviewMouseMove="QuickSendDragHandle_MouseMove"
+                                                        PreviewMouseLeftButtonUp="QuickSendDragHandle_MouseUp"
+                                                        LostMouseCapture="QuickSendDragHandle_LostCapture"
+                                                        PreviewKeyDown="QuickSendDragHandle_KeyDown"
+                                                        QueryContinueDrag="QuickSendDragHandle_QueryContinueDrag">
+                                                    <Path Width="8" Height="14" Margin="0" HorizontalAlignment="Center" VerticalAlignment="Center" Stretch="Fill" IsHitTestVisible="False"
+                                                          Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                          Data="M 0,0 L 2,0 2,2 0,2 Z M 6,0 L 8,0 8,2 6,2 Z M 0,6 L 2,6 2,8 0,8 Z M 6,6 L 8,6 8,8 6,8 Z M 0,12 L 2,12 2,14 0,14 Z M 6,12 L 8,12 8,14 6,14 Z" />
+                                                </Button>
                                                 <TextBox x:Name="QuickSendRowTextBox" Grid.Column="1" Margin="0,0,4,0" MinWidth="60"
                                                          HorizontalAlignment="Stretch"
                                                          MouseDoubleClick="QuickSendTextBox_MouseDoubleClick"
@@ -1060,13 +1092,13 @@
                                     <ColumnDefinition Width="28" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock HorizontalAlignment="Center" Text="{DynamicResource QuickSendId}" />
                                 <TextBlock Grid.Column="1" Margin="4,0,0,0" HorizontalAlignment="Left" Text="{DynamicResource QuickSendContent}" />
                             </Grid>
                         </Grid>
                         <Grid Grid.Row="1">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <ListBox
@@ -1077,6 +1109,12 @@
                         BorderThickness="0"
                         ItemContainerStyle="{StaticResource toSendListStyle}"
                         PreviewKeyDown="QuickSendList_PreviewKeyDown"
+                        Unloaded="QuickSendList_Unloaded"
+                        AllowDrop="True"
+                        PreviewDragEnter="QuickSendList_DragOver"
+                        PreviewDragOver="QuickSendList_DragOver"
+                        PreviewDragLeave="QuickSendList_DragLeave"
+                        PreviewDrop="QuickSendList_Drop"
                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                         ScrollViewer.VerticalScrollBarVisibility="Auto"
                         ToolTip="{DynamicResource QuickSendKeyboardNavigationTip}"
@@ -1084,6 +1122,10 @@
                         VirtualizingPanel.CacheLengthUnit="Page"
                         VirtualizingPanel.IsVirtualizing="True"
                         VirtualizingPanel.VirtualizationMode="Recycling" />
+                            <Canvas x:Name="QuickSendDragOverlay" IsHitTestVisible="False" ClipToBounds="True" Panel.ZIndex="5">
+                                <Border x:Name="QuickSendInsertionLine" Height="3" CornerRadius="1.5" Visibility="Collapsed"
+                                        Background="{DynamicResource AppAccentBrush}" />
+                            </Canvas>
                             <Button Name="addSendListButton" Grid.Row="1" Margin="28,5,0,0"
                                     HorizontalAlignment="Left" Click="AddSendListButton_Click"
                                     AutomationProperties.Name="{DynamicResource QuickSendAdd}"
@@ -1094,6 +1136,16 @@
                                     <TextBlock Margin="7,0,0,0" FontWeight="SemiBold" Text="{DynamicResource QuickSendAdd}" />
                                 </StackPanel>
                             </Button>
+                        <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="4,5,0,0" MaxWidth="340">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button x:Name="QuickWorkflowRunButton" Content="▶ 运行本页流程" Click="QuickWorkflowRun_Click" Padding="10,4" Margin="0,0,5,0"
+                                        ToolTip="依次发送本页指令；在每条指令的设置中配置期望回复。超时停止，默认不重发。" />
+                                <Button x:Name="QuickWorkflowStopButton" Content="停止" IsEnabled="False" Click="QuickWorkflowStop_Click" Padding="10,4" />
+                            </StackPanel>
+                        </StackPanel>
+                        <TextBlock x:Name="QuickWorkflowStatusText" Grid.Row="2" Margin="28,4,4,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AppGlassMutedBrush}" FontSize="11"
+                                   Text="流程：在指令设置中指定期望回复，收到后再执行下一条。" />
                         </Grid>
                         <Popup x:Name="QuickSendItemSettingsPopup" Placement="Bottom" VerticalOffset="5"
                                AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade"
@@ -1101,6 +1153,7 @@
                             <local:QuickSendItemSettings x:Name="QuickSendItemSettingsEditor"
                                                         PreviewKeyDown="QuickSendItemSettingsEditor_PreviewKeyDown"
                                                         CloseRequested="QuickSendItemSettingsEditor_CloseRequested"
+                                                        DuplicateRequested="QuickCommandDuplicate_Click"
                                                         DeleteRequested="QuickSendItemSettingsEditor_DeleteRequested" />
                         </Popup>
                         <Border
@@ -1122,6 +1175,13 @@
 
                                 <!-- File operations and recovery have one quiet, separate home. -->
                                 <StackPanel Orientation="Horizontal">
+                                    <Button Click="SearchQuickCommand_Click" Style="{StaticResource QuickSendCommandButtonStyle}"
+                                            ToolTip="查找当前页指令 / Find command" AutomationProperties.Name="查找指令">
+                                        <fa:FontAwesome Icon="Search" FontSize="14"/>
+                                    </Button>
+                                    <Button x:Name="UndoQuickCommandButton" Click="UndoQuickCommand_Click" IsEnabled="False"
+                                            Style="{StaticResource QuickSendCommandButtonStyle}" ToolTip="撤销最近一次指令删除（当前页） / Undo last deletion"
+                                            AutomationProperties.Name="撤销删除" Content="↶"/>
                                     <Button
                                         Name="QuickSendImportButton"
                                         AutomationProperties.Name="{DynamicResource QuickSendImport}"
@@ -1186,7 +1246,10 @@
                         </Border>
                     </Grid>
                 </TabItem>
-                <TabItem Name="ScriptTab" Header="{DynamicResource ScriptCard}" Margin="0,2,0,-8" Width="118">
+                <TabItem x:Name="TimelineTab" Header="{DynamicResource TimelineTabTitle}" Margin="0,2,0,-8" Width="104">
+                    <Frame x:Name="MainTimelineFrame" NavigationUIVisibility="Hidden" Background="Transparent" BorderThickness="0" />
+                </TabItem>
+                <TabItem Name="ScriptTab" Header="{DynamicResource ScriptCard}" Margin="0,2,0,-8" Width="104">
                     <Grid>
                         <!--  脚本编辑界面  -->
                         <Grid Name="scriptEditorGrid" Visibility="Visible">
@@ -1343,7 +1406,7 @@
                         <!--  脚本运行日志界面END  -->
                     </Grid>
                 </TabItem>
-                <TabItem Name="ToolsTab" Header="{DynamicResource ToolsTab}" Margin="0,2,0,-8" Width="118">
+                <TabItem Name="ToolsTab" Header="{DynamicResource ToolsTab}" Margin="0,2,0,-8" Width="104">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="170" />
@@ -1354,11 +1417,22 @@
                         Grid.Column="0"
                         Padding="6"
                         Style="{StaticResource GlassPanelTightStyle}">
+                            <DockPanel>
+                            <Button DockPanel.Dock="Top" Content="★ 设为 / 取消常用" Margin="0,0,0,6"
+                                    ToolTip="收藏当前工具，不会中断正在运行的任务" Click="ToggleToolFavorite_Click"/>
                             <ListBox
                             Name="ToolListBox"
                             ItemContainerStyle="{StaticResource ToolListItemStyle}"
                             SelectionChanged="ToolListBox_SelectionChanged"
                             Style="{StaticResource ToolListBoxStyle}">
+                                <ListBox.GroupStyle>
+                                    <GroupStyle>
+                                        <GroupStyle.HeaderTemplate>
+                                            <DataTemplate><TextBlock Text="{Binding Name}" Margin="3,9,0,6" TextWrapping="Wrap"
+                                                FontSize="11" Foreground="{DynamicResource AppGlassMutedBrush}"/></DataTemplate>
+                                        </GroupStyle.HeaderTemplate>
+                                    </GroupStyle>
+                                </ListBox.GroupStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <TextBlock
@@ -1370,6 +1444,7 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
+                            </DockPanel>
                         </Border>
                         <Border
                         Grid.Column="2"
@@ -1676,6 +1751,8 @@
                                     Text="{DynamicResource NotificationEmpty}" />
                                 <ListBox
                                     Name="NotificationListBox"
+                                    MouseDoubleClick="NotificationListBox_MouseDoubleClick"
+                                    ToolTip="双击定位到日志分析 / Double-click to locate in timeline"
                                     Padding="3"
                                     HorizontalContentAlignment="Stretch"
                                     Background="Transparent"

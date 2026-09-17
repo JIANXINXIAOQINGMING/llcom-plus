@@ -1,30 +1,77 @@
 <Page x:Class="llcom_plus.Pages.PlotPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
-      xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
-      xmlns:local="clr-namespace:llcom_plus.Pages"
-      mc:Ignorable="d" 
-      d:DesignHeight="440" d:DesignWidth="400"
-      Title="PlotPage"
-      Loaded="Page_Loaded">
-    <Grid>
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      mc:Ignorable="d" d:DesignHeight="620" d:DesignWidth="800"
+      Title="PlotPage" Loaded="Page_Loaded" Unloaded="Page_Unloaded">
+    <Grid Margin="8">
         <Grid.RowDefinitions>
-            <RowDefinition Height="auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" MinHeight="160" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <Button Content="{DynamicResource PlotFit}" Margin="2" Click="RefreshButton_Click"/>
-            <Button Content="{DynamicResource PlotClear}" Grid.Column="1" Margin="2" Click="ClearButton_Click"/>
-            <Button Content="{DynamicResource PlotTheme}" Grid.Column="2" Margin="2" Click="ThemeButton_Click"/>
+        <StackPanel>
+            <WrapPanel Margin="0,0,0,6">
+                <TextBlock x:Name="SourceLabel" Text="数据来源" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <ComboBox x:Name="SourceCombo" Width="100" MinHeight="32" IsEditable="True" DropDownOpened="SourceCombo_DropDownOpened" Margin="0,0,8,0" />
+                <ComboBox x:Name="FormatCombo" Width="155" MinHeight="32" SelectionChanged="FormatCombo_SelectionChanged" Margin="0,0,8,0" />
+                <Button x:Name="CaptureButton" Content="开始采集" MinWidth="90" Padding="10,5" Click="CaptureButton_Click" />
+            </WrapPanel>
+            <WrapPanel Margin="0,0,0,6">
+                <Button x:Name="PauseButton" Content="暂停显示" Padding="10,5" Margin="0,0,6,0" Click="PauseButton_Click" />
+                <Button x:Name="FitButton" Content="查看全局" Padding="10,5" Margin="0,0,6,0" Click="RefreshButton_Click" />
+                <Button x:Name="ClearButton" Content="清空曲线" Padding="10,5" Margin="0,0,6,0" Click="ClearButton_Click" />
+                <Button x:Name="ExportButton" Content="导出 CSV" Padding="10,5" Click="ExportButton_Click" />
+                <CheckBox x:Name="FollowCheck" Content="跟随最新数据" IsChecked="True" VerticalAlignment="Center" Margin="12,0,0,0" />
+            </WrapPanel>
+        </StackPanel>
+        <Expander x:Name="ConfigurationExpander" Grid.Row="1" Header="解析和曲线设置" Margin="0,0,0,8">
+            <StackPanel Margin="0,6,0,0">
+                <WrapPanel>
+                    <TextBlock x:Name="SeparatorLabel" Text="分隔符" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox x:Name="SeparatorCombo" Width="110" MinHeight="32" Margin="0,0,8,0" />
+                    <TextBlock x:Name="PatternLabel" Text="正则表达式" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBox x:Name="PatternBox" Width="240" MaxLength="512" MinHeight="32" VerticalContentAlignment="Center" />
+                </WrapPanel>
+                <TextBlock x:Name="FormatHint" TextWrapping="Wrap" Foreground="{DynamicResource AppGlassMutedBrush}" Margin="0,6" />
+                <DataGrid x:Name="SeriesGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                          CanUserResizeRows="False" HeadersVisibility="Column" MinHeight="72" MaxHeight="200">
+                    <DataGrid.Columns>
+                        <DataGridCheckBoxColumn x:Name="VisibleColumn" Header="显示" Width="46" Binding="{Binding Visible, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <DataGridTextColumn x:Name="KeyColumn" Header="字段" Width="65" Binding="{Binding Key}" IsReadOnly="True" />
+                        <DataGridTextColumn x:Name="NameColumn" Header="名称" Width="*" MinWidth="75" Binding="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <DataGridTextColumn x:Name="UnitColumn" Header="单位" Width="52" Binding="{Binding Unit, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <DataGridComboBoxColumn x:Name="ColorColumn" Header="颜色" Width="95" SelectedItemBinding="{Binding Color, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <DataGridTextColumn x:Name="CurrentColumn" Header="当前" Width="70" Binding="{Binding Current}" IsReadOnly="True" />
+                        <DataGridTextColumn x:Name="MinimumColumn" Header="最小" Width="70" Binding="{Binding Minimum}" IsReadOnly="True" />
+                        <DataGridTextColumn x:Name="MaximumColumn" Header="最大" Width="70" Binding="{Binding Maximum}" IsReadOnly="True" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                <WrapPanel Margin="0,6,0,0">
+                    <Button x:Name="ApplyButton" Content="应用配置" Padding="10,5" Margin="0,0,8,0" Click="ApplyButton_Click" />
+                    <Button x:Name="DiscoverButton" Content="重新识别字段" Padding="10,5" Click="DiscoverButton_Click" />
+                    <TextBlock x:Name="ApplyHint" Text="更改解析配置会开始一段新曲线，不修改串口设置。" TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppGlassMutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                </WrapPanel>
+            </StackPanel>
+        </Expander>
+        <Grid Grid.Row="2">
+            <WpfPlot x:Name="Plot" />
+            <Border x:Name="EmptyOverlay" Margin="35" CornerRadius="12" Padding="20"
+                    Background="{DynamicResource AppFloatingContentBackground}" VerticalAlignment="Center" IsHitTestVisible="False">
+                <StackPanel>
+                    <TextBlock x:Name="EmptyTitle" Text="还没有曲线数据" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                    <TextBlock x:Name="EmptyHint" Text="选择串口和数据格式，开始采集。每条数据请以换行结束。"
+                               TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0" Foreground="{DynamicResource AppGlassMutedBrush}" />
+                </StackPanel>
+            </Border>
         </Grid>
-        <Grid Grid.Row="1">
-            <WpfPlot Name="Plot" MouseMove="Plot_MouseMove"/>
-        </Grid>
+        <StackPanel Grid.Row="3" Margin="0,6,0,0">
+            <TextBlock x:Name="StatusText" TextWrapping="Wrap" />
+            <TextBlock x:Name="PreviewText" MaxHeight="52" TextWrapping="Wrap" Foreground="{DynamicResource AppGlassMutedBrush}" />
+            <TextBlock x:Name="ErrorText" TextWrapping="Wrap" Foreground="{DynamicResource AppGlassMutedBrush}" />
+        </StackPanel>
     </Grid>
 </Page>

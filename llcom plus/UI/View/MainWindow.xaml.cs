@@ -98,6 +98,7 @@ namespace llcom_plus
                 }
             });
             LocationChanged += MainWindow_PlacementChanged;
+            PreviewKeyDown += MainWindow_AnalysisKeyDown;
             SizeChanged += MainWindow_PlacementChanged;
             StartupProfiler.Mark("MainWindow ctor exit");
         }
@@ -167,6 +168,11 @@ namespace llcom_plus
             public string recvScriptPara { get; set; }
             public bool appendCrlf { get; set; }
             public bool disableSuggestion { get; set; }
+            public int responseMode { get; set; }
+            public string expectedResponse { get; set; } = "";
+            public int responseTimeoutMs { get; set; } = 5000;
+            public int responseRetries { get; set; }
+            public bool skipInWorkflow { get; set; }
         }
 
         private sealed class QuickSendImportResult
@@ -230,14 +236,24 @@ namespace llcom_plus
             }
 
             public string Key { get; }
-            public string Title { get; }
+            public string Title { get; set; }
+            public string Category { get; set; }
+            public bool IsFavorite { get; set; }
+            public string Group => IsFavorite ? "★ 常用 / Favorites" : Category;
+            public int GroupOrder => IsFavorite ? 0 : Category == "调试与分析 / Analysis" ? 1 : Category == "连接 / Connections" ? 2 : 3;
 
             public FrameworkElement GetContent()
             {
                 if (content == null)
-                    content = contentFactory();
+                {
+                    var created = contentFactory();
+                    content = created is Page page
+                        ? new Frame { NavigationUIVisibility = NavigationUIVisibility.Hidden, Content = page }
+                        : created;
+                }
                 return content;
             }
+            public FrameworkElement PeekContent() => content;
         }
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
@@ -383,9 +399,12 @@ namespace llcom_plus
 
         private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (!lazyLoadReady)
-                return;
             if (!ReferenceEquals(e.OriginalSource, MainTabControl))
+                return;
+
+            if (TimelineTab != null && MainTabControl.SelectedItem == TimelineTab)
+                EnsureTimelineInitialized();
+            if (!lazyLoadReady)
                 return;
 
             if (MainTabControl.SelectedItem != QuickSendTab)
@@ -424,7 +443,7 @@ namespace llcom_plus
             {
                 toolsInitialized = true;
                 RegisterToolModules();
-                ToolListBox.ItemsSource = toolModules;
+                BindToolModules();
             }
 
             if (ToolListBox.SelectedIndex < 0 && toolModules.Count > 0)
@@ -435,10 +454,17 @@ namespace llcom_plus
 
         private void RegisterToolModules()
         {
+            LoadToolFavorites();
             toolModules.Clear();
             AddFrameTool("EncodingTools", GetResourceText("EncodingToolsTab", "编码转换工具"), "UI/Pages/ConvertPage.xaml");
             AddFrameTool("Mqtt", "MQTT", "UI/Pages/MqttTestPage.xaml");
             AddFrameTool("SerialMonitor", GetResourceText("SerialMonitorHeader", "串口监听"), "UI/Pages/SerialMonitorPage.xaml");
+            AddContentTool("PowerDiagnostics", GetResourceText("PowerDiagnosticsTool", "低功耗诊断"), () =>
+            {
+                var page = new Pages.LogAnalysisPage();
+                page.FocusSearch(power: true);
+                return page;
+            });
             AddFrameTool("LogReplay", GetResourceText("LogReplayToolTab", "日志回放"), "UI/Pages/LogReplayPage.xaml");
             AddFrameTool("CircularSend", GetResourceText("CircularSendToolTab", "循环发送"), "UI/Pages/CircularSendPage.xaml");
             AddFrameTool("EncodingFix", GetResourceText("EncodingFixHeader", "乱码修复"), "UI/Pages/EncodingFixPage.xaml");
@@ -447,6 +473,7 @@ namespace llcom_plus
             AddContentTool("HttpTool", GetResourceText("HttpToolTab", "HTTP工具"), () => new HttpToolWindow());
             AddContentTool("DataCalc", GetResourceText("DataCalcToolTab", "数据计算/文件发送"), () => new Pages.DataCalcFileSendView());
             AddFrameTool("TcpClient", GetResourceText("TcpClientTitle", "socket客户端"), "UI/Pages/SocketClientPage.xaml");
+            AddContentTool("Workspaces", GetResourceText("WorkspacesTool", "工作区"), CreateWorkspacePage);
         }
 
         private void RefreshToolModulesLocalization()
@@ -457,7 +484,7 @@ namespace llcom_plus
             var selectedKey = (ToolListBox.SelectedItem as ToolModule)?.Key;
             RegisterToolModules();
             ToolListBox.ItemsSource = null;
-            ToolListBox.ItemsSource = toolModules;
+            BindToolModules();
 
             var selectedModule = toolModules.FirstOrDefault(module => module.Key == selectedKey);
             ToolListBox.SelectedItem = selectedModule ?? toolModules.FirstOrDefault();
@@ -466,13 +493,13 @@ namespace llcom_plus
 
         private void AddFrameTool(string key, string title, string pagePath)
         {
-            toolModules.Add(new ToolModule(key, title, () =>
+            AddContentTool(key, title, () =>
             {
                 var frame = new Frame { NavigationUIVisibility = NavigationUIVisibility.Hidden };
                 StartupProfiler.Measure($"CreateToolFrame {pagePath}", () =>
                     frame.Navigate(new Uri(pagePath, UriKind.Relative)));
                 return frame;
-            }));
+            });
         }
 
         private void Global_SerialSplitScreenChangedEvent(object sender, EventArgs e)
@@ -1116,7 +1143,13 @@ namespace llcom_plus
 
         private void AddContentTool(string key, string title, Func<FrameworkElement> contentFactory)
         {
-            toolModules.Add(new ToolModule(key, title, contentFactory));
+            // Regrouping/localization must preserve live pages and jobs.
+            if (!toolModuleCache.TryGetValue(key, out var module))
+                toolModuleCache[key] = module = new ToolModule(key, title, contentFactory);
+            module.Title = title;
+            module.Category = ToolCategory(key);
+            module.IsFavorite = favoriteToolKeys.Contains(key);
+            toolModules.Add(module);
         }
 
         private FrameworkElement CreateLaunchToolPanel(string buttonText, RoutedEventHandler clickHandler)
@@ -1157,6 +1190,8 @@ namespace llcom_plus
                 return;
 
             ToolContentHost.Content = module.GetContent();
+            if (module.Key == "PowerDiagnostics" && module.GetContent() is Frame powerFrame &&
+                powerFrame.Content is Pages.LogAnalysisPage powerPage) powerPage.FocusSearch(power: true);
         }
 
         private void RightToolsToggleButton_Click(object sender, RoutedEventArgs e)
@@ -1319,6 +1354,8 @@ namespace llcom_plus
 
         private void LoadQuickSendList()
         {
+            InvalidateQuickReorder();
+            ClearQuickSendUndo();
             CloseQuickSendItemSettings();
             ExitQuickSendKeyboardNavigation();
             NormalizeQuickSendRows();
@@ -1491,6 +1528,7 @@ namespace llcom_plus
         {
             var pendingSend = Dispatcher.Invoke(new Func<Task>(() =>
             {
+                if (BlockManualSendDuringQuickWorkflow(true)) return Task.CompletedTask;
                 SetReceiveScriptContext(recvScriptBackup, "", data);
                 return sendUartData(data, true, false);
             }));
@@ -1519,6 +1557,24 @@ namespace llcom_plus
                 pendingSend.GetAwaiter().GetResult();
         }
 
+        private void MainWindow_AnalysisKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.F || Keyboard.Modifiers != ModifierKeys.Control || ScriptTab.IsSelected) return;
+            if (TimelineTab.IsSelected && TimelineTab.IsKeyboardFocusWithin)
+                mainTimelinePage?.FocusQuery();
+            else
+                ShowMainLogSearch();
+            e.Handled = true;
+        }
+
+        private void NotificationListBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (!(NotificationListBox.SelectedItem is AppNotificationItem item)) return;
+            NotificationPopup.IsOpen = false;
+            OpenLogAnalysis(item.PortName, item.Timestamp);
+            e.Handled = true;
+        }
+
         private async Task<bool> Global_SendDataRequestAsync(
             Tools.UartSendRequest request,
             CancellationToken token)
@@ -1532,6 +1588,14 @@ namespace llcom_plus
                 token.ThrowIfCancellationRequested();
                 if (windowIsClosing || Tools.Global.isMainWindowsClosed)
                     throw new OperationCanceledException("The serial window is closing.", token);
+
+                if (!string.IsNullOrEmpty(request.ExpectedTargetIdentity))
+                {
+                    var target = Tools.Global.CaptureActiveSerialTarget();
+                    if (target == null || !target.IsOpen ||
+                        !string.Equals(target.Identity, request.ExpectedTargetIdentity, StringComparison.Ordinal))
+                        throw new InvalidOperationException("测试已停止：串口连接或发送目标已改变，请重新开始测试。");
+                }
 
                 SetReceiveScriptContext(recvScriptBackup, "", request.Data);
                 // Resolve the target and profile on the UI thread before enqueueing;
@@ -2160,6 +2224,7 @@ namespace llcom_plus
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             windowIsClosing = true;
+            CancelQuickWorkflow();
             CloseQuickSendItemSettings();
             CancelQuickSendImport();
             Tools.Global.setting.windowLeft = this.Left;
@@ -2698,6 +2763,7 @@ namespace llcom_plus
             bool autoOpen = true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (BlockManualSendDuringQuickWorkflow(propagateErrors)) return Task.CompletedTask;
             if (data == null)
                 return Task.CompletedTask;
 
@@ -2729,7 +2795,10 @@ namespace llcom_plus
                     sourceText,
                     propagateErrors);
                 if (splitData == null || splitData.Length == 0)
+                {
+                    if (propagateErrors) throw new InvalidOperationException("发送处理后没有数据，流程已停止，未发送指令。");
                     return Task.CompletedTask;
+                }
 
                 return SendToSelectedSplitSlotAsync(
                     splitData, autoOpen, cancellationToken, propagateErrors, targetSlot);
@@ -2769,11 +2838,11 @@ namespace llcom_plus
                     connection.Profile,
                     sourceText,
                     propagateErrors);
-                if (dataConvert == null)
+                if (dataConvert == null || dataConvert.Length == 0)
+                {
+                    if (propagateErrors) throw new InvalidOperationException("发送处理后没有数据，流程已停止，未发送指令。");
                     return Task.CompletedTask;
-
-                if (dataConvert.Length == 0)
-                    return Task.CompletedTask;
+                }
 
                 return SendMainSerialAsync(
                     connection, dataConvert, applySendProcessing ? data : null, sessionStringLogOverride,
@@ -3398,10 +3467,12 @@ namespace llcom_plus
                 return;
 
             Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
+            RememberQuickSendDeletion(item);
             ExitQuickSendKeyboardNavigation();
             if (toSendListItems.Count <= 1)
             {
                 ClearQuickSendItem(item, 1);
+                CaptureQuickSendPlaceholder();
                 SaveSendList(null, EventArgs.Empty);
                 return;
             }
@@ -3452,6 +3523,11 @@ namespace llcom_plus
                 item.recvScriptPara = "";
                 item.appendCrlf = true;
                 item.disableSuggestion = false;
+                item.responseMode = 0;
+                item.expectedResponse = "";
+                item.responseTimeoutMs = 5000;
+                item.responseRetries = 0;
+                item.skipInWorkflow = false;
             }
             finally
             {
@@ -3830,6 +3906,7 @@ namespace llcom_plus
 
         private void SendQuickSendItem(ToSendData data)
         {
+            if (BlockManualSendDuringQuickWorkflow(false)) return;
             if (data == null)
                 return;
 
@@ -3916,10 +3993,9 @@ namespace llcom_plus
             {
                 if (toSendListItems[i].id != i + 1)
                 {
-                    var item = toSendListItems[i];
-                    toSendListItems.RemoveAt(i);//元素删掉重新加进去
-                    item.id = i + 1;
-                    toSendListItems.Insert(i, item);
+                    // IDs remain persisted for legacy scripts; the row now uses a
+                    // drag handle, and property notification needs no remove/add.
+                    toSendListItems[i].id = i + 1;
                 }
             }
         }
@@ -4386,25 +4462,8 @@ namespace llcom_plus
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(notification.PortName))
-            {
-                AddNotification(
-                    notification.Timestamp,
-                    notification.Title,
-                    notification.Message,
-                    notification.Level,
-                    notification.Category);
-            }
-            else
-            {
-                AddPortNotification(
-                    notification.Timestamp,
-                    notification.Title,
-                    notification.Message,
-                    notification.Level,
-                    notification.Category,
-                    notification.PortName);
-            }
+            AddNotificationCore(notification.Timestamp, notification.Title, notification.Message,
+                notification.Level, notification.Category, notification.PortName, recordTrace: false);
         }
 
         private void AddSerialConnectionNotification(string portName, bool reconnected)
@@ -4491,9 +4550,14 @@ namespace llcom_plus
             string message,
             AppNotificationLevel level,
             AppNotificationCategory category,
-            string portName)
+            string portName,
+            bool recordTrace = true)
         {
             var effectiveTimestamp = timestamp == default(DateTime) ? DateTime.Now : timestamp;
+            if (recordTrace && category != AppNotificationCategory.SerialPin)
+                SerialTraceHub.RecordEvent(portName, "",
+                    level == AppNotificationLevel.Error ? SerialTraceKind.Error : SerialTraceKind.Info,
+                    (title ?? "") + " | " + (message ?? ""), effectiveTimestamp);
             notificationItems.Insert(0, new AppNotificationItem
             {
                 Timestamp = effectiveTimestamp,
@@ -4934,49 +4998,6 @@ namespace llcom_plus
             }
         }
 
-        //id序号右击事件
-        private void TextBlock_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            ToSendData data;
-            try
-            {
-                data = ((TextBlock)sender).Tag as ToSendData;
-            }
-            catch
-            {
-                data = ((Grid)sender).Tag as ToSendData;
-            }
-            if (data == null)
-                return;
-            Tuple<bool, string> ret = Tools.InputDialog.OpenDialog(TryFindResource("QuickSendChangeIdButton") as string ?? "?!",
-                data.id.ToString(), (TryFindResource("QuickSendChangeIdTitle") as string ?? "?!") + data.id.ToString());
-
-            if (!ret.Item1)
-                return;
-            CheckToSendListId();
-            if (data.id <= 0 || data.id > toSendListItems.Count)
-                return;
-            if (ret.Item2.Trim().Length == 0)//留空删除该项目
-            {
-                Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
-                if (toSendListItems.Count <= 1)
-                    ClearQuickSendItem(data, 1);
-                else
-                    toSendListItems.RemoveAt(data.id-1);
-            }
-            else
-            {
-                int index = -1;
-                int.TryParse(ret.Item2, out index);
-                if (index == data.id || index <= 0 || index > toSendListItems.Count) return;
-                //移动到指定位置
-                var item = toSendListItems[data.id-1];
-                toSendListItems.RemoveAt(data.id-1);
-                toSendListItems.Insert(index - 1, item);
-            }
-            SaveSendList(null, EventArgs.Empty);
-        }
-
         private void MenuItem_Click_QuickSendList(object sender, RoutedEventArgs e)
         {
             int select = int.Parse((string)((MenuItem)sender).Tag);
@@ -5398,7 +5419,12 @@ namespace llcom_plus
                 recvScriptPath = source.recvScriptPath ?? string.Empty,
                 recvScriptPara = source.recvScriptPara ?? string.Empty,
                 appendCrlf = source.appendCrlf,
-                disableSuggestion = source.disableSuggestion
+                disableSuggestion = source.disableSuggestion,
+                responseMode = source.responseMode,
+                expectedResponse = source.expectedResponse ?? "",
+                responseTimeoutMs = source.responseTimeoutMs,
+                responseRetries = source.responseRetries,
+                skipInWorkflow = source.skipInWorkflow
             };
         }
 
@@ -5438,6 +5464,8 @@ namespace llcom_plus
                 ValidateImportedQuickSendField(item.commit, ref totalCharacters);
                 ValidateImportedQuickSendField(item.recvScriptPath, ref totalCharacters);
                 ValidateImportedQuickSendField(item.recvScriptPara, ref totalCharacters);
+                ValidateImportedQuickSendField(item.expectedResponse, ref totalCharacters);
+                Tools.QuickSendWorkflow.Validate(Tools.QuickSendBackupItem.FromModel(item));
 
                 if (string.IsNullOrWhiteSpace(item.recvScriptPath))
                 {
@@ -5715,6 +5743,7 @@ namespace llcom_plus
 
         private void uartDataFlowDocument_PreviewTextInput(object sender, TextCompositionEventArgs e)
         {
+            if (IsMainLogSearchActive || IsQuickWorkflowRunning) return;
             if (e.TextComposition.Text.Length < 1 || !Tools.Global.setting.terminal)
                 return;
             if (IsSerialSplitModeActive())
@@ -5738,6 +5767,7 @@ namespace llcom_plus
 
         private void uartDataFlowDocument_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (IsMainLogSearchActive || IsQuickWorkflowRunning) return;
             if (!IsCtrlKeyDown() || !Tools.Global.setting.terminal)
                 return;
 

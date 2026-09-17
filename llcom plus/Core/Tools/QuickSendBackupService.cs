@@ -1092,6 +1092,20 @@ namespace llcom_plus.Tools
         [JsonProperty("disableSuggestion", Order = 8)]
         internal bool DisableSuggestion { get; set; }
 
+        // Omit defaults to preserve the canonical hash of pre-workflow snapshots.
+        [JsonProperty("responseMode", Order = 9, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        internal int ResponseMode { get; set; }
+        [System.ComponentModel.DefaultValue("")]
+        [JsonProperty("expectedResponse", Order = 10, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        internal string ExpectedResponse { get; set; } = string.Empty;
+        [System.ComponentModel.DefaultValue(5000)]
+        [JsonProperty("responseTimeoutMs", Order = 11, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        internal int ResponseTimeoutMs { get; set; } = 5000;
+        [JsonProperty("responseRetries", Order = 12, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        internal int ResponseRetries { get; set; }
+        [JsonProperty("skipInWorkflow", Order = 13, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        internal bool SkipInWorkflow { get; set; }
+
         internal static QuickSendBackupItem FromModel(Model.ToSendData source)
         {
             source = source ?? new Model.ToSendData();
@@ -1104,7 +1118,12 @@ namespace llcom_plus.Tools
                 ReceiveScriptPath = source.recvScriptPath ?? string.Empty,
                 ReceiveScriptParameter = source.recvScriptPara ?? string.Empty,
                 AppendCrlf = source.appendCrlf,
-                DisableSuggestion = source.disableSuggestion
+                DisableSuggestion = source.disableSuggestion,
+                ResponseMode = source.responseMode,
+                ExpectedResponse = source.expectedResponse ?? string.Empty,
+                ResponseTimeoutMs = source.responseTimeoutMs,
+                ResponseRetries = source.responseRetries,
+                SkipInWorkflow = source.skipInWorkflow
             };
         }
 
@@ -1119,7 +1138,12 @@ namespace llcom_plus.Tools
                 ReceiveScriptPath = ReceiveScriptPath ?? string.Empty,
                 ReceiveScriptParameter = ReceiveScriptParameter ?? string.Empty,
                 AppendCrlf = AppendCrlf,
-                DisableSuggestion = DisableSuggestion
+                DisableSuggestion = DisableSuggestion,
+                ResponseMode = ResponseMode,
+                ExpectedResponse = ExpectedResponse ?? string.Empty,
+                ResponseTimeoutMs = ResponseTimeoutMs,
+                ResponseRetries = ResponseRetries,
+                SkipInWorkflow = SkipInWorkflow
             };
         }
 
@@ -1134,7 +1158,12 @@ namespace llcom_plus.Tools
                 recvScriptPath = ReceiveScriptPath ?? string.Empty,
                 recvScriptPara = ReceiveScriptParameter ?? string.Empty,
                 appendCrlf = AppendCrlf,
-                disableSuggestion = DisableSuggestion
+                disableSuggestion = DisableSuggestion,
+                responseMode = ResponseMode,
+                expectedResponse = ExpectedResponse ?? string.Empty,
+                responseTimeoutMs = ResponseTimeoutMs,
+                responseRetries = ResponseRetries,
+                skipInWorkflow = SkipInWorkflow
             };
         }
 
@@ -1151,7 +1180,8 @@ namespace llcom_plus.Tools
                 !string.IsNullOrWhiteSpace(ReceiveScriptPath) ||
                 !string.IsNullOrWhiteSpace(ReceiveScriptParameter) ||
                 !AppendCrlf ||
-                DisableSuggestion;
+                DisableSuggestion || ResponseMode != 0 || !string.IsNullOrEmpty(ExpectedResponse) ||
+                ResponseTimeoutMs != 5000 || ResponseRetries != 0 || SkipInWorkflow;
         }
     }
 

@@ -25,6 +25,7 @@ public static class LowPowerRegressionProbe
     {
         internal readonly object Controller, Line, Profile, Key = new object();
         internal Func<bool> Current = () => true;
+        internal Action<string> Trace;
         internal Fixture(Assembly assembly)
         {
             var type = assembly.GetType("llcom_plus.Model.DtrWakeController", true);
@@ -41,7 +42,7 @@ public static class LowPowerRegressionProbe
         internal object Timer { get { return Controller.GetType().GetField("restoreTimerState", Instance).GetValue(Controller); } }
         internal void Send(Action send, CancellationToken token = default(CancellationToken))
         {
-            Call(Controller, "ExecuteWithWakeCore", Key, 1L, Current, Profile, token, send, Line);
+            Call(Controller, "ExecuteWithWakeCore", Key, 1L, Current, Profile, token, send, Line, Trace);
         }
         internal void Receive() { Call(Controller, "RenewAfterReceiveCore", Key, 1L, Current, Profile, Line); }
         internal void Fire(object timer) { Call(Controller, "RestoreAfterIdle", timer); }
@@ -55,6 +56,16 @@ public static class LowPowerRegressionProbe
         var controllerType = assembly.GetType("llcom_plus.Model.DtrWakeController", true);
         Assert((bool)controllerType.GetMethod("ProbeDtrWakeLifecycleBehavior", Static).Invoke(null, null),
             "Base wake lifecycle, RX renewal, manual DTR and no-retry regression failed.");
+
+        using (var f = new Fixture(assembly))
+        {
+            int observations = 0, sends = 0;
+            f.Trace = message => { observations++; throw new InvalidOperationException("Synthetic observer failure"); };
+            f.Send(() => { sends++; Assert(f.Enabled, "Trace observer interrupted DTR assertion."); });
+            Assert(observations > 0 && sends == 1, "Trace observer failure interrupted or repeated a write.");
+            f.Fire(f.Timer);
+            Assert(!f.Enabled, "Trace observer failure prevented DTR restoration.");
+        }
 
         for (int i = 0; i < 40; i++)
         {

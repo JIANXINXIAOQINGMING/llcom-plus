@@ -15,6 +15,7 @@ namespace llcom_plus
         internal ToSendData Item => DataContext as ToSendData;
         public event EventHandler CloseRequested;
         public event EventHandler DeleteRequested;
+        public event EventHandler DuplicateRequested;
 
         public QuickSendItemSettings()
         {
@@ -109,7 +110,16 @@ namespace llcom_plus
             ScriptWarning.Visibility = Visibility.Visible;
         }
 
+        internal bool CommitWorkflowFields()
+        {
+            // A text-to-number binding failure must not silently run with an old value.
+            ResponseTimeoutTextBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            ResponseRetriesTextBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            return !Validation.GetHasError(ResponseTimeoutTextBox) && !Validation.GetHasError(ResponseRetriesTextBox);
+        }
+
         private void CloseButton_Click(object sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
         private void DeleteCommandButton_Click(object sender, RoutedEventArgs e) => DeleteRequested?.Invoke(this, EventArgs.Empty);
+        private void DuplicateCommandButton_Click(object sender, RoutedEventArgs e) => DuplicateRequested?.Invoke(this, EventArgs.Empty);
     }
 }
