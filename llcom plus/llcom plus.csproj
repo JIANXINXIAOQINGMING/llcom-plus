@@ -278,6 +278,7 @@
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Core\Tools\InputDialog.cs" />
+    <Compile Include="Core\Tools\SendInputHistory.cs" />
     <Compile Include="Core\Tools\AppInfo.cs" />
     <Compile Include="Core\Tools\DataCalcResult.cs" />
     <Compile Include="Core\Tools\CipherSuitePicker.cs" />
@@ -308,6 +309,7 @@
     <Compile Include="UI\View\MainWindow.Workspaces.cs" />
     <Compile Include="UI\View\MainWindow.QuickCommands.cs" />
     <Compile Include="UI\View\MainWindow.QuickReorder.cs" />
+    <Compile Include="UI\View\MainWindow.SendInput.cs" />
     <Compile Include="UI\Pages\WorkspacePage.xaml.cs">
       <DependentUpon>WorkspacePage.xaml</DependentUpon>
     </Compile>

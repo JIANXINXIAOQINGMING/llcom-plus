@@ -34,6 +34,7 @@
     <system:String x:Key="ErrorSendFileFail">文件发送失败！</system:String>
     <system:String x:Key="SendDataButton">发送</system:String>
     <system:String x:Key="SendDataButtonTip">按Ctrl+Enter同样也可以发送数据。</system:String>
+    <system:String x:Key="SendInputNavigationTip">↑ / ↓ 切换历史输入（多行时先在行间移动）；Tab 打开指令提示，↑ / ↓ 选择，Enter / Tab 填入，Esc 关闭。</system:String>
     <system:String x:Key="SplitSendTarget">目标</system:String>
     <system:String x:Key="SerialSendTarget">串口</system:String>
     <system:String x:Key="SplitSendTargetItem">窗口 {0}</system:String>

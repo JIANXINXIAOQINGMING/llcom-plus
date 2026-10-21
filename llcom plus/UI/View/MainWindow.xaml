@@ -523,6 +523,8 @@
                 AcceptsReturn="True"
                 FontFamily="Consolas"
                 PreviewKeyDown="ToSendDataTextBox_PreviewKeyDown"
+                SelectionChanged="ToSendDataTextBox_SelectionChanged"
+                ToolTip="{DynamicResource SendInputNavigationTip}"
                 Text="{Binding dataToSend}"
                 TextChanged="ToSendDataTextBox_TextChanged"
                 TextWrapping="Wrap"
@@ -548,6 +550,7 @@
                         Width="{Binding ElementName=toSendDataTextBox, Path=ActualWidth}"
                         FontFamily="Consolas"
                         HorizontalContentAlignment="Stretch"
+                        PreviewKeyDown="SendSuggestListBox_PreviewKeyDown"
                         MouseDoubleClick="SendSuggestListBox_MouseDoubleClick">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>

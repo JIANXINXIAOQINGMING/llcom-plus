@@ -3158,8 +3158,11 @@ namespace llcom_plus
                 return;
             }
 
-            if (sendSuggestPopup.IsOpen && HandleSendSuggestionKey(e))
+            if (HandleSendInputNavigation(e.Key, Keyboard.Modifiers))
+            {
+                e.Handled = true;
                 return;
+            }
 
             if ((e.Key != Key.Return && e.Key != Key.Enter) || !Tools.Global.setting.enterSend)
                 return;
@@ -3172,15 +3175,18 @@ namespace llcom_plus
 
         private void SendCurrentTextBoxData()
         {
+            if (BlockManualSendDuringQuickWorkflow()) return;
+            var sourceText = toSendDataTextBox.Text ?? string.Empty;
+            RememberSendInput(sourceText);
+            CloseSendSuggestions();
             if (IsMainSendTargetSelected())
             {
-                var targetData = PrepareMainSendTargetData(toSendDataTextBox.Text, Tools.Global.setting.hexSend);
+                var targetData = PrepareMainSendTargetData(sourceText, Tools.Global.setting.hexSend);
                 if (targetData.Length > 0)
                     Tools.Global.SendToMainSendTarget(targetData);
                 return;
             }
 
-            var sourceText = toSendDataTextBox.Text ?? string.Empty;
             var data = Global.GetEncoding().GetBytes(sourceText);
             var receiveScript = recvScriptBackup;
             if (IsSerialSplitModeActive() && mainSplitPortPage != null && !IsAllSerialTargetsSelected())
@@ -3220,29 +3226,27 @@ namespace llcom_plus
             return temp.ToArray();
         }
 
-        private bool HandleSendSuggestionKey(KeyEventArgs e)
+        private bool HandleSendSuggestionKey(Key key)
         {
-            if (e.Key == Key.Down)
+            if (key == Key.Down)
             {
                 SelectSendSuggestion(sendSuggestListBox.SelectedIndex + 1);
-                e.Handled = true;
                 return true;
             }
-            if (e.Key == Key.Up)
+            if (key == Key.Up)
             {
                 SelectSendSuggestion(sendSuggestListBox.SelectedIndex - 1);
-                e.Handled = true;
                 return true;
             }
-            if (e.Key == Key.Return || e.Key == Key.Enter || e.Key == Key.Tab)
+            if (key == Key.Return || key == Key.Enter || key == Key.Tab)
             {
-                e.Handled = ApplySelectedSendSuggestion();
-                return e.Handled;
+                ApplySelectedSendSuggestion();
+                CloseSendSuggestions();
+                return true;
             }
-            if (e.Key == Key.Escape)
+            if (key == Key.Escape)
             {
-                sendSuggestPopup.IsOpen = false;
-                e.Handled = true;
+                CloseSendSuggestions();
                 return true;
             }
             return false;
@@ -3250,8 +3254,9 @@ namespace llcom_plus
 
         private void ToSendDataTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (!applyingSendSuggestion)
-                UpdateSendSuggestions();
+            if (!applyingSendHistory)
+                sendInputHistory?.ResetNavigation();
+            CloseSendSuggestions();
         }
 
         private void ToSendDataTextBox_LostFocus(object sender, RoutedEventArgs e)
@@ -3271,7 +3276,8 @@ namespace llcom_plus
 
         private void UpdateSendSuggestions()
         {
-            if (!toSendDataTextBox.IsKeyboardFocusWithin)
+            // Invoked synchronously by Tab on the composer or its completion list.
+            if (toSendDataTextBox.IsReadOnly)
             {
                 sendSuggestPopup.IsOpen = false;
                 return;
@@ -3281,17 +3287,11 @@ namespace llcom_plus
             int prefixLength;
             var prefix = GetCurrentSendLinePrefix(out lineStart, out prefixLength);
             var matchPrefix = prefix.TrimStart();
-            if (matchPrefix.Length == 0)
-            {
-                sendSuggestPopup.IsOpen = false;
-                return;
-            }
-
             var items = GetQuickSendSuggestions()
                 .Select(i => new
                 {
                     Item = i,
-                    Rank = GetSendSuggestionRank(i.SendText, matchPrefix)
+                    Rank = matchPrefix.Length == 0 ? 0 : GetSendSuggestionRank(i.SendText, matchPrefix)
                 })
                 .Where(i => i.Rank >= 0)
                 .OrderBy(i => i.Rank)
@@ -3308,6 +3308,9 @@ namespace llcom_plus
 
             sendSuggestListBox.ItemsSource = items;
             sendSuggestListBox.Width = toSendDataTextBox.ActualWidth;
+            sendSuggestionCaretIndex = toSendDataTextBox.CaretIndex;
+            sendSuggestionSelectionStart = toSendDataTextBox.SelectionStart;
+            sendSuggestionSelectionLength = toSendDataTextBox.SelectionLength;
             sendSuggestPopup.IsOpen = true;
             SelectSendSuggestion(0);
         }
@@ -3431,7 +3434,8 @@ namespace llcom_plus
             applyingSendSuggestion = true;
             try
             {
-                toSendDataTextBox.Text = text.Remove(replaceStart, replaceLength).Insert(replaceStart, selectedText);
+                toSendDataTextBox.SetCurrentValue(TextBox.TextProperty,
+                    text.Remove(replaceStart, replaceLength).Insert(replaceStart, selectedText));
                 toSendDataTextBox.CaretIndex = replaceStart + selectedText.Length;
             }
             finally
@@ -4178,6 +4182,7 @@ namespace llcom_plus
         }
         private void Window_Deactivated(object sender, EventArgs e)
         {
+            CloseSendSuggestions();
             CloseQuickCommandActions();
             CloseQuickSendItemSettings();
             CloseNotificationPopup();

@@ -109,6 +109,8 @@ namespace llcom_plus.Model
         private string legacyTlsClientCertificatePassword;
         public event EventHandler MainWindowTop;
         private string _dataToSend = "uart data";
+        [JsonProperty("sendInputHistory", ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        private List<string> sendInputHistory = new List<string>();
         private int _baudRate = 115200;
         private bool _autoReconnect = true;
         private bool _autoSaveLog = true;
@@ -198,6 +200,7 @@ namespace llcom_plus.Model
         [OnDeserialized]
         internal void OnDeserialized(StreamingContext context)
         {
+            sendInputHistory = new Tools.SendInputHistory(sendInputHistory).Entries.ToList();
             if (legacyMqttPassword != null)
             {
                 _mqttPassword = legacyMqttPassword;
@@ -1466,6 +1469,15 @@ namespace llcom_plus.Model
                 _dtrWakeIdleMs = NormalizeDtrWakeIdleMilliseconds(value);
                 SaveUartProcessingSetting();
             }
+        }
+
+        internal IReadOnlyList<string> GetSendInputHistory() =>
+            new Tools.SendInputHistory(sendInputHistory).Entries;
+
+        internal void SaveSendInputHistory(IEnumerable<string> entries)
+        {
+            sendInputHistory = new Tools.SendInputHistory(entries).Entries.ToList();
+            Save(false);
         }
 
         public string dataToSend

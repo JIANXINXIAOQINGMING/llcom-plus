@@ -34,6 +34,7 @@
     <system:String x:Key="ErrorSendFileFail">File send failed!</system:String>
     <system:String x:Key="SendDataButton">Send</system:String>
     <system:String x:Key="SendDataButtonTip">same as Ctrl+Enter</system:String>
+    <system:String x:Key="SendInputNavigationTip">Up / Down: input history (move within multiline text first). Tab: command suggestions; Up / Down: select; Enter / Tab: insert; Esc: close.</system:String>
     <system:String x:Key="SplitSendTarget">Target</system:String>
     <system:String x:Key="SerialSendTarget">Serial</system:String>
     <system:String x:Key="SplitSendTargetItem">Pane {0}</system:String>
