@@ -61,6 +61,28 @@ jobs:
       - name: Build x86
         run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x86 /p:RequireNativeSourceBuild=true /v:normal
 
+      - name: Test CH347 transactions without hardware (x64 and x86)
+        shell: pwsh
+        run: |
+          foreach ($architecture in @('x64', 'x86')) {
+            $shellDirectory = if ($architecture -eq 'x64') { 'System32' } else { 'SysWOW64' }
+            $testPowerShell = Join-Path $env:WINDIR "$shellDirectory\WindowsPowerShell\v1.0\powershell.exe"
+            & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File .\build\Test-Ch347Bus.ps1 -Configuration Release -Platform $architecture
+            if ($LASTEXITCODE -ne 0) { throw "CH347 regression failed: $architecture" }
+          }
+
+      - name: Test serial release and reopen isolation without hardware (x64 and x86)
+        shell: pwsh
+        run: |
+          foreach ($architecture in @('x64', 'x86')) {
+            $shellDirectory = if ($architecture -eq 'x64') { 'System32' } else { 'SysWOW64' }
+            $testPowerShell = Join-Path $env:WINDIR "$shellDirectory\WindowsPowerShell\v1.0\powershell.exe"
+            foreach ($suite in @('Test-SerialPortAccess.ps1', 'Test-SerialDisconnection.ps1', 'Test-SerialReceiveIsolation.ps1')) {
+              & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File (Join-Path '.\build' $suite) -Configuration Release -Platform $architecture
+              if ($LASTEXITCODE -ne 0) { throw "Serial regression failed: $suite ($architecture)" }
+            }
+          }
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:

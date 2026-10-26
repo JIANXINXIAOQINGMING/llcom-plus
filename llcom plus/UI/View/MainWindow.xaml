@@ -226,6 +226,8 @@
         <Style x:Key="GlassTabControlStyle" TargetType="{x:Type TabControl}">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="UseLayoutRounding" Value="True" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type TabControl}">
@@ -235,15 +237,22 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Border
+                                x:Name="MainTabHeaderBorder"
                                 Grid.Row="0"
                                 HorizontalAlignment="Left"
-                                Margin="0,0,180,18"
+                                Margin="0,0,220,18"
                                 Padding="0"
                                 Background="Transparent"
                                 BorderThickness="0">
-                                <TabPanel
+                                <!-- Unlike TabPanel, WrapPanel keeps page order
+                                     stable when the selected page changes rows. -->
+                                <WrapPanel
+                                    x:Name="MainTabHeaderPanel"
+                                    Orientation="Horizontal"
                                     IsItemsHost="True"
                                     KeyboardNavigation.TabIndex="1"
+                                    KeyboardNavigation.TabNavigation="Once"
+                                    KeyboardNavigation.DirectionalNavigation="Cycle"
                                     Panel.ZIndex="1" />
                             </Border>
                             <Border Grid.Row="1" Background="Transparent">
@@ -264,7 +273,7 @@
             <Setter Property="Foreground" Value="{DynamicResource AppGlassTextBrush}" />
             <Setter Property="MinWidth" Value="104" />
             <Setter Property="Padding" Value="14,7" />
-            <Setter Property="Margin" Value="4,2" />
+            <Setter Property="Margin" Value="0,2,4,2" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -871,7 +880,7 @@
             Style="{StaticResource GlassTabControlStyle}"
             ItemContainerStyle="{StaticResource GlassTabItemStyle}"
             SelectionChanged="MainTabControl_SelectionChanged">
-                <TabItem Name="QuickSendTab" Header="{DynamicResource QuickSendCard}" Margin="0,3,0,-9" Width="104">
+                <TabItem Name="QuickSendTab" Header="{DynamicResource QuickSendCard}" Width="104">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="auto" />
@@ -1255,10 +1264,10 @@
                         </Border>
                     </Grid>
                 </TabItem>
-                <TabItem x:Name="TimelineTab" Header="{DynamicResource TimelineTabTitle}" Margin="0,2,0,-8" Width="104">
+                <TabItem x:Name="TimelineTab" Header="{DynamicResource TimelineTabTitle}" Width="104">
                     <Frame x:Name="MainTimelineFrame" NavigationUIVisibility="Hidden" Background="Transparent" BorderThickness="0" />
                 </TabItem>
-                <TabItem Name="ScriptTab" Header="{DynamicResource ScriptCard}" Margin="0,2,0,-8" Width="104">
+                <TabItem Name="ScriptTab" Header="{DynamicResource ScriptCard}" Width="104">
                     <Grid>
                         <!--  脚本编辑界面  -->
                         <Grid Name="scriptEditorGrid" Visibility="Visible">
@@ -1415,7 +1424,7 @@
                         <!--  脚本运行日志界面END  -->
                     </Grid>
                 </TabItem>
-                <TabItem Name="ToolsTab" Header="{DynamicResource ToolsTab}" Margin="0,2,0,-8" Width="104">
+                <TabItem Name="ToolsTab" Header="{DynamicResource ToolsTab}" Width="104">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="170" />
@@ -1586,6 +1595,7 @@
                         Name="CheckUpdateButton"
                         Width="36"
                         Height="36"
+                        Margin="0,0,4,0"
                         Padding="0"
                         Click="CheckUpdateButton_Click"
                         ToolTip="{DynamicResource AboutReleaseButton}">
@@ -1620,6 +1630,21 @@
                                     Text="!" />
                             </Border>
                         </Grid>
+                    </Button>
+                    <Button
+                        Name="AboutProjectButton"
+                        Width="36"
+                        Height="36"
+                        Padding="0"
+                        Click="AboutProjectButton_Click"
+                        AutomationProperties.Name="{DynamicResource AboutProjectTitle}"
+                        ToolTip="{DynamicResource AboutProjectTitle}">
+                        <fa:FontAwesome
+                            Width="17"
+                            Height="17"
+                            FontSize="17"
+                            Foreground="{DynamicResource AppInfoBrush}"
+                            Icon="InfoCircle" />
                     </Button>
                 </StackPanel>
             </Border>

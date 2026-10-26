@@ -3,7 +3,8 @@ param(
     [string]$Configuration = 'Release',
     [ValidateSet('x64', 'x86')]
     [string]$Platform = 'x64',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$OutputDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,13 +96,18 @@ if (-not $isWindowsPowerShell51 -or -not $isMatchingBitness -or -not $isStaThrea
     if ($SkipBuild) {
         $relaunchArguments += '-SkipBuild'
     }
+    if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
+        $relaunchArguments += @('-OutputDirectory', $OutputDirectory)
+    }
     & $matchingPowerShell @relaunchArguments
     exit $LASTEXITCODE
 }
 
 $root = Split-Path -Parent $PSScriptRoot
 $projectDir = Join-Path $root 'llcom plus'
-$outputDir = Join-Path $projectDir "bin\$Platform\$Configuration"
+$outputDir = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $projectDir "bin\$Platform\$Configuration"
+} else { [IO.Path]::GetFullPath($OutputDirectory) }
 $exePath = Join-Path $outputDir 'llcom plus.exe'
 $failures = New-Object System.Collections.Generic.List[string]
 
@@ -140,6 +146,9 @@ function Get-PeMachine([string]$path) {
 }
 
 if (-not $SkipBuild) {
+    if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
+        throw 'Build the custom output directory first and use -SkipBuild -OutputDirectory.'
+    }
     & (Join-Path $PSScriptRoot 'Build-Current.ps1') `
         -Configuration $Configuration `
         -Platform $Platform
@@ -1193,6 +1202,19 @@ if ($Configuration -eq 'Release') {
         try {
             Test-Condition ($null -ne $zip.GetEntry('llcom plus.exe')) 'Release ZIP contains the application'
             Test-Condition ($null -ne $zip.GetEntry('serial_monitor.dll')) 'Release ZIP contains the native serial monitor'
+            Test-Condition ($null -ne $zip.GetEntry('CH347/CH347DLL.dll')) 'Release ZIP contains the CH347 vendor runtime'
+            $ch347Entry = $zip.GetEntry('CH347/CH347DLL.dll')
+            if ($null -ne $ch347Entry) {
+                $ch347Stream = $ch347Entry.Open()
+                $hasher = [Security.Cryptography.SHA256]::Create()
+                try {
+                    $ch347Hash = [BitConverter]::ToString($hasher.ComputeHash($ch347Stream)).Replace('-', '')
+                    $expectedCh347Hash = if ($Platform -eq 'x64') {
+                        'D08C1CCD0146376A55602D9F2038DABC39C36AF95CF7A36F11B17D42F8420388'
+                    } else { '7C9F762A5F379928ED99DA8F2FE4C6128139A8331CE8D89A6F0E98317401A407' }
+                    Test-Condition ($ch347Hash -eq $expectedCh347Hash) 'Release ZIP contains the pinned matching-architecture CH347 runtime'
+                } finally { $ch347Stream.Dispose(); $hasher.Dispose() }
+            }
             Test-Condition ($null -ne $zip.GetEntry('llcom-plus-taskbar-v2.ico')) 'Release ZIP contains the dedicated taskbar icon'
             Test-Condition ($null -ne $zip.GetEntry('OpenSSL/openssl.exe')) 'Release ZIP contains OpenSSL'
             Test-Condition ($null -eq $zip.GetEntry('settings.json')) 'Release ZIP excludes settings.json'
@@ -1200,6 +1222,9 @@ if ($Configuration -eq 'Release') {
                 @($zip.Entries | Where-Object { $_.FullName -like 'quick-send-backups/*' }).Count -eq 0
             ) 'Release ZIP excludes user quick-send snapshots'
             Test-Condition ($null -eq $zip.GetEntry('circular_send.json')) 'Release ZIP excludes circular_send.json'
+            Test-Condition (
+                @($zip.Entries | Where-Object { $_.FullName -like 'ch347-presets.json*' }).Count -eq 0
+            ) 'Release ZIP excludes user CH347 presets, backups and temporary files'
             $containsCredentialSidecar = @($zip.Entries | Where-Object {
                 $_.FullName -like '.credentials/*' -or $_.FullName -like '*/.credentials/*'
             }).Count -gt 0

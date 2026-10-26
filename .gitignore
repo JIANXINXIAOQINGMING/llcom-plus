@@ -340,6 +340,13 @@ serial_monitor_rs/target/
 !llcom plus/Runtime/Native/x64/
 !llcom plus/Runtime/Native/x64/serial_monitor.dll
 
+# Vendor-signed CH347 runtime, split by process architecture.
+!llcom plus/Runtime/CH347/
+!llcom plus/Runtime/CH347/x86/
+!llcom plus/Runtime/CH347/x86/CH347DLL.dll
+!llcom plus/Runtime/CH347/x64/
+!llcom plus/Runtime/CH347/x64/CH347DLL.dll
+
 # Bundled OpenSSL runtime, split by target architecture.
 !llcom plus/Runtime/OpenSSL/x86/
 !llcom plus/Runtime/OpenSSL/x86/*.exe

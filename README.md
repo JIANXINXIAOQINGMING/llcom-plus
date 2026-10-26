@@ -84,6 +84,7 @@ llcom plus 是在原 [llcom](https://github.com/chenxuuu/llcom) 基础上继续�
 - 编码转换和乱码修复：用于常见字符集转换与文本恢复。
 - 曲线工具：脚本可将数据推送到曲线页显示。
 - WinUSB 工具：用于基础 USB/WinUSB 调试。
+- CH347 总线调试：I²C 地址扫描与读写、SPI 单片选读写/全双工交换、JTAG 手动 TAP 复位和 IR/DR 移位，支持常用操作和日志；周期读取仅用于 I²C/SPI。不包含芯片烧录、SWD 或自动 JTAG 链扫描。使用说明见 [CH347.md](CH347.md)。
 
 ## JavaScript 示例
 

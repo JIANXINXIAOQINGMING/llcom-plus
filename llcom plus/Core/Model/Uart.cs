@@ -902,6 +902,7 @@ namespace llcom_plus.Model
         public event EventHandler UartDataSent;
         public event EventHandler UartDataRawSent;
         private Stream lastPortBaseStream = null;
+        private Tools.SerialPortAccessCoordinator.Reservation serialReservation;
         private readonly object sendLock = new object();
         private readonly object receiveLock = new object();
         private readonly object lifecycleLock = new object();
@@ -917,6 +918,7 @@ namespace llcom_plus.Model
         // DTR 的设备再由用户按端口开启，避免“写入成功但设备正在重启”。
         private bool _dtr = false;
         private Tools.SerialPinMonitor pinMonitor;
+        private Tools.SerialConnectionMonitor connectionMonitor;
         private UartPortProfile runtimeProfileOverride;
 
         internal void SetRuntimeProfileOverride(UartPortProfile profile)
@@ -1073,6 +1075,42 @@ namespace llcom_plus.Model
                 return IsConnectionCurrentUnsafe(lease);
         }
 
+        internal bool RetireFailedConnection(ConnectionLease connection, Exception cause)
+        {
+            if (!Tools.SerialConnectionMonitor.IsDisconnectException(cause)) return false;
+            lock (lifecycleLock)
+            {
+                // IsOpen may already be false after removal. Monitor ownership records
+                // that this lease was actually opened, while generation rejects stale work.
+                if (!IsConnectionCurrentUnsafe(connection) || connectionMonitor == null)
+                    return false;
+                connectionMonitor.Dispose();
+                connectionMonitor = null;
+                Tools.Logger.AddUartLogDebug($"[UartDisconnected]{connection.PortName},generation={connection.Generation}:{cause.Message}");
+                try { RefreshSerialDeviceCore(waitForDispose: false); }
+                catch (Exception ex) { Tools.Logger.AddUartLogDebug("[UartDisconnected]retirement error:" + ex.Message); }
+                if (serial != null && !ReferenceEquals(serial, connection.Port) &&
+                    !string.IsNullOrWhiteSpace(connection.PortName))
+                {
+                    try { serial.PortName = connection.PortName; }
+                    catch (Exception ex) { Tools.Logger.AddUartLogDebug("[UartDisconnected]restore assignment error:" + ex.Message); }
+                }
+                WaitUartReceive.Set();
+            }
+            // A removed adapter is an expected connection event, not an app crash.
+            try { Tools.Global.NotifyUartPortClosed(connection.PortName); }
+            catch (Exception ex) { Tools.Logger.AddUartLogDebug("[UartDisconnected]notification error:" + ex.Message); }
+            return true;
+        }
+
+        internal void CheckDevicePresence(string[] availablePortNames)
+        {
+            if (availablePortNames == null) return;
+            var connection = CaptureConnectionLease();
+            if (!Tools.SerialConnectionMonitor.ContainsPort(availablePortNames, connection.PortName))
+                RetireFailedConnection(connection, new IOException("The serial device was removed: " + connection.PortName));
+        }
+
         public bool Rts
         {
             get
@@ -1202,15 +1240,23 @@ namespace llcom_plus.Model
 
         private void RefreshSerialDeviceCore(bool waitForDispose)
         {
-            Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]start");
+            var oldSerial = serial;
+            var oldBaseStream = lastPortBaseStream;
+            var oldReservation = serialReservation;
+            oldReservation?.BeginRelease();
+            serialReservation = null;
+            // Publish a closed replacement before touching the removed driver.
+            // Even if cleanup fails or hangs, IsOpen cannot keep reporting the old handle.
+            serial = new SerialPort();
             var retiredGeneration = connectionGeneration;
             connectionGeneration = unchecked(connectionGeneration + 1);
             if (connectionGeneration == 0)
                 connectionGeneration = 1;
-            var oldSerial = serial;
-            dtrWakeController.InvalidateConnection(oldSerial, retiredGeneration);
-            var oldBaseStream = lastPortBaseStream;
             lastPortBaseStream = null;
+            connectionMonitor?.Dispose();
+            connectionMonitor = null;
+            Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]start");
+            dtrWakeController.InvalidateConnection(oldSerial, retiredGeneration);
             pinMonitor?.Dispose();
             pinMonitor = null;
             try
@@ -1227,7 +1273,7 @@ namespace llcom_plus.Model
                 if (ReferenceEquals(pendingReceivePort, oldSerial))
                     pendingReceivePort = null;
             }
-            DisposeSerialResources(oldSerial, oldBaseStream, waitForDispose);
+            DisposeSerialResources(oldSerial, oldBaseStream, oldReservation, waitForDispose);
             Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]new");
             lock(useless)//短暂保留旧对象，避免系统回调还在引用；同时限制数量避免长期增长。
             {
@@ -1235,7 +1281,6 @@ namespace llcom_plus.Model
                 while (useless.Count > MaxRetiredSerialPorts)
                     useless.RemoveAt(0);
             }
-            serial = new SerialPort();
             //声明接收到事件
             serial.DataReceived += Serial_DataReceived;
             ConfigureSerialDevice(serial);
@@ -1251,7 +1296,8 @@ namespace llcom_plus.Model
                 : new Tools.SerialPinMonitor(port, Tools.Global.NotifySerialPinStatusChanged);
         }
 
-        private void DisposeSerialResources(SerialPort port, Stream baseStream, bool waitForDispose)
+        private void DisposeSerialResources(SerialPort port, Stream baseStream,
+            Tools.SerialPortAccessCoordinator.Reservation reservation, bool waitForDispose)
         {
             Action dispose = () =>
             {
@@ -1265,43 +1311,19 @@ namespace llcom_plus.Model
                     Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.DataReceived unsubscribe error:{e.Message}");
                 }
 
-                try
-                {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Close");
-                    if (port?.IsOpen == true)
-                        port.Close();
-                }
-                catch (Exception e)
-                {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Close error:{e.Message}");
-                }
-
-                try
-                {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Dispose");
-                    port?.Dispose();
-                }
-                catch (Exception e)
-                {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]SerialPort.Dispose error:{e.Message}");
-                }
-
-                try
-                {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose");
-                    baseStream?.Dispose();
-                }
-                catch (Exception e)
-                {
-                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]BaseStream.Dispose error:{e.Message}");
-                }
+                Tools.SerialPortAccessCoordinator.DisposePort(port, baseStream,
+                    message => Tools.Logger.AddUartLogDebug("[refreshSerialDevice]" + message));
             };
 
-            var task = Task.Run(dispose);
-            if (waitForDispose && !task.Wait(SerialDisposeTimeoutMilliseconds))
+            var task = Tools.SerialPortAccessCoordinator.ReleaseAsync(reservation, dispose);
+            if (waitForDispose)
             {
-                Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]dispose timeout {SerialDisposeTimeoutMilliseconds}ms");
-                throw new TimeoutException($"串口释放超过 {SerialDisposeTimeoutMilliseconds} 毫秒，后台仍在尝试释放。");
+                if (!((IAsyncResult)task).AsyncWaitHandle.WaitOne(SerialDisposeTimeoutMilliseconds))
+                {
+                    Tools.Logger.AddUartLogDebug($"[refreshSerialDevice]dispose timeout {SerialDisposeTimeoutMilliseconds}ms");
+                    throw new TimeoutException($"串口释放超过 {SerialDisposeTimeoutMilliseconds} 毫秒，后台仍在尝试释放；释放完成前不会重新打开。");
+                }
+                task.GetAwaiter().GetResult();
             }
         }
 
@@ -1372,14 +1394,28 @@ namespace llcom_plus.Model
 
         private void SetSerialOption(Action<SerialPort> apply)
         {
+            var connection = CaptureConnectionLease();
             try
             {
-                apply(serial);
+                apply(connection.Port);
             }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException ex)
             {
-                refreshSerialDevice(waitForDispose: false);
-                apply(serial);
+                if (connectionMonitor != null)
+                    ThreadPool.QueueUserWorkItem(_ => RetireFailedConnection(connection, ex));
+                else
+                {
+                    lock (lifecycleLock)
+                    {
+                        if (!IsConnectionCurrentUnsafe(connection)) return;
+                        RefreshSerialDeviceCore(waitForDispose: false);
+                        apply(serial);
+                    }
+                }
+            }
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+                ThreadPool.QueueUserWorkItem(_ => RetireFailedConnection(connection, ex));
             }
         }
 
@@ -1480,15 +1516,43 @@ namespace llcom_plus.Model
                 if (isShuttingDown || Tools.Global.isMainWindowsClosed)
                     throw new ObjectDisposedException(nameof(Uart), "程序正在退出，不能再打开串口。");
 
-                string temp = GetName();
-                Tools.Logger.AddUartLogDebug($"[UartOpen]refreshSerialDevice");
-                refreshSerialDevice();
-                serial.PortName = temp;
-                Tools.Logger.AddUartLogDebug($"[UartOpen]open");
-                serial.Open();
-                lastPortBaseStream = serial.BaseStream;
-                pinMonitor?.Arm();
-                Tools.Logger.AddUartLogDebug($"[UartOpen]done");
+                var portName = GetName();
+                Tools.SerialPortAccessCoordinator.Reservation reservation = null;
+                try
+                {
+                    // Acquire before touching a driver. The reservation also covers
+                    // another pane's still-running close, not just IsOpen=true.
+                    reservation = Tools.SerialPortAccessCoordinator.Acquire(portName, "Main UART / 主串口");
+                    Tools.Logger.AddUartLogDebug($"[UartOpen]refreshSerialDevice");
+                    refreshSerialDevice();
+                    serialReservation = reservation;
+                    serial.PortName = portName;
+                    Tools.Logger.AddUartLogDebug($"[UartOpen]open");
+                    serial.Open();
+                    lastPortBaseStream = serial.BaseStream;
+                    pinMonitor?.Arm();
+                    var connection = CaptureConnectionLease();
+                    connectionMonitor = new Tools.SerialConnectionMonitor(serial,
+                        error => RetireFailedConnection(connection, error));
+                    Tools.Logger.AddUartLogDebug($"[UartOpen]done");
+                }
+                catch (Exception error)
+                {
+                    if (reservation != null)
+                    {
+                        if (ReferenceEquals(serialReservation, reservation))
+                        {
+                            // A failed Open can still have created native resources.
+                            // Retire that object and retain its reservation until cleanup.
+                            try { RefreshSerialDeviceCore(waitForDispose: false); }
+                            catch (Exception cleanupError) { Tools.Logger.AddUartLogDebug("[UartOpen]cleanup:" + cleanupError.Message); }
+                            try { serial.PortName = portName; } catch { }
+                        }
+                        else reservation.Dispose();
+                    }
+                    var chinese = (Tools.Global.setting?.language ?? "zh-CN").StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+                    throw new IOException(Tools.SerialPortAccessCoordinator.GetOpenErrorMessage(error, portName, chinese), error);
+                }
             }
         }
 
@@ -1517,12 +1581,17 @@ namespace llcom_plus.Model
                     return;
 
                 isShuttingDown = true;
+                connectionMonitor?.Dispose();
+                connectionMonitor = null;
                 uiSendQueue.Stop();
                 var retiredGeneration = connectionGeneration;
                 connectionGeneration = unchecked(connectionGeneration + 1);
                 if (connectionGeneration == 0)
                     connectionGeneration = 1;
                 var oldSerial = serial;
+                var oldReservation = serialReservation;
+                oldReservation?.BeginRelease();
+                serialReservation = null;
                 dtrWakeController.InvalidateConnection(oldSerial, retiredGeneration);
                 var oldBaseStream = lastPortBaseStream;
                 pinMonitor?.Dispose();
@@ -1532,7 +1601,7 @@ namespace llcom_plus.Model
                 lock (receiveLock)
                     pendingReceivePort = null;
 
-                DisposeSerialResources(oldSerial, oldBaseStream, waitForDispose: true);
+                DisposeSerialResources(oldSerial, oldBaseStream, oldReservation, waitForDispose: true);
                 dtrWakeController.Dispose();
                 WaitUartReceive.Set();
                 Tools.Logger.AddUartLogDebug("[UartShutdown]all serial resources released");
@@ -1723,20 +1792,7 @@ namespace llcom_plus.Model
             catch (Exception ex) when (IsClosedSerialException(UnwrapSerialException(ex)))
             {
                 var cause = UnwrapSerialException(ex);
-                var notifyClosed = false;
-                lock (lifecycleLock)
-                {
-                    // A delayed failure from a retired SerialPort must never replace or
-                    // close the newer connection that now occupies Global.uart.serial.
-                    if (IsConnectionCurrentUnsafe(lease))
-                    {
-                        RefreshSerialDeviceCore(waitForDispose: false);
-                        notifyClosed = true;
-                    }
-                }
-
-                if (notifyClosed)
-                    Tools.Global.NotifyUartPortClosed(portName);
+                RetireFailedConnection(lease, cause);
                 throw new IOException("Serial port was closed while writing.", cause);
             }
         }
@@ -1783,9 +1839,7 @@ namespace llcom_plus.Model
 
         private static bool IsClosedSerialException(Exception ex)
         {
-            return ex is ObjectDisposedException ||
-                ex is IOException ||
-                ex is InvalidOperationException;
+            return Tools.SerialConnectionMonitor.IsDisconnectException(ex);
         }
 
         private static bool ByteArrayEquals(byte[] first, byte[] second)
@@ -1809,7 +1863,13 @@ namespace llcom_plus.Model
         private void Serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
             var eventPort = sender as SerialPort;
-            RenewDtrWakeAfterReceive(eventPort);
+            try { RenewDtrWakeAfterReceive(eventPort); }
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+                var failedConnection = CaptureConnectionLease(eventPort);
+                if (failedConnection != null) RetireFailedConnection(failedConnection, ex);
+                return;
+            }
             if (directReceiveMode)
             {
                 if (eventPort == null || !ReferenceEquals(eventPort, serial))
@@ -1839,9 +1899,10 @@ namespace llcom_plus.Model
 
         private void ReadDataDirect(SerialPort eventPort)
         {
+            ConnectionLease connection = null;
             try
             {
-                var connection = CaptureConnectionLease(eventPort);
+                connection = CaptureConnectionLease(eventPort);
                 if (connection == null)
                     return;
                 var profile = connection.Profile;
@@ -1890,6 +1951,7 @@ namespace llcom_plus.Model
                     catch (Exception ex)
                     {
                         Tools.Logger.AddUartLogDebug($"[UartReceive]direct read error:{ex.Message}");
+                        RetireFailedConnection(connection, ex);
                         break;
                     }
 
@@ -1904,6 +1966,10 @@ namespace llcom_plus.Model
 
                 PublishReceivedData(result, connection);
             }
+            catch (Exception ex) when (IsClosedSerialException(ex))
+            {
+                if (connection != null) RetireFailedConnection(connection, ex);
+            }
             finally
             {
                 Interlocked.Exchange(ref directReceiveScheduled, 0);
@@ -1911,9 +1977,11 @@ namespace llcom_plus.Model
                 // Data may have arrived after the final BytesToRead check while this
                 // callback was still marked as scheduled. Drain it without waiting for
                 // another driver notification.
+                ConnectionLease drainConnection = null;
                 try
                 {
-                    var currentPort = serial;
+                    drainConnection = CaptureConnectionLease();
+                    var currentPort = drainConnection.Port;
                     if (directReceiveMode &&
                         currentPort != null &&
                         currentPort.IsOpen &&
@@ -1922,6 +1990,10 @@ namespace llcom_plus.Model
                     {
                         ThreadPool.QueueUserWorkItem(_ => ReadDataDirect(currentPort));
                     }
+                }
+                catch (Exception ex) when (IsClosedSerialException(ex))
+                {
+                    if (drainConnection != null) RetireFailedConnection(drainConnection, ex);
                 }
                 catch
                 {
@@ -1987,72 +2059,81 @@ namespace llcom_plus.Model
                     return;
                 // A packet belongs to exactly one connection. Never reselect serial
                 // inside the aggregation loop: a COM switch may happen during Sleep.
-                var connection = CaptureConnectionLease();
-                var readPort = connection.Port;
-                var profile = connection.Profile;
-                if (profile.timeout > 0)
-                    System.Threading.Thread.Sleep(profile.timeout);//等待时间
-                else
-                    System.Threading.Thread.Sleep(10);//等待时间默认给个10ms吧，防止中文被分割
-                if (directReceiveMode)
-                    continue;
-                if (Tools.Global.isMainWindowsClosed)
-                    return;
-                List<byte> result = new List<byte>();
-                while (true)//循环读
+                ConnectionLease connection = null;
+                try
                 {
-                    try
-                    {
-                        byte[] traceBlock;
-                        int traceCount;
-                        lock (receiveLock)
-                        {
-                            if (directReceiveMode ||
-                                !ReferenceEquals(readPort, serial) ||
-                                connection.Generation != Interlocked.Read(ref connectionGeneration))
-                                break;
-
-                            if (readPort == null || !readPort.IsOpen)//串口被关了，不读了
-                                break;
-
-                            int length = readPort.BytesToRead;
-                            if (length == 0)//没数据，退出去
-                                break;
-                            byte[] rev = new byte[Math.Min(length, 65536)];
-                            var read = readPort.Read(rev, 0, rev.Length);//读数据
-                            if (read <= 0)
-                                break;
-                            if (read == rev.Length)
-                                result.AddRange(rev);//加到list末尾
-                            else
-                                result.AddRange(rev.Take(read));
-                            traceBlock = rev;
-                            traceCount = read;
-                        }
-                        Tools.SerialTraceHub.RecordBuffer(connection.PortName, connection.Identity,
-                            false, traceBlock, 0, traceCount, profile.encoding);
-                        RenewDtrWakeAfterReceive(readPort);
-                    }
-                    catch (Exception ex)
-                    {
-                        Tools.Logger.AddUartLogDebug($"[UartReceive]read error:{ex.Message}");
-                        break;
-                    }
-
-                    if (result.Count > profile.maxLength)//长度超了
-                        break;
-                    if (profile.bitDelay && profile.timeout > 0)//如果是设置了等待间隔时间
-                    {
+                    connection = CaptureConnectionLease();
+                    var readPort = connection.Port;
+                    var profile = connection.Profile;
+                    if (profile.timeout > 0)
                         System.Threading.Thread.Sleep(profile.timeout);//等待时间
-                    }
-                    else if (profile.timeout < 0)//如果是设置了等待间隔时间
-                    {
+                    else
                         System.Threading.Thread.Sleep(10);//等待时间默认给个10ms吧，防止中文被分割
+                    if (directReceiveMode)
+                        continue;
+                    if (Tools.Global.isMainWindowsClosed)
+                        return;
+                    List<byte> result = new List<byte>();
+                    while (true)//循环读
+                    {
+                        try
+                        {
+                            byte[] traceBlock;
+                            int traceCount;
+                            lock (receiveLock)
+                            {
+                                if (directReceiveMode ||
+                                    !ReferenceEquals(readPort, serial) ||
+                                    connection.Generation != Interlocked.Read(ref connectionGeneration))
+                                    break;
+
+                                if (readPort == null || !readPort.IsOpen)//串口被关了，不读了
+                                    break;
+
+                                int length = readPort.BytesToRead;
+                                if (length == 0)//没数据，退出去
+                                    break;
+                                byte[] rev = new byte[Math.Min(length, 65536)];
+                                var read = readPort.Read(rev, 0, rev.Length);//读数据
+                                if (read <= 0)
+                                    break;
+                                if (read == rev.Length)
+                                    result.AddRange(rev);//加到list末尾
+                                else
+                                    result.AddRange(rev.Take(read));
+                                traceBlock = rev;
+                                traceCount = read;
+                            }
+                            Tools.SerialTraceHub.RecordBuffer(connection.PortName, connection.Identity,
+                                false, traceBlock, 0, traceCount, profile.encoding);
+                            RenewDtrWakeAfterReceive(readPort);
+                        }
+                        catch (Exception ex)
+                        {
+                            Tools.Logger.AddUartLogDebug($"[UartReceive]read error:{ex.Message}");
+                            RetireFailedConnection(connection, ex);
+                            break;
+                        }
+
+                        if (result.Count > profile.maxLength)//长度超了
+                            break;
+                        if (profile.bitDelay && profile.timeout > 0)//如果是设置了等待间隔时间
+                        {
+                            System.Threading.Thread.Sleep(profile.timeout);//等待时间
+                        }
+                        else if (profile.timeout < 0)//如果是设置了等待间隔时间
+                        {
+                            System.Threading.Thread.Sleep(10);//等待时间默认给个10ms吧，防止中文被分割
+                        }
                     }
+                    if (Tools.Global.isMainWindowsClosed)
+                        return;
+                    PublishReceivedData(result, connection);
                 }
-                if (Tools.Global.isMainWindowsClosed)
-                    return;
-                PublishReceivedData(result, connection);
+                catch (Exception ex) when (IsClosedSerialException(ex))
+                {
+                    if (connection != null) RetireFailedConnection(connection, ex);
+                }
             }
         }
     }

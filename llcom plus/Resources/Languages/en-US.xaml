@@ -4,6 +4,18 @@
     xmlns:system="clr-namespace:System;assembly=mscorlib"
     xml:space="preserve">
     <system:String x:Key="AppTitle">llcom plus</system:String>
+    <system:String x:Key="AboutProjectTitle">About this project</system:String>
+    <system:String x:Key="AboutProjectVersion">Version</system:String>
+    <system:String x:Key="AboutProjectDescription">A serial and protocol debugging tool for embedded development, extending the original llcom project.</system:String>
+    <system:String x:Key="AboutProjectAuthor">Author</system:String>
+    <system:String x:Key="AboutProjectFeaturesTitle">Features</system:String>
+    <system:String x:Key="AboutProjectFeatures">Multi-port split view · Quick commands and workflows&#10;JavaScript scripting · Log search and timeline&#10;Network tools · CH347 I²C / SPI / JTAG</system:String>
+    <system:String x:Key="AboutProjectCredits">Built on the original llcom project. Thanks to the upstream project and all contributors.</system:String>
+    <system:String x:Key="AboutProjectLicense">Open source: Apache License 2.0. Third-party components retain their own licenses.</system:String>
+    <system:String x:Key="AboutProjectHome">Project home</system:String>
+    <system:String x:Key="AboutProjectUpstream">Original llcom</system:String>
+    <system:String x:Key="AboutProjectClose">Close</system:String>
+    <system:String x:Key="AboutProjectOpenLinkFailed">Unable to open the browser. Please try again later.</system:String>
     <system:String x:Key="TimelineTabTitle">Timeline</system:String>
     <system:String x:Key="OpenPort_open">Open</system:String>
     <system:String x:Key="OpenPort_close">Close</system:String>
@@ -34,6 +46,8 @@
     <system:String x:Key="ErrorSendFileFail">File send failed!</system:String>
     <system:String x:Key="SendDataButton">Send</system:String>
     <system:String x:Key="SendDataButtonTip">same as Ctrl+Enter</system:String>
+    <system:String x:Key="SerialDeviceDisconnectedMessage">The serial device was removed or is no longer accessible. Check the connection and reopen the port.</system:String>
+    <system:String x:Key="Ch347BusTool">Bus tools · CH347</system:String>
     <system:String x:Key="SendInputNavigationTip">Up / Down: input history (move within multiline text first). Tab: command suggestions; Up / Down: select; Enter / Tab: insert; Esc: close.</system:String>
     <system:String x:Key="SplitSendTarget">Target</system:String>
     <system:String x:Key="SerialSendTarget">Serial</system:String>

@@ -84,6 +84,7 @@ llcom plus is a serial debugging tool extended from the original [llcom](https:/
 - Encoding conversion and garbled-text recovery for common character-set conversion and text recovery.
 - Plot tool: scripts can push data to the plot page for display.
 - WinUSB tool: basic USB/WinUSB debugging.
+- CH347 bus tool: I²C scanning and write/read transactions, SPI single-CS transfers and full-duplex exchange, manual JTAG TAP reset and IR/DR shifts, presets, and logs. Periodic reads apply only to I²C/SPI; chip programming, SWD, and automatic JTAG chain discovery are not included. See [CH347.md](CH347.md) for setup and limitations.
 
 ## JavaScript Examples
 

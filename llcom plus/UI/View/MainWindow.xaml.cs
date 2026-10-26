@@ -114,6 +114,7 @@ namespace llcom_plus
         private bool forcusClosePort = true;
         private bool canSaveSendList = true;
         private bool isOpeningPort = false;
+        private string disconnectedMainPortName = string.Empty;
         private bool applyingSendSuggestion = false;
         private bool lazyLoadReady = false;
         private bool scriptEditorInitialized = false;
@@ -471,6 +472,7 @@ namespace llcom_plus
             AddFrameTool("EncodingFix", GetResourceText("EncodingFixHeader", "乱码修复"), "UI/Pages/EncodingFixPage.xaml");
             AddFrameTool("Plot", GetResourceText("PlotHeader", "曲线"), "UI/Pages/PlotPage.xaml");
             AddFrameTool("WinUsb", "WinUSB", "UI/Pages/WinUSBPage.xaml");
+            AddContentTool("Ch347Bus", GetResourceText("Ch347BusTool", "总线调试 · CH347"), () => new Pages.Ch347BusPage());
             AddContentTool("HttpTool", GetResourceText("HttpToolTab", "HTTP工具"), () => new HttpToolWindow());
             AddContentTool("DataCalc", GetResourceText("DataCalcToolTab", "数据计算/文件发送"), () => new Pages.DataCalcFileSendView());
             AddFrameTool("TcpClient", GetResourceText("TcpClientTitle", "socket客户端"), "UI/Pages/SocketClientPage.xaml");
@@ -1670,10 +1672,18 @@ namespace llcom_plus
 
         private void Global_UartPortClosedEvent(object sender, string portName)
         {
+            if (!Tools.Global.uart.IsOpen() && !string.IsNullOrWhiteSpace(portName))
+                Volatile.Write(ref disconnectedMainPortName, portName);
             Dispatcher.BeginInvoke(new Action(delegate
             {
                 if (Tools.Global.isMainWindowsClosed)
                     return;
+                // A queued loss notification must not tear down a later connection.
+                if (Tools.Global.uart.IsOpen())
+                {
+                    UpdateMainSerialConnectionStatus();
+                    return;
+                }
                 if (!forcusClosePort)
                 {
                     var displayName = string.IsNullOrWhiteSpace(portName)
@@ -1690,6 +1700,7 @@ namespace llcom_plus
                 }
                 if (IsSerialSplitModeRequested())
                 {
+                    mainSplitPortPage?.PreserveMainPortAssignment(portName);
                     ApplySerialSplitLayout();
                     return;
                 }
@@ -1748,6 +1759,7 @@ namespace llcom_plus
             }
 
             // 已有串口连接时只记录待切换端口，不提前把新端口配置应用到旧连接。
+            disconnectedMainPortName = string.Empty;
             if (!Tools.Global.uart.IsOpen())
                 ApplySelectedUartProfile();
             UpdateMainSerialConnectionStatus();
@@ -2031,13 +2043,17 @@ namespace llcom_plus
                         var portName = ExtractPortName(item);
                         return string.IsNullOrWhiteSpace(portName) || !actualPortNames.Contains(portName);
                     });
+                    Tools.Global.uart.CheckDevicePresence(actualPortNames.ToArray());
                 }
 
 
                 StartupProfiler.Measure("refreshPortList UI update", () => this.Dispatcher.Invoke(new Action(delegate {
-                    var preferredPort = !string.IsNullOrWhiteSpace(pendingSelectedPort)
-                        ? pendingSelectedPort
-                        : (!string.IsNullOrWhiteSpace(lastPort) ? lastPort : Tools.Global.uart.GetName());
+                    var rememberedDisconnectedPort = IsSerialSplitModeRequested()
+                        ? string.Empty : Volatile.Read(ref disconnectedMainPortName);
+                    var preferredPort = !string.IsNullOrWhiteSpace(rememberedDisconnectedPort)
+                        ? rememberedDisconnectedPort
+                        : (!string.IsNullOrWhiteSpace(pendingSelectedPort) ? pendingSelectedPort
+                            : (!string.IsNullOrWhiteSpace(lastPort) ? lastPort : Tools.Global.uart.GetName()));
                     string selectedItem = null;
                     foreach (string i in strs)
                     {
@@ -2046,12 +2062,26 @@ namespace llcom_plus
                             selectedItem = i;
                     }
 
+                    if (selectedItem == null && !IsSerialSplitModeRequested() &&
+                        !string.IsNullOrWhiteSpace(rememberedDisconnectedPort) &&
+                        string.Equals(preferredPort, rememberedDisconnectedPort, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Keep the missing assignment visible; do not silently select
+                        // another live adapter and later auto-connect to that adapter.
+                        selectedItem = preferredPort;
+                        serialPortsListComboBox.Items.Add(selectedItem);
+                    }
                     if (selectedItem == null && strs.Count > 0)
                         selectedItem = strs[0];
+                    if (selectedItem != null)
+                        serialPortsListComboBox.SelectedItem = selectedItem;
 
                     if (IsSerialSplitModeRequested())
                     {
-                        mainSplitPortPage?.RefreshSlotPorts(strs.Select(ExtractPortName).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray());
+                        // Only a successful driver inventory can prove device removal.
+                        // WMI may be partial/stale or unavailable during USB transitions.
+                        if (serialPortScanSucceeded)
+                            mainSplitPortPage?.RefreshSlotPorts(actualPortNames.ToArray());
                         if (selectedItem != null)
                             serialPortsListComboBox.SelectedItem = selectedItem;
                         refreshLock = false;
@@ -2076,7 +2106,7 @@ namespace llcom_plus
                     refreshLock = false;
                     UpdateMainSerialConnectionStatus();
 
-                    if (ShouldAutoReconnectAfterPortRefresh(
+                    if (actualPortNames.Contains(preferredPort) && ShouldAutoReconnectAfterPortRefresh(
                         preferredPort,
                         ExtractPortName(selectedItem),
                         Tools.Global.uart.IsOpen(),
@@ -2093,6 +2123,7 @@ namespace llcom_plus
                                 Tools.Logger.StartSessionLog(Tools.Global.uart.GetName());
                                 Dispatcher.Invoke(new Action(delegate
                                 {
+                                    disconnectedMainPortName = string.Empty;
                                     serialPortsListComboBox.IsEnabled = true;
                                     connectionStatusButton.IsEnabled = true;
                                     UpdateMainSerialConnectionStatus();
@@ -2164,21 +2195,31 @@ namespace llcom_plus
             if (msg == WmNcLButtonDown)
                 CloseNotificationPopup();
 
-            if (msg == 0x219 && !Tools.Global.uart.IsOpen())// 监听USB设备插拔消息
+            if (msg == 0x219 && !windowIsClosing && !Tools.Global.isMainWindowsClosed)// 监听USB设备插拔消息，包括已打开的串口
             {
                 if (UsbPluginDeley == 0)
                 {
                     ++UsbPluginDeley;   // Task启动需要准备时间,这里提前对公共变量加一
                     Task.Run(() =>
                     {
-                        do Task.Delay(100).Wait();
-                        while (++UsbPluginDeley < 10);
-                        UsbPluginDeley = 0;
-                        Dispatcher.Invoke(() =>
+                        try
                         {
-                            UsbDeviceNotifier_OnDeviceNotify();
-                        });
-                        Logger.AddUartLogInfo($"[USB拔插事件] {DateTime.Now:HH:mm:ss.fff}");
+                            do Task.Delay(100).Wait();
+                            while (++UsbPluginDeley < 10);
+                            UsbPluginDeley = 0;
+                            if (windowIsClosing || Dispatcher.HasShutdownStarted)
+                                return;
+                            Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                if (!windowIsClosing && !Tools.Global.isMainWindowsClosed)
+                                    UsbDeviceNotifier_OnDeviceNotify();
+                            }));
+                            Logger.AddUartLogInfo($"[USB拔插事件] {DateTime.Now:HH:mm:ss.fff}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.AddUartLogDebug("[USB拔插事件]refresh canceled/failed:" + ex.Message);
+                        }
                     });
                 }
                 else UsbPluginDeley = 1;
@@ -2491,6 +2532,7 @@ namespace llcom_plus
                     Tools.Logger.AddUartLogDebug($"[openPort]change show and send pending data");
                     this.Dispatcher.Invoke(new Action(delegate
                     {
+                        disconnectedMainPortName = string.Empty;
                         serialPortsListComboBox.IsEnabled = true;
                         connectionStatusButton.IsEnabled = true;
                         UpdateMainSerialConnectionStatus();
@@ -2563,6 +2605,7 @@ namespace llcom_plus
                 {
                     Tools.Logger.AddUartLogDebug($"[ConnectionStatusButton]close");
                     forcusClosePort = true;//不再重新开启串口
+                    disconnectedMainPortName = string.Empty;
                     lastPort = Tools.Global.uart.GetName();//串口号
                     Tools.Global.uart.Close(waitForDispose: true);
                     Tools.Logger.StopSessionLog();
@@ -4731,6 +4774,13 @@ namespace llcom_plus
         private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
         {
             await updateCheckController.CheckAsync();
+        }
+
+        private void AboutProjectButton_Click(object sender, RoutedEventArgs e)
+        {
+            CloseNotificationPopup();
+            new AboutProjectWindow { Owner = this }.ShowDialog();
+            e.Handled = true;
         }
 
         private void NotificationCenterButton_Click(object sender, RoutedEventArgs e)

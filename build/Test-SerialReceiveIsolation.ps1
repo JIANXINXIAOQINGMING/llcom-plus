@@ -3,7 +3,8 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
     [ValidateSet('x64', 'x86')]
-    [string]$Platform = 'x64'
+    [string]$Platform = 'x64',
+    [string]$OutputDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,11 @@ if ($PSVersionTable.PSVersion.Major -ne 5 -or
 }
 $root = Split-Path -Parent $PSScriptRoot
 $projectDir = Join-Path $root 'llcom plus'
-$outputDir = Join-Path $projectDir "bin\$Platform\$Configuration"
+$outputDir = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $projectDir "bin\$Platform\$Configuration"
+} else {
+    [IO.Path]::GetFullPath($OutputDirectory)
+}
 $exePath = Join-Path $outputDir 'llcom plus.exe'
 if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) { throw 'Build the application first.' }
 
@@ -58,7 +63,8 @@ Assert-Check ($publish -match '(?s)new UartReceiveEventArgs\(connection\).*?fore
 Write-Pass 'Source wiring: main UART rejects stale publication and rechecks before every subscriber.'
 
 $read = $uartSource.Substring($uartSource.IndexOf('private void ReadData()', [StringComparison]::Ordinal))
-Assert-Check ($read -match '(?s)var connection = CaptureConnectionLease\(\);\s*var readPort = connection.Port;\s*var profile = connection.Profile;') `
+Assert-Check ($read -match '(?s)ConnectionLease connection = null;\s*try\s*\{\s*connection = CaptureConnectionLease\(\);\s*var readPort = connection.Port;\s*var profile = connection.Profile;' -and
+    [regex]::Matches($read, '\bCaptureConnectionLease\(\)').Count -eq 1) `
     'The packet aggregation loop must capture one port and profile before reading.'
 Assert-Check ($read -match 'readPort.Read\(' -and
     $read -notmatch '\bserial.Read\(' -and

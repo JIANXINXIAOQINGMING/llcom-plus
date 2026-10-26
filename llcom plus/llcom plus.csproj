@@ -289,6 +289,18 @@
     <Compile Include="Core\Tools\EditorTheme.cs" />
     <Compile Include="Core\Tools\SshCli.cs" />
     <Compile Include="Core\Tools\SerialPinMonitor.cs" />
+    <Compile Include="Core\Tools\SerialConnectionMonitor.cs" />
+    <Compile Include="Core\Tools\SerialPortAccessCoordinator.cs" />
+    <Compile Include="UI\View\AboutProjectWindow.xaml.cs">
+      <DependentUpon>AboutProjectWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Core\Tools\Ch347BusModels.cs" />
+    <Compile Include="Core\Tools\Ch347PresetStore.cs" />
+    <Compile Include="Core\Tools\Ch347Native.cs" />
+    <Compile Include="Core\Tools\Ch347BusService.cs" />
+    <Compile Include="UI\Pages\Ch347BusPage.xaml.cs">
+      <DependentUpon>Ch347BusPage.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Core\Tools\SerialTraceHub.cs" />
     <Compile Include="Core\Tools\LogTextSearch.cs" />
     <Compile Include="Core\Tools\QuickSendWorkflow.cs" />
@@ -413,6 +425,14 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="UI\Pages\WinUSBPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\Pages\Ch347BusPage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UI\View\AboutProjectWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -637,6 +657,25 @@
     <Copy SourceFiles="@(OpenSslSharedRuntimeFile)" DestinationFiles="@(OpenSslSharedRuntimeFile->'$(TargetDir)OpenSSL\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(OpenSslPlatformRuntimeFile)" DestinationFiles="@(OpenSslPlatformRuntimeFile->'$(TargetDir)OpenSSL\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
+  <Target Name="CopyCh347RuntimeFiles" AfterTargets="Build">
+    <PropertyGroup>
+      <Ch347RuntimePlatform>$(PlatformTarget)</Ch347RuntimePlatform>
+      <Ch347RuntimePlatform Condition="'$(Ch347RuntimePlatform)' == ''">$(Platform)</Ch347RuntimePlatform>
+      <Ch347ExpectedHash Condition="'$(Ch347RuntimePlatform)' == 'x86'">7C9F762A5F379928ED99DA8F2FE4C6128139A8331CE8D89A6F0E98317401A407</Ch347ExpectedHash>
+      <Ch347ExpectedHash Condition="'$(Ch347RuntimePlatform)' == 'x64'">D08C1CCD0146376A55602D9F2038DABC39C36AF95CF7A36F11B17D42F8420388</Ch347ExpectedHash>
+    </PropertyGroup>
+    <ItemGroup>
+      <Ch347RuntimeFile Include="$(MSBuildProjectDirectory)\Runtime\CH347\$(Ch347RuntimePlatform)\CH347DLL.dll" />
+    </ItemGroup>
+    <Error Condition="'$(Ch347ExpectedHash)' == '' Or !Exists('@(Ch347RuntimeFile)')" Text="Missing CH347 runtime for $(Ch347RuntimePlatform)." />
+    <GetFileHash Files="@(Ch347RuntimeFile)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="Ch347HashedFile" />
+    </GetFileHash>
+    <Error Condition="'%(Ch347HashedFile.FileHash)' != '$(Ch347ExpectedHash)'" Text="CH347 vendor runtime hash mismatch: %(Ch347HashedFile.Identity)." />
+    <MakeDir Directories="$(TargetDir)CH347" />
+    <Copy SourceFiles="@(Ch347RuntimeFile)" DestinationFiles="$(TargetDir)CH347\CH347DLL.dll" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Runtime\CH347\README.txt" DestinationFiles="$(TargetDir)CH347\README.txt" SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="CopyUpdateSigningPublicKey" AfterTargets="Build">
     <Delete Files="$(TargetDir)UpdateSigningPublicKey.xml" Condition="!Exists('$(UpdateSigningPublicKeyFile)') And Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
     <Copy SourceFiles="$(UpdateSigningPublicKeyFile)" DestinationFiles="$(TargetDir)UpdateSigningPublicKey.xml" SkipUnchangedFiles="true" Condition="Exists('$(UpdateSigningPublicKeyFile)')" />
@@ -645,7 +684,7 @@
   <Target Name="CopyTaskbarIcon" AfterTargets="Build" DependsOnTargets="GenerateApplicationIcon">
     <Copy SourceFiles="$(MSBuildProjectDirectory)\Resources\Assets\AppIcon.ico" DestinationFiles="$(TargetDir)llcom-plus-taskbar-v2.ico" SkipUnchangedFiles="true" />
   </Target>
-  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles;CopyTaskbarIcon;CopyUpdateSigningPublicKey" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles;CopyCh347RuntimeFiles;CopyTaskbarIcon;CopyUpdateSigningPublicKey" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <ReleasePackageVersion>$(AppVersion)</ReleasePackageVersion>
       <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>
@@ -654,7 +693,7 @@
       <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
-      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir).credentials\**\*;$(TargetDir)quick-send-backups\**\*;$(TargetDir)circular_send.json;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir).credentials\**\*;$(TargetDir)quick-send-backups\**\*;$(TargetDir)circular_send.json;$(TargetDir)ch347-presets.json*;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
       <ReleasePackageFile Include="$(TargetDir)UpdateSigningPublicKey.xml" Condition="Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
       <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
       <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />

@@ -1,0 +1,289 @@
+<Page
+    x:Class="llcom_plus.Pages.Ch347BusPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="CH347"
+    d:DesignHeight="850"
+    d:DesignWidth="560"
+    Loaded="Page_Loaded"
+    Unloaded="Page_Unloaded"
+    TextElement.Foreground="{DynamicResource AppGlassTextBrush}"
+    mc:Ignorable="d">
+    <Page.Resources>
+        <!-- TabPanel measures tab items without their margins. With our rounded
+             standalone tab chrome that clips the bottom edge; a normal panel
+             reserves the complete tab bounds without changing the shared style. -->
+        <Style x:Key="BusProtocolTabs" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="UseLayoutRounding" Value="True" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border x:Name="ProtocolHeaderBorder"
+                                    Grid.Row="0" HorizontalAlignment="Left" Margin="0,0,0,8" Padding="4"
+                                    Background="{DynamicResource AppTabStripBackground}"
+                                    BorderBrush="{DynamicResource AppTabStripBorderBrush}"
+                                    BorderThickness="1" CornerRadius="12">
+                                <StackPanel x:Name="ProtocolHeaderPanel" Orientation="Horizontal" IsItemsHost="True"
+                                            KeyboardNavigation.TabIndex="1" KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                            </Border>
+                            <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1"
+                                              ContentSource="SelectedContent"
+                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="BusSection" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource AppGlassPanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppGlassBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style x:Key="BusField" TargetType="StackPanel">
+            <Setter Property="Width" Value="118" />
+            <Setter Property="Margin" Value="0,0,10,8" />
+        </Style>
+        <Style x:Key="BusLabel" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="Foreground" Value="{DynamicResource AppGlassMutedBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="BusHex" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="Background" Value="{DynamicResource AppGlassInputBackground}" />
+        </Style>
+    </Page.Resources>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="2,4,6,4">
+            <Border Style="{StaticResource BusSection}">
+                <StackPanel>
+                    <TextBlock FontSize="17" FontWeight="SemiBold" Text="{DynamicResource Ch347Title}" />
+                    <TextBlock Margin="0,3,0,8" Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Intro}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="DeviceComboBox" MinWidth="100" DisplayMemberPath="Label" SelectionChanged="Inputs_Changed">
+                            <ComboBox.ItemContainerStyle>
+                                <Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+                                    <Setter Property="ToolTip" Value="{Binding Device.DevicePath}" />
+                                </Style>
+                            </ComboBox.ItemContainerStyle>
+                        </ComboBox>
+                        <Button x:Name="RefreshButton" Grid.Column="1" Margin="6,0,0,0" Click="RefreshButton_Click" Content="{DynamicResource Ch347Refresh}" />
+                    </Grid>
+                    <WrapPanel Margin="0,7,0,0">
+                        <Button x:Name="ConnectButton" Margin="0,0,6,4" MinWidth="72" Click="ConnectButton_Click" Content="{DynamicResource Ch347Connect}" />
+                        <Button x:Name="DisconnectButton" Margin="0,0,10,4" MinWidth="72" Click="DisconnectButton_Click" Content="{DynamicResource Ch347Disconnect}" />
+                        <TextBlock x:Name="ConnectionStatusText" VerticalAlignment="Center" Margin="0,0,0,4" TextWrapping="Wrap" />
+                    </WrapPanel>
+                    <TextBlock x:Name="DeviceIdentityText" FontSize="11" Foreground="{DynamicResource AppGlassMutedBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource BusSection}">
+                <Expander Header="{DynamicResource Ch347Presets}" IsExpanded="False">
+                <StackPanel Margin="0,7,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="PresetComboBox" SelectionChanged="PresetComboBox_SelectionChanged" />
+                        <Button x:Name="DeletePresetButton" Grid.Column="1" Margin="6,0,0,0" Click="DeletePresetButton_Click" Content="{DynamicResource Ch347Delete}" />
+                    </Grid>
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="PresetNameTextBox" MaxLength="80" ToolTip="{DynamicResource Ch347PresetName}" />
+                        <Button x:Name="SavePresetButton" Grid.Column="1" Margin="6,0,0,0" Click="SavePresetButton_Click" Content="{DynamicResource Ch347SavePreset}" />
+                    </Grid>
+                </StackPanel>
+                </Expander>
+            </Border>
+
+            <Border Style="{StaticResource BusSection}">
+                <StackPanel>
+                    <TabControl x:Name="ProtocolTabs" Style="{StaticResource BusProtocolTabs}" SelectedIndex="0" SelectionChanged="Inputs_Changed">
+                        <TabItem x:Name="I2cTab" Header="I²C">
+                            <StackPanel x:Name="I2cInputs" Margin="4,9,4,4">
+                                <WrapPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347I2cAddress}" />
+                                        <TextBox x:Name="I2cAddressTextBox" Text="50" MaxLength="4" FontFamily="Consolas" TextChanged="Inputs_Changed" />
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Speed}" />
+                                        <ComboBox x:Name="I2cSpeedComboBox" SelectedIndex="1">
+                                            <ComboBoxItem Content="20 kHz" />
+                                            <ComboBoxItem Content="100 kHz" />
+                                            <ComboBoxItem Content="400 kHz" />
+                                            <ComboBoxItem Content="750 kHz" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347ReadLength}" />
+                                        <TextBox x:Name="I2cReadLengthTextBox" Text="1" MaxLength="4" TextChanged="Inputs_Changed" />
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347WriteHex}" />
+                                <TextBox x:Name="I2cWriteTextBox" Height="64" MaxLength="16384" AcceptsReturn="True" Style="{StaticResource BusHex}" TextChanged="Inputs_Changed" />
+                                <WrapPanel Margin="0,7,0,0">
+                                    <Button x:Name="ScanI2cButton" Click="ScanI2cButton_Click" Margin="0,0,8,4" Content="{DynamicResource Ch347Scan}" />
+                                    <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource AppGlassMutedBrush}" Margin="0,0,0,4" Text="{DynamicResource Ch347I2cHint}" TextWrapping="Wrap" />
+                                </WrapPanel>
+                                <TextBlock x:Name="I2cScanResultText" Margin="0,3,0,0" FontFamily="Consolas" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </TabItem>
+                        <TabItem x:Name="SpiTab" Header="SPI">
+                            <StackPanel x:Name="SpiInputs" Margin="4,9,4,4">
+                                <WrapPanel>
+                                    <StackPanel Style="{StaticResource BusField}" Width="180">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347SpiMode}" />
+                                        <ComboBox x:Name="SpiModeComboBox" SelectedIndex="0" ToolTip="CPOL / CPHA">
+                                            <ComboBoxItem Content="0 · CPOL 0 / CPHA 0" />
+                                            <ComboBoxItem Content="1 · CPOL 0 / CPHA 1" />
+                                            <ComboBoxItem Content="2 · CPOL 1 / CPHA 0" />
+                                            <ComboBoxItem Content="3 · CPOL 1 / CPHA 1" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Clock}" />
+                                        <ComboBox x:Name="SpiClockComboBox" SelectedIndex="0">
+                                            <ComboBoxItem Content="468.75 kHz" />
+                                            <ComboBoxItem Content="937.5 kHz" />
+                                            <ComboBoxItem Content="1.875 MHz" />
+                                            <ComboBoxItem Content="3.75 MHz" />
+                                            <ComboBoxItem Content="7.5 MHz" />
+                                            <ComboBoxItem Content="15 MHz" />
+                                            <ComboBoxItem Content="30 MHz" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347BitOrder}" />
+                                        <ComboBox x:Name="SpiBitOrderComboBox" SelectedIndex="0">
+                                            <ComboBoxItem Content="MSB first" />
+                                            <ComboBoxItem Content="LSB first" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347ChipSelect}" />
+                                        <ComboBox x:Name="SpiCsComboBox" SelectedIndex="0">
+                                            <ComboBoxItem Content="CS0" />
+                                            <ComboBoxItem Content="CS1" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}" Width="200">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Operation}" />
+                                        <ComboBox x:Name="SpiOperationComboBox" SelectedIndex="1" SelectionChanged="Inputs_Changed">
+                                            <ComboBoxItem Content="{DynamicResource Ch347WriteOnly}" />
+                                            <ComboBoxItem Content="{DynamicResource Ch347ReadOnly}" />
+                                            <ComboBoxItem Content="{DynamicResource Ch347WriteRead}" />
+                                            <ComboBoxItem Content="{DynamicResource Ch347Exchange}" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Dummy}" />
+                                        <TextBox x:Name="SpiDummyTextBox" Text="FF" MaxLength="2" FontFamily="Consolas" TextChanged="Inputs_Changed" />
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347ReadLength}" />
+                                        <TextBox x:Name="SpiReadLengthTextBox" Text="1" MaxLength="4" TextChanged="Inputs_Changed" />
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347WriteHex}" />
+                                <TextBox x:Name="SpiWriteTextBox" Height="64" MaxLength="16384" AcceptsReturn="True" Style="{StaticResource BusHex}" TextChanged="Inputs_Changed" />
+                                <TextBlock Margin="0,7,0,0" Foreground="{DynamicResource AppGlassMutedBrush}" Text="{DynamicResource Ch347SpiHint}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </TabItem>
+                        <TabItem x:Name="JtagTab" Header="JTAG">
+                            <StackPanel x:Name="JtagInputs" Margin="4,9,4,4">
+                                <TextBlock Margin="0,0,0,8" Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347JtagModeHint}" />
+                                <WrapPanel>
+                                    <StackPanel Style="{StaticResource BusField}" Width="200">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Operation}" />
+                                        <ComboBox x:Name="JtagOperationComboBox" SelectedIndex="0" SelectionChanged="Inputs_Changed">
+                                            <ComboBoxItem Content="{DynamicResource Ch347JtagReset}" />
+                                            <ComboBoxItem Content="{DynamicResource Ch347JtagIr}" />
+                                            <ComboBoxItem Content="{DynamicResource Ch347JtagDr}" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Clock}" />
+                                        <ComboBox x:Name="JtagClockComboBox" SelectedIndex="0" SelectionChanged="Inputs_Changed">
+                                            <ComboBoxItem Content="468.75 kHz" />
+                                            <ComboBoxItem Content="937.5 kHz" />
+                                            <ComboBoxItem Content="1.875 MHz" />
+                                            <ComboBoxItem Content="3.75 MHz" />
+                                            <ComboBoxItem Content="7.5 MHz" />
+                                            <ComboBoxItem Content="15 MHz" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Style="{StaticResource BusField}">
+                                        <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347JtagBits}" />
+                                        <TextBox x:Name="JtagBitLengthTextBox" Text="32" MaxLength="5" TextChanged="Inputs_Changed" />
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347JtagTdi}" />
+                                <TextBox x:Name="JtagWriteTextBox" Height="64" Text="00 00 00 00" MaxLength="16384" AcceptsReturn="True" Style="{StaticResource BusHex}" TextChanged="Inputs_Changed" />
+                                <TextBlock Margin="0,7,0,0" Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347JtagShiftHint}" />
+                            </StackPanel>
+                        </TabItem>
+                    </TabControl>
+                    <TextBlock x:Name="ProtocolAvailabilityText" Margin="4,4,4,8" Style="{StaticResource BusLabel}" Visibility="Collapsed" />
+                    <WrapPanel x:Name="CommonInputs" Margin="4,10,0,0">
+                        <StackPanel Style="{StaticResource BusField}">
+                            <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Timeout}" />
+                            <TextBox x:Name="TimeoutTextBox" Text="1000" MaxLength="5" TextChanged="Inputs_Changed" />
+                        </StackPanel>
+                        <StackPanel x:Name="IntervalField" Style="{StaticResource BusField}">
+                            <TextBlock Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Interval}" />
+                            <TextBox x:Name="IntervalTextBox" Text="1000" MaxLength="7" />
+                        </StackPanel>
+                    </WrapPanel>
+                    <CheckBox x:Name="PeriodicCheckBox" Margin="4,0,0,5" Checked="PeriodicCheckBox_Changed" Unchecked="PeriodicCheckBox_Changed" Content="{DynamicResource Ch347Periodic}" />
+                    <TextBlock x:Name="PeriodicHintText" Margin="4,0,0,8" FontSize="11" Foreground="{DynamicResource AppGlassMutedBrush}" Text="{DynamicResource Ch347PeriodicHint}" TextWrapping="Wrap" />
+                    <WrapPanel>
+                        <Button x:Name="ExecuteButton" MinWidth="90" Margin="0,0,6,4" Click="ExecuteButton_Click" Content="{DynamicResource Ch347Execute}" />
+                        <Button x:Name="CancelButton" MinWidth="72" Margin="0,0,10,4" Click="CancelButton_Click" Content="{DynamicResource Ch347Cancel}" />
+                        <TextBlock x:Name="OperationStatusText" VerticalAlignment="Center" Margin="0,0,0,4" TextWrapping="Wrap" />
+                    </WrapPanel>
+                    <TextBlock Margin="0,4,0,4" Style="{StaticResource BusLabel}" Text="{DynamicResource Ch347Readback}" />
+                    <TextBox x:Name="ReadbackTextBox" Height="72" IsReadOnly="True" Style="{StaticResource BusHex}" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource BusSection}">
+                <StackPanel>
+                    <WrapPanel Margin="0,0,0,6">
+                        <TextBlock FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,4" Text="{DynamicResource Ch347Log}" />
+                        <Button x:Name="SaveLogButton" Margin="0,0,6,4" Click="SaveLogButton_Click" Content="{DynamicResource Ch347SaveLog}" />
+                        <Button Margin="0,0,10,4" Click="ClearLogButton_Click" Content="{DynamicResource Ch347ClearLog}" />
+                        <TextBlock x:Name="LogCountText" VerticalAlignment="Center" Margin="0,0,0,4" Foreground="{DynamicResource AppGlassMutedBrush}" />
+                    </WrapPanel>
+                    <TextBox x:Name="LogTextBox" Height="190" IsReadOnly="True" Style="{StaticResource BusHex}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

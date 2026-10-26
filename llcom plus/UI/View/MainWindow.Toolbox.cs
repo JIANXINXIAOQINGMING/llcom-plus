@@ -34,7 +34,7 @@ namespace llcom_plus
             {
                 case "SerialMonitor": case "LogAnalysis": case "PowerDiagnostics":
                 case "LogReplay": case "CircularSend": case "Plot": return "调试与分析 / Analysis";
-                case "Mqtt": case "WinUsb": case "HttpTool": case "TcpClient": return "连接 / Connections";
+                case "Mqtt": case "WinUsb": case "Ch347Bus": case "HttpTool": case "TcpClient": return "连接 / Connections";
                 default: return "配置与实用工具 / Utilities";
             }
         }

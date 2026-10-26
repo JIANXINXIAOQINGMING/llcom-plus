@@ -561,6 +561,22 @@ namespace llcom_plus.Pages
                 ApplyPortProfile(slot);
             }
             ActivateSettingsProfileForActiveSlot();
+            UpdateStatus();
+        }
+
+        private void NotifyConnectionStateChanged()
+        {
+            UpdateStatus();
+            ActiveSlotChanged?.Invoke(activeSlotNumber);
+        }
+
+        public void PreserveMainPortAssignment(string portName)
+        {
+            var mainSlot = slots.FirstOrDefault(slot => slot.UsesMainUart);
+            if (mainSlot != null && !string.IsNullOrWhiteSpace(portName) &&
+                (string.IsNullOrWhiteSpace(mainSlot.SelectedPortName) ||
+                 string.Equals(mainSlot.SelectedPortName, portName, StringComparison.OrdinalIgnoreCase)))
+                mainSlot.SetPortName(portName, preserveAssignment: true);
         }
 
         private void CloseAll(
@@ -980,7 +996,7 @@ namespace llcom_plus.Pages
             }
             catch
             {
-                return new string[0];
+                return null;
             }
         }
 
@@ -1037,7 +1053,10 @@ namespace llcom_plus.Pages
         {
             private readonly MultiPortPage owner;
             private readonly bool useMainUart;
-            private readonly SerialPort serial = new SerialPort();
+            private SerialPort serial = new SerialPort();
+            private Stream serialBaseStream;
+            private SerialPortAccessCoordinator.Reservation serialReservation;
+            private const int SerialReleaseWaitMilliseconds = 5000;
             private readonly ComboBox portComboBox = new ComboBox();
             private readonly ComboBox baudComboBox = new ComboBox();
             private readonly CheckBox hexCheckBox = new CheckBox();
@@ -1051,9 +1070,8 @@ namespace llcom_plus.Pages
             private readonly TextBox sendTextBox = new TextBox();
             private readonly TextBlock titleTextBlock = new TextBlock();
             private readonly object serialLock = new object();
-            private readonly object serialLifecycleLock = new object();
             private readonly object sendLock = new object();
-            private readonly DtrWakeController dtrWakeController = new DtrWakeController();
+            private DtrWakeController dtrWakeController = new DtrWakeController();
             private readonly SerialSendQueue uiSendQueue = new SerialSendQueue();
             private int pendingUiSends;
             private readonly object receiveBufferLock = new object();
@@ -1066,6 +1084,7 @@ namespace llcom_plus.Pages
             private readonly List<DataShowPage.DataShow> packedLogItems = new List<DataShowPage.DataShow>();
             private const int MaxRetainedLogItems = 3000;
             private SerialPinMonitor pinMonitor;
+            private SerialConnectionMonitor connectionMonitor;
             private Timer receiveFlushTimer;
             private bool receiveFlushScheduled;
             private bool serialTransition;
@@ -1092,6 +1111,7 @@ namespace llcom_plus.Pages
                 {
                     Global.uart.UartDataRecived += MainUart_UartDataRecived;
                     Global.uart.UartDataSent += MainUart_UartDataSent;
+                    Global.UartPortClosedEvent += MainUart_PortClosed;
                     Global.uart.SetDirectReceiveMode(true);
                 }
                 else
@@ -1300,32 +1320,139 @@ namespace llcom_plus.Pages
                 }
             }
 
-            private long BeginSerialTransition()
+            // Retiring an endpoint and releasing its driver are different states.
+            // Publish the closed replacement immediately, but retain the shared
+            // COM reservation until every cleanup step has actually returned.
+            private Task RetireDirectConnection(SerialPort expectedPort, long expectedGeneration,
+                bool disposeSlot = false)
             {
-                long retiredGeneration;
-                long nextGeneration;
+                SerialPort oldPort;
+                Stream oldStream;
+                SerialPortAccessCoordinator.Reservation oldReservation;
+                DtrWakeController oldWake;
+                SerialPinMonitor oldPins;
                 lock (serialLock)
                 {
-                    retiredGeneration = connectionGeneration;
+                    if (serialDisposed || expectedGeneration != connectionGeneration ||
+                        !ReferenceEquals(expectedPort, serial)) return null;
+                    oldPort = serial;
+                    oldStream = serialBaseStream;
+                    oldReservation = serialReservation;
+                    oldReservation?.BeginRelease();
+                    oldWake = dtrWakeController;
+                    oldPins = pinMonitor;
+                    var portName = SelectedPortName;
+                    try { portName = NormalizePortName(oldPort.PortName); } catch { }
+                    connectionMonitor?.Dispose();
+                    connectionMonitor = null;
                     connectionGeneration = unchecked(connectionGeneration + 1);
-                    if (connectionGeneration == 0)
-                        connectionGeneration = 1;
-                    serialTransition = true;
-                    nextGeneration = connectionGeneration;
+                    if (connectionGeneration == 0) connectionGeneration = 1;
+                    serial = new SerialPort { WriteTimeout = 5000, ReadTimeout = 500 };
+                    if (!string.IsNullOrWhiteSpace(portName)) serial.PortName = portName;
+                    if (!disposeSlot) serial.DataReceived += Serial_DataReceived;
+                    serialBaseStream = null;
+                    serialReservation = null;
+                    serialTransition = false;
+                    serialDisposed = disposeSlot;
+                    dtrWakeController = new DtrWakeController();
+                    pinMonitor = disposeSlot ? null : new SerialPinMonitor(serial, Global.NotifySerialPinStatusChanged);
+                    ResetReceiveBuffer();
                 }
-                // Drain any in-flight DTR operation before reusing this SerialPort.
-                // No helper lock is taken while waiting for serialLock here.
-                dtrWakeController.InvalidateConnection(serial, retiredGeneration);
-                return nextGeneration;
+
+                var task = SerialPortAccessCoordinator.ReleaseAsync(oldReservation, () =>
+                {
+                    try { oldWake.InvalidateConnection(oldPort, expectedGeneration); } catch { }
+                    try { oldWake.Dispose(); } catch { }
+                    try { oldPins?.Dispose(); } catch { }
+                    try { oldPort.DataReceived -= Serial_DataReceived; } catch { }
+                    // This lock belongs to the retired port, not the slot. A stuck
+                    // old driver must not stall an unrelated COM's new connection.
+                    lock (oldPort)
+                        SerialPortAccessCoordinator.DisposePort(oldPort, oldStream,
+                            message => Logger.AddUartLogDebug("[SplitUartRelease]" + message));
+                });
+                task.ContinueWith(failed =>
+                {
+                    try
+                    {
+                        Logger.AddUartLogDebug("[SplitUartRelease]cleanup incomplete; reservation retained: " +
+                            failed.Exception.GetBaseException().Message);
+                    }
+                    catch { }
+                }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                return task;
             }
 
-            private void CompleteSerialTransition(long generation)
+            private static void WaitForDirectRelease(Task release)
+            {
+                if (release == null) return;
+                if (!((IAsyncResult)release).AsyncWaitHandle.WaitOne(SerialReleaseWaitMilliseconds))
+                    throw new TimeoutException("串口仍在后台释放，请稍后手动重新打开；不会抢占或自动重发。");
+                release.GetAwaiter().GetResult();
+            }
+
+            private void StartConnectionMonitor(long generation)
             {
                 lock (serialLock)
                 {
-                    if (generation == connectionGeneration)
-                        serialTransition = false;
+                    if (serialDisposed || serialTransition || generation != connectionGeneration) return;
+                    var port = serial;
+                    connectionMonitor?.Dispose();
+                    connectionMonitor = new SerialConnectionMonitor(port,
+                        error => HandleConnectionFailure(port, generation, error));
                 }
+            }
+
+            private bool HandleConnectionFailure(SerialPort failedPort, long generation, Exception error)
+            {
+                if (useMainUart || !SerialConnectionMonitor.IsDisconnectException(error)) return false;
+                string portName;
+                SerialPort replacement;
+                long retiredGeneration;
+                lock (serialLock)
+                {
+                    // Driver callbacks may outlive both removal of a pane and a
+                    // close/reopen on the same COM. Retire only their own session.
+                    if (serialDisposed || serialTransition || generation != connectionGeneration ||
+                        !ReferenceEquals(failedPort, serial)) return false;
+                    portName = NormalizePortName(failedPort.PortName);
+                    if (RetireDirectConnection(failedPort, generation) == null) return false;
+                    retiredGeneration = connectionGeneration;
+                    replacement = serial;
+                }
+                Logger.AddUartLogDebug($"[SplitUartDisconnected]slot={Index},port={portName},generation={generation}:{error.Message}");
+                owner.RunOnUi(() =>
+                {
+                    lock (serialLock)
+                        if (serialDisposed || retiredGeneration != connectionGeneration ||
+                            !ReferenceEquals(serial, replacement)) return;
+                    if (string.IsNullOrWhiteSpace(SelectedPortName) ||
+                        string.Equals(SelectedPortName, portName, StringComparison.OrdinalIgnoreCase))
+                        SetPortName(portName, preserveAssignment: true);
+                    var title = string.Format(owner.FindText("NotificationDisconnectedTitleFormat", "{0} 已断开"), portName);
+                    var message = owner.FindText("SerialDeviceDisconnectedMessage", "串口设备已移除或无法访问，请检查连接后重新打开。");
+                    LastErrorMessage = message;
+                    AppendLog("SYS", message);
+                    try { WriteNotificationToSession(DateTime.Now, title, message); }
+                    catch (Exception ex) { Logger.AddUartLogDebug("[SplitUartDisconnected]log notice:" + ex.Message); }
+                    try { CloseSessionLog(); }
+                    catch (Exception ex) { Logger.AddUartLogDebug("[SplitUartDisconnected]close log:" + ex.Message); }
+                    SyncOpenStateUi();
+                    owner.NotifyConnectionStateChanged();
+                    Global.PublishNotification(title, message, AppNotificationLevel.Warning,
+                        category: AppNotificationCategory.Connection, portName: portName);
+                });
+                return true;
+            }
+
+            private void MainUart_PortClosed(object sender, string portName)
+            {
+                owner.RunOnUi(() =>
+                {
+                    owner.PreserveMainPortAssignment(portName);
+                    SyncOpenStateUi();
+                    owner.NotifyConnectionStateChanged();
+                });
             }
 
             public void SetIndex(int index)
@@ -1344,6 +1471,16 @@ namespace llcom_plus.Pages
 
             public void RefreshPorts(string[] ports)
             {
+                // A failed enumeration is not evidence that every device vanished.
+                if (ports != null && !useMainUart)
+                {
+                    SerialPort current;
+                    long generation;
+                    lock (serialLock) { current = serial; generation = connectionGeneration; }
+                    if (IsOpen && !SerialConnectionMonitor.ContainsPort(ports, PortName))
+                        HandleConnectionFailure(current, generation,
+                            new IOException("The serial device was removed: " + PortName));
+                }
                 ports = (ports ?? new string[0])
                     .Select(NormalizePortName)
                     .Where(name => !string.IsNullOrWhiteSpace(name))
@@ -1486,27 +1623,19 @@ namespace llcom_plus.Pages
                 }
                 else
                 {
-                    var generation = BeginSerialTransition();
-                    string portName;
-                    try { portName = serial.PortName; }
-                    catch { portName = SelectedPortName; }
-                    pinMonitor?.Disarm();
-                    Logger.AddUartLogDebug($"[SplitUartClose]slot={Index},port={portName},generation={generation}");
                     try
                     {
-                        lock (serialLifecycleLock)
+                        Task release;
+                        lock (serialLock)
                         {
-                            if (serial.IsOpen)
-                                serial.Close();
+                            Logger.AddUartLogDebug($"[SplitUartClose]slot={Index},port={PortName},generation={connectionGeneration}");
+                            release = RetireDirectConnection(serial, connectionGeneration);
                         }
+                        if (waitForDispose) WaitForDirectRelease(release);
                     }
                     catch (Exception ex)
                     {
                         closeError = ex;
-                    }
-                    finally
-                    {
-                        CompleteSerialTransition(generation);
                     }
                 }
 
@@ -1531,6 +1660,7 @@ namespace llcom_plus.Pages
                 Global.uart.SetDirectReceiveMode(false);
                 Global.uart.UartDataRecived -= MainUart_UartDataRecived;
                 Global.uart.UartDataSent -= MainUart_UartDataSent;
+                Global.UartPortClosedEvent -= MainUart_PortClosed;
             }
 
             public void DisposeOwnedPort()
@@ -1539,22 +1669,9 @@ namespace llcom_plus.Pages
                     return;
 
                 uiSendQueue.Stop();
-                BeginSerialTransition();
-                dtrWakeController.Dispose();
                 lock (serialLock)
-                    serialDisposed = true;
-
-                try { pinMonitor?.Dispose(); }
-                catch { }
-                pinMonitor = null;
-                try { serial.DataReceived -= Serial_DataReceived; }
-                catch { }
-                lock (serialLifecycleLock)
                 {
-                    try { serial.Close(); }
-                    catch { }
-                    try { serial.Dispose(); }
-                    catch { }
+                    RetireDirectConnection(serial, connectionGeneration, disposeSlot: true);
                 }
                 lock (receiveBufferLock)
                 {
@@ -1579,7 +1696,7 @@ namespace llcom_plus.Pages
 
             public void WriteNotificationToSession(DateTime timestamp, string title, string message)
             {
-                if (useMainUart || !IsOpen)
+                if (useMainUart)
                     return;
 
                 EnsureSessionLogOpen();
@@ -1853,6 +1970,8 @@ namespace llcom_plus.Pages
                 profile.dtr = Dtr;
                 UpdateProfileSnapshot(profile);
                 long generation = 0;
+                SerialPort openingPort = null;
+                SerialPortAccessCoordinator.Reservation pendingReservation = null;
 
                 try
                 {
@@ -1873,46 +1992,80 @@ namespace llcom_plus.Pages
                         {
                             if (serialDisposed)
                                 throw new ObjectDisposedException(nameof(PortSlot));
+                            openingPort = serial;
                         }
 
+                        // Reserve before setting any driver properties. This also
+                        // rejects a main/pane owner's still-running retired Close.
+                        pendingReservation = SerialPortAccessCoordinator.Acquire(portName,
+                            string.Format(owner.FindText("MultiPortSlotTitle", "串口 {0}"), Index));
                         ResetReceiveBuffer();
-                        generation = BeginSerialTransition();
+                        DtrWakeController openingWake;
+                        SerialPinMonitor openingPins;
+                        lock (serialLock)
+                        {
+                            if (serialDisposed || !ReferenceEquals(openingPort, serial))
+                                throw new IOException("The split serial connection changed before opening.");
+                            connectionGeneration = unchecked(connectionGeneration + 1);
+                            if (connectionGeneration == 0) connectionGeneration = 1;
+                            generation = connectionGeneration;
+                            serialTransition = true;
+                            connectionMonitor?.Dispose();
+                            connectionMonitor = null;
+                            serialReservation = pendingReservation;
+                            pendingReservation = null;
+                            openingWake = dtrWakeController;
+                            openingPins = pinMonitor;
+                        }
                         var handshake = GetHandshake(profile.flowControl);
                         Logger.AddUartLogDebug(
                             $"[SplitUartOpen]slot={Index},port={portName},baud={baudRate}," +
                             $"parity={(Parity)profile.parity},dataBits={profile.dataBits},stopBits={(StopBits)profile.stopBit}," +
                             $"handshake={handshake},dtr={profile.dtr},rts={profile.rts},generation={generation}");
-                        lock (serialLifecycleLock)
+                        lock (openingPort)
                         {
-                            serial.PortName = portName;
-                            serial.BaudRate = baudRate;
-                            serial.DataBits = profile.dataBits;
-                            serial.Parity = (Parity)profile.parity;
-                            serial.StopBits = (StopBits)profile.stopBit;
-                            serial.Handshake = handshake;
-                            dtrWakeController.ApplyConfiguredDtr(serial, generation, profile.dtr);
-                            if (serial.Handshake != Handshake.RequestToSend)
-                                serial.RtsEnable = profile.rts;
-                            serial.Open();
+                            lock (serialLock)
+                                if (serialDisposed || generation != connectionGeneration ||
+                                    !ReferenceEquals(openingPort, serial))
+                                    throw new IOException("The split serial connection changed while opening.");
+                            openingPort.PortName = portName;
+                            openingPort.BaudRate = baudRate;
+                            openingPort.DataBits = profile.dataBits;
+                            openingPort.Parity = (Parity)profile.parity;
+                            openingPort.StopBits = (StopBits)profile.stopBit;
+                            openingPort.Handshake = handshake;
+                            openingWake.ApplyConfiguredDtr(openingPort, generation, profile.dtr);
+                            if (openingPort.Handshake != Handshake.RequestToSend)
+                                openingPort.RtsEnable = profile.rts;
+                            openingPort.Open();
+                            lock (serialLock)
+                            {
+                                if (serialDisposed || generation != connectionGeneration ||
+                                    !ReferenceEquals(openingPort, serial))
+                                    throw new IOException("The split serial connection changed while opening.");
+                                serialBaseStream = openingPort.BaseStream;
+                                serialTransition = false;
+                            }
                         }
 
-                        lock (serialLock)
-                        {
-                            if (serialDisposed || generation != connectionGeneration)
-                                throw new IOException("The split serial connection changed while opening.");
-                            serialTransition = false;
-                        }
-                        pinMonitor?.Arm();
+                        openingPins?.Arm();
                         EnsureSessionLogOpen();
 
                         try
                         {
-                            if (serial.BytesToRead > 0)
-                                ThreadPool.QueueUserWorkItem(_ => Serial_DataReceived(serial, null));
+                            if (openingPort.BytesToRead > 0)
+                                ThreadPool.QueueUserWorkItem(_ => Serial_DataReceived(openingPort, null));
                         }
                         catch { }
                     }
 
+                    if (!useMainUart)
+                    {
+                        lock (serialLock)
+                            if (serialDisposed || generation != connectionGeneration ||
+                                !ReferenceEquals(openingPort, serial) || !openingPort.IsOpen)
+                                throw new IOException("The split serial connection was disconnected while opening.");
+                    }
                     SyncOpenStateUi();
                     UpdateTitle();
                     owner.UpdateStatus();
@@ -1928,25 +2081,21 @@ namespace llcom_plus.Pages
                         category: AppNotificationCategory.Connection,
                         portName: portName);
                     LastErrorMessage = string.Empty;
+                    if (!useMainUart) StartConnectionMonitor(generation);
                     return true;
                 }
                 catch (Exception ex)
                 {
                     if (!useMainUart && generation != 0)
                     {
-                        try
-                        {
-                            lock (serialLifecycleLock)
-                            {
-                                if (serial.IsOpen)
-                                    serial.Close();
-                            }
-                        }
-                        catch { }
-                        CompleteSerialTransition(generation);
+                        // An unsuccessful Open may still leave native resources
+                        // behind. Retire this exact object rather than reuse it.
+                        RetireDirectConnection(openingPort, generation);
                     }
+                    pendingReservation?.Dispose();
 
-                    LastErrorMessage = ex.Message;
+                    LastErrorMessage = SerialPortAccessCoordinator.GetOpenErrorMessage(ex, portName,
+                        (Global.setting?.language ?? "zh-CN").StartsWith("zh", StringComparison.OrdinalIgnoreCase));
                     AppendLog("ERR", owner.FindText("MultiPortOpenFailed", "打开失败: ") + LastErrorMessage);
                     Global.PublishNotification(
                         string.Format(
@@ -2186,6 +2335,19 @@ namespace llcom_plus.Pages
                 if (!IsDirectConnectionOpen(generation))
                     return false;
 
+                SerialPort targetPort;
+                DtrWakeController targetWakeController;
+                lock (serialLock)
+                {
+                    targetPort = serial;
+                    targetWakeController = dtrWakeController;
+                }
+                var committedCallbackFailed = false;
+                Action<int> onCommitted = count =>
+                {
+                    try { committedBytes?.Invoke(count); }
+                    catch { committedCallbackFailed = true; throw; }
+                };
                 try
                 {
                     lock (sendLock)
@@ -2193,9 +2355,9 @@ namespace llcom_plus.Pages
                         SerialTraceHub.RecordEvent(portName,
                             $"split:{owner.pageIdentity}:slot:{Index}:{portName}:{generation}", SerialTraceKind.Info,
                             $"TX request / 发送请求: {data.Length} bytes, baud={profile.baudRate}, flow={profile.flowControl}, DTR={profile.dtr}, RTS={profile.rts}, wake={profile.dtrWakeBeforeSend}");
-                        dtrWakeController.ExecuteWithWake(
-                            serial, generation, () => IsDirectConnectionOpen(generation), profile, token,
-                            () => WriteDirectSerial(generation, portName, profile, data, token, committedBytes),
+                        targetWakeController.ExecuteWithWake(
+                            targetPort, generation, () => IsDirectConnectionOpen(generation), profile, token,
+                            () => WriteDirectSerial(generation, portName, profile, data, token, onCommitted),
                             message => SerialTraceHub.RecordEvent(portName,
                                 $"split:{owner.pageIdentity}:slot:{Index}:{portName}:{generation}",
                                 SerialTraceKind.Wake, message));
@@ -2209,6 +2371,8 @@ namespace llcom_plus.Pages
                 }
                 catch (Exception ex)
                 {
+                    if (!committedCallbackFailed && !token.IsCancellationRequested)
+                        HandleConnectionFailure(targetPort, generation, ex);
                     SerialTraceHub.RecordEvent(portName,
                         $"split:{owner.pageIdentity}:slot:{Index}:{portName}:{generation}", SerialTraceKind.Error,
                         "TX incomplete / 发送未完成: " + ex.Message);
@@ -2313,26 +2477,21 @@ namespace llcom_plus.Pages
 
             private void Serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
             {
-                long generation;
+                long generation = -1;
                 string tracePort;
                 UartPortProfile profile;
-                lock (serialLock)
-                {
-                    if (serialDisposed ||
-                        serialTransition ||
-                        !ReferenceEquals(sender, serial) ||
-                        !serial.IsOpen)
-                    {
-                        return;
-                    }
-                    generation = connectionGeneration;
-                    tracePort = serial.PortName;
-                    profile = GetProfileSnapshot();
-                }
-
-                RenewDtrWakeAfterReceive(generation);
+                var eventPort = sender as SerialPort;
                 try
                 {
+                    lock (serialLock)
+                    {
+                        if (serialDisposed || serialTransition || !ReferenceEquals(eventPort, serial)) return;
+                        generation = connectionGeneration;
+                        if (!serial.IsOpen) return;
+                        tracePort = serial.PortName;
+                        profile = GetProfileSnapshot();
+                    }
+                    RenewDtrWakeAfterReceive(generation);
                     var result = new List<byte>();
                     while (true)
                     {
@@ -2372,6 +2531,7 @@ namespace llcom_plus.Pages
                 }
                 catch (Exception ex) when (IsClosedSerialException(ex))
                 {
+                    HandleConnectionFailure(eventPort, generation, ex);
                 }
                 catch (Exception ex)
                 {
@@ -2853,9 +3013,7 @@ namespace llcom_plus.Pages
 
             private static bool IsClosedSerialException(Exception ex)
             {
-                return ex is ObjectDisposedException ||
-                    ex is IOException ||
-                    ex is InvalidOperationException;
+                return SerialConnectionMonitor.IsDisconnectException(ex);
             }
         }
     }
