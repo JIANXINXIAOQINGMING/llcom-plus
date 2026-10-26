@@ -597,6 +597,7 @@ try {
             $window.FindName('ThemeToggleMenuItem').ToolTip -eq 'Dark mode' -and
             $window.FindName('LanguageMenuButton').ToolTip -eq 'Language' -and
             $window.FindName('CheckUpdateButton').ToolTip -eq 'Check updates' -and
+            $window.FindName('AboutProjectButton').ToolTip -eq 'About this project' -and
             ([string]$app.TryFindResource('AboutUpdateAvailableTooltipFormat')).Contains('{0}')
         ) 'The complete top-right toolbar has valid English tooltips'
         [void]$loadLanguage.Invoke($null, [object[]]@('zh-CN'))
@@ -622,11 +623,24 @@ try {
                 $app.TryFindResource('AppDangerBrush').ToString()
         ) 'The update button has a non-interactive hidden danger badge for new versions'
         $topRightButtonPanel = $checkUpdateButton.Parent
+        $aboutProjectButton = $window.FindName('AboutProjectButton')
         Test-Condition (
             $null -ne $topRightButtonPanel -and
+            $null -ne $aboutProjectButton -and
             $topRightButtonPanel.Children.IndexOf($checkUpdateButton) -eq
-                ($topRightButtonPanel.Children.Count - 1)
-        ) 'The update button is the final top-right toolbar action'
+                ($topRightButtonPanel.Children.Count - 2) -and
+            $topRightButtonPanel.Children.IndexOf($aboutProjectButton) -eq
+                ($topRightButtonPanel.Children.Count - 1) -and
+            $aboutProjectButton.Content.Icon.ToString() -eq 'InfoCircle'
+        ) 'The About information button immediately follows Update as the final top-right action'
+        $aboutWindow = [Activator]::CreateInstance($assembly.GetType('llcom_plus.AboutProjectWindow', $true))
+        try {
+            Test-Condition (
+                $aboutWindow.FindName('AuthorText').Text -eq 'lawrenc.liu' -and
+                $aboutWindow.FindName('VersionText').Text.Contains($assembly.GetName().Version.ToString(3)) -and
+                $aboutWindow.FindName('VersionText').Text.Contains($Platform)
+            ) 'About displays the requested author and the actual running version and architecture'
+        } finally { $aboutWindow.Close() }
         Test-Condition (
             $null -ne $assembly.GetType('llcom_plus.UpdateCheckController', $false) -and
             $null -ne $windowType.GetMethod(
