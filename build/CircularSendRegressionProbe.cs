@@ -142,6 +142,7 @@ public static class CircularSendRegressionProbe
         Assert(Thread.CurrentThread.GetApartmentState() == ApartmentState.STA,
             "Circular-send UI regression requires the isolated STA test host.");
         var global = assembly.GetType("llcom_plus.Tools.Global", true);
+        RunStorageChecks(assembly, global);
         var asyncField = global.GetField("SendDataAsyncRequest", Static);
         var openField = global.GetField("IsActiveSerialTargetOpenRequest", Static);
         var captureField = global.GetField("CaptureActiveSerialTargetRequest", Static);
@@ -248,5 +249,74 @@ public static class CircularSendRegressionProbe
             openField.SetValue(null, originalOpen);
             captureField.SetValue(null, originalCapture);
         }
+    }
+
+    private static void RunStorageChecks(Assembly assembly, Type global)
+    {
+        var profile = global.GetField("ProfilePath", Static);
+        string originalProfile = (string)profile.GetValue(null);
+        // This probe runs only inside Test-CriticalFixes' isolated profile.
+        string directory = Path.Combine(originalProfile, "circular-storage-regression");
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "circular_send.json");
+        var pageType = assembly.GetType("llcom_plus.Pages.CircularSendPage", true);
+        var read = pageType.GetMethod("ReadStoredItems", Static);
+        var write = pageType.GetMethod("WriteStoredItems", Static);
+        var save = pageType.GetMethod("SaveItems", Instance);
+        const string first = "[{\"Command\":\"AT+FIRST\"}]";
+        const string second = "[{\"Command\":\"AT+SECOND\"}]";
+        const string third = "[{\"Command\":\"AT+THIRD\"}]";
+        try
+        {
+            profile.SetValue(null, directory + Path.DirectorySeparatorChar);
+            Invoke(write, null, path, first, false);
+            Invoke(write, null, path, second, false);
+            Assert(File.ReadAllText(path) == second && File.ReadAllText(path + ".bak") == first,
+                "Atomic circular-save did not preserve the previous configuration.");
+            Invoke(write, null, path, third, false);
+            Assert(File.ReadAllText(path + ".bak") == second,
+                "Circular backup did not rotate to the last successful save.");
+
+            using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                bool failed = false;
+                try { Invoke(write, null, path, first, false); }
+                catch (IOException) { failed = true; }
+                Assert(failed && File.ReadAllText(path) == third && File.ReadAllText(path + ".bak") == second,
+                    "A blocked circular-save altered the primary or its backup.");
+            }
+            Assert(Directory.GetFiles(directory, "*.tmp").Length == 0,
+                "Failed circular-save leaked temporary files.");
+
+            const string damaged = "{ unreadable circular configuration";
+            File.WriteAllText(path, damaged);
+            var page = Activator.CreateInstance(pageType);
+            var items = (IList)pageType.GetProperty("Items").GetValue(page, null);
+            var command = items[0].GetType().GetProperty("Command");
+            Assert((string)command.GetValue(items[0], null) == "AT+SECOND",
+                "Unreadable circular configuration did not recover its previous backup.");
+            Invoke(save, page);
+            Assert(File.ReadAllText(path) == damaged,
+                "Leaving an unchanged fallback view overwrote the unreadable original.");
+            command.SetValue(items[0], "AT+RECOVERED", null);
+            Assert(File.ReadAllText(path + ".load-error.bak") == damaged &&
+                File.ReadAllText(path + ".bak") == second && File.ReadAllText(path).Contains("AT+RECOVERED"),
+                "Editing recovered circular rows did not independently preserve the damaged original and valid backup.");
+
+            string emptyDirectory = Path.Combine(directory, "no-backup");
+            Directory.CreateDirectory(emptyDirectory);
+            profile.SetValue(null, emptyDirectory + Path.DirectorySeparatorChar);
+            string emptyPath = Path.Combine(emptyDirectory, "circular_send.json");
+            File.WriteAllText(emptyPath, "null");
+            page = Activator.CreateInstance(pageType);
+            Invoke(save, page);
+            Assert(File.ReadAllText(emptyPath) == "null",
+                "A configuration with no usable backup was silently replaced by defaults.");
+            bool rejected = false;
+            try { Invoke(read, null, emptyPath); }
+            catch (InvalidDataException) { rejected = true; }
+            Assert(rejected, "A JSON null configuration was accepted as a successful empty load.");
+        }
+        finally { profile.SetValue(null, originalProfile); }
     }
 }

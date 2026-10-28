@@ -93,8 +93,7 @@ namespace llcom_plus.Pages
             //适配一下通用通道
             ScriptApis.SendChannelsRegister("mqtt", (data, options) =>
             {
-                var currentClient = mqttClient;
-                if (currentClient != null && currentClient.IsConnected && options != null)
+                if (options != null && TryCaptureMqttConnection(out var currentClient, out var attemptId))
                 {
                     try
                     {
@@ -103,7 +102,9 @@ namespace llcom_plus.Pages
                         var qos = ScriptApis.GetOption<int>(options, "qos", 0);
                         if (string.IsNullOrEmpty(topic))
                             return false;
-                        return Publish(
+                        return PublishCaptured(
+                            currentClient,
+                            attemptId,
                             topic,
                             payload,
                             qos);
@@ -441,23 +442,45 @@ namespace llcom_plus.Pages
                 Dispatcher.BeginInvoke(new Action(() => CompleteMqttAttempt(client, attemptId, null, false))));
             client.UseApplicationMessageReceivedHandler(e =>
             {
-                if (!IsCurrentMqttAttempt(client, attemptId, MqttConnectionState.Connected))
-                    return;
-
-                ScriptApis.SendChannelsReceived("mqtt",
-                    new
-                    {
-                        topic = e.ApplicationMessage.Topic,
-                        payload = e.ApplicationMessage.Payload,
-                        qos = (int)e.ApplicationMessage.QualityOfServiceLevel
-                    });
-                Tools.Logger.ShowDataRaw(new Tools.DataShowRaw
+                RunMqttCallback(client, attemptId, () =>
                 {
-                    title = $"MQTT → {e.ApplicationMessage.Topic}({(int)e.ApplicationMessage.QualityOfServiceLevel})",
-                    data = e.ApplicationMessage.Payload,
-                    color = Tools.Logger.GetThemeBrush("AppDataReceivedBrush", Brushes.SeaGreen)
+                    ScriptApis.SendChannelsReceived("mqtt", new ScriptApis.MqttChannelData(
+                        e.ApplicationMessage.Topic, e.ApplicationMessage.Payload,
+                        (int)e.ApplicationMessage.QualityOfServiceLevel));
+                    Tools.Logger.ShowDataRaw(new Tools.DataShowRaw
+                    {
+                        title = $"MQTT → {e.ApplicationMessage.Topic}({(int)e.ApplicationMessage.QualityOfServiceLevel})",
+                        data = e.ApplicationMessage.Payload,
+                        color = Tools.Logger.GetThemeBrush("AppDataReceivedBrush", Brushes.SeaGreen)
+                    });
                 });
             });
+        }
+
+        private bool TryCaptureMqttConnection(out IMqttClient client, out long attemptId)
+        {
+            lock (mqttStateLock)
+            {
+                client = mqttClient;
+                attemptId = activeMqttAttempt;
+                return mqttConnectionState == MqttConnectionState.Connected && client?.IsConnected == true;
+            }
+        }
+
+        private void RunMqttCallback(IMqttClient client, long attemptId, Action callback)
+        {
+            if (!IsCurrentMqttAttempt(client, attemptId, MqttConnectionState.Connected) ||
+                Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            Action publish = () =>
+            {
+                if (IsCurrentMqttAttempt(client, attemptId, MqttConnectionState.Connected)) callback();
+            };
+            try
+            {
+                if (Dispatcher.CheckAccess()) publish();
+                else Dispatcher.Invoke(publish);
+            }
+            catch (InvalidOperationException) when (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) { }
         }
 
         private bool IsCurrentMqttAttempt(
@@ -728,8 +751,7 @@ namespace llcom_plus.Pages
                 Tools.MessageBox.Show("no subcribe topic!");
                 return;
             }
-            var currentClient = mqttClient;
-            if (currentClient != null && currentClient.IsConnected)
+            if (TryCaptureMqttConnection(out var currentClient, out var attemptId))
             {
                 var topic = subcribeTextBox.Text;
                 var qos = int.Parse(subQOSComboBox.Text);
@@ -737,24 +759,27 @@ namespace llcom_plus.Pages
                 {
                     try
                     {
+                        if (!IsCurrentMqttAttempt(currentClient, attemptId, MqttConnectionState.Connected)) return;
                         var r = await currentClient.SubscribeAsync(
                             new MqttTopicFilterBuilder()
                             .WithTopic(topic)
                             .WithQualityOfServiceLevel((MQTTnet.Protocol.MqttQualityOfServiceLevel)qos)
                             .Build());
-                        this.Dispatcher.Invoke(new Action(delegate
-                        {
-                            foreach (string i in subListBox.Items)
-                            {
-                                if (i == topic)
-                                    return;
-                            }
-                            subListBox.Items.Add(topic);
-                        }));
+                        CompleteSubscription(currentClient, attemptId, topic);
                     }
                     catch { }
                 });
             }
+        }
+
+        private void CompleteSubscription(IMqttClient client, long attemptId, string topic)
+        {
+            RunMqttCallback(client, attemptId, () =>
+            {
+                foreach (string existing in subListBox.Items)
+                    if (existing == topic) return;
+                subListBox.Items.Add(topic);
+            });
         }
 
         private void publishButton_Click(object sender, RoutedEventArgs e)
@@ -764,8 +789,7 @@ namespace llcom_plus.Pages
                 Tools.MessageBox.Show("no publish topic!");
                 return;
             }
-            var currentClient = mqttClient;
-            if (currentClient != null && currentClient.IsConnected)
+            if (TryCaptureMqttConnection(out var currentClient, out var attemptId))
             {
                 var topic = publishTopicTextBox.Text;
                 var payload = HexCheckBox.IsChecked ?? false ?
@@ -774,37 +798,43 @@ namespace llcom_plus.Pages
                 var qos = int.Parse(publishQOSComboBox.Text);
                 Task.Run(() =>
                 {
-                    Publish(topic, payload, qos);
+                    PublishCaptured(currentClient, attemptId, topic, payload, qos);
                 });
             }
         }
 
-        private bool Publish(string topic, byte[] payload, int qos)
+        private bool PublishCaptured(IMqttClient client, long attemptId, string topic, byte[] payload, int qos)
         {
             try
             {
-                var client = mqttClient;
-                if (client == null || !client.IsConnected)
-                    return false;
-
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic(topic)
-                    .WithPayload(payload)
+                    .WithPayload(payload == null ? new byte[0] : (byte[])payload.Clone())
                     .WithQualityOfServiceLevel(qos)
                     .Build();
-                client.PublishAsync(message, CancellationToken.None).Wait();
-                Tools.Logger.ShowDataRaw(new Tools.DataShowRaw
+                if (!PublishOnCapturedClientAsync(client, attemptId, message).GetAwaiter().GetResult()) return false;
+                RunMqttCallback(client, attemptId, () => Tools.Logger.ShowDataRaw(new Tools.DataShowRaw
                 {
                     title = $"MQTT ← {message.Topic}({(int)message.QualityOfServiceLevel})",
                     data = message.Payload ?? new byte[0],
                     color = Tools.Logger.GetThemeBrush("AppDataSentBrush", Brushes.IndianRed)
-                });
+                }));
                 return true;
             }
             catch
             {
                 return false;
             }
+        }
+
+        private async Task<bool> PublishOnCapturedClientAsync(IMqttClient client, long attemptId, MqttApplicationMessage message)
+        {
+            // A queued publish belongs to its original broker/client. Never resolve
+            // mqttClient again after another connection has replaced that attempt.
+            if (!IsCurrentMqttAttempt(client, attemptId, MqttConnectionState.Connected) || !client.IsConnected)
+                return false;
+            await client.PublishAsync(message, CancellationToken.None).ConfigureAwait(false);
+            return IsCurrentMqttAttempt(client, attemptId, MqttConnectionState.Connected) && client.IsConnected;
         }
 
         private void LoadCertificate_MouseRightButtonDown(object sender, MouseButtonEventArgs e)

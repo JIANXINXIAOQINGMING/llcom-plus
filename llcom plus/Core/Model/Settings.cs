@@ -1264,6 +1264,73 @@ namespace llcom_plus.Model
             Save();
         }
 
+        /// <summary>
+        /// Restoring replaces every page, so both the recovery snapshot and the
+        /// settings-file commit must succeed. The UI suppresses DataChanged while
+        /// this method materializes rows and refreshes its bindings afterwards.
+        /// </summary>
+        internal void ApplyQuickSendRestore(Tools.QuickSendBackupState state, string reason)
+        {
+            if (state == null)
+                throw new ArgumentNullException(nameof(state));
+
+            ApplyQuickSendReplacement(state.CreateModelLists, state.Names, state.SelectedIndex, reason);
+        }
+
+        internal void ApplyQuickSendImport(List<List<ToSendData>> data, IList<string> names, bool replaceAllPages)
+        {
+            if (data == null || data.Count == 0 || data.Any(page => page == null) ||
+                (!replaceAllPages && data.Count != 1))
+                throw new ArgumentException("快捷发送导入内容无效 / Invalid quick-send import.", nameof(data));
+
+            lock (saveLock)
+            {
+                GetQuickSendStateSnapshot(out var currentRows, out var currentNames, out var currentSelected);
+                if (!replaceAllPages)
+                    currentRows[currentSelected] = new List<ToSendData>(data[0]);
+                ApplyQuickSendReplacement(() => CopyQuickSendLists(replaceAllPages ? data : currentRows),
+                    replaceAllPages && names != null ? names : currentNames, currentSelected, "pre-import");
+            }
+        }
+
+        private void ApplyQuickSendReplacement(Func<List<List<ToSendData>>> createRows, IList<string> names,
+            int selectedIndex, string reason)
+        {
+            lock (saveLock)
+            {
+                if (_suspendSave)
+                    throw new InvalidOperationException("配置尚未准备好，快捷发送未修改 / Settings are not ready; quick send was not changed.");
+
+                GetQuickSendStateSnapshot(out var previousRows, out var previousNames, out var previousSelected);
+                var backup = Tools.QuickSendBackupService.CreateNow(this, reason);
+                if (!backup.Succeeded)
+                    throw new IOException("替换前备份未成功，当前快捷发送未修改 / Backup failed; current quick send was not changed. " + backup.Error);
+
+                var nextRows = createRows();
+                try
+                {
+                    lock (quickSendStateLock)
+                    {
+                        quickSendList = nextRows;
+                        quickListNames = names == null ? new List<string>() : new List<string>(names);
+                        _quickSendSelect = selectedIndex;
+                        EnsureQuickSendListStateUnsafe();
+                    }
+                    Save(false);
+                }
+                catch
+                {
+                    lock (quickSendStateLock)
+                    {
+                        quickSendList = previousRows;
+                        quickListNames = previousNames;
+                        _quickSendSelect = previousSelected;
+                    }
+                    throw;
+                }
+            }
+        }
+
         private static List<List<ToSendData>> CopyQuickSendLists(List<List<ToSendData>> data)
         {
             var copy = new List<List<ToSendData>>();
@@ -1286,17 +1353,38 @@ namespace llcom_plus.Model
 
         public int AddQuickSendPage()
         {
-            int selectedIndex;
-            lock (quickSendStateLock)
+            var selectedIndex = 0;
+            EditQuickSendPageState(() =>
             {
-                EnsureQuickSendListStateUnsafe();
                 quickSendList.Add(CreateDefaultQuickSendRows());
                 quickListNames.Add(GetDefaultQuickListName(quickSendList.Count - 1));
                 _quickSendSelect = quickSendList.Count - 1;
                 selectedIndex = _quickSendSelect;
-            }
-            Save();
+            });
             return selectedIndex;
+        }
+
+        private void EditQuickSendPageState(Action edit)
+        {
+            lock (saveLock)
+            {
+                GetQuickSendStateSnapshot(out var previousRows, out var previousNames, out var previousSelected);
+                try
+                {
+                    lock (quickSendStateLock) edit();
+                    Save();
+                }
+                catch
+                {
+                    lock (quickSendStateLock)
+                    {
+                        quickSendList = previousRows;
+                        quickListNames = previousNames;
+                        _quickSendSelect = previousSelected;
+                    }
+                    throw;
+                }
+            }
         }
 
         private List<ToSendData> CreateDefaultQuickSendRows()
@@ -1318,22 +1406,32 @@ namespace llcom_plus.Model
 
         public bool RemoveQuickSendPage(int index)
         {
-            lock (quickSendStateLock)
+            lock (saveLock)
             {
-                EnsureQuickSendListStateUnsafe();
-                if (quickSendList.Count <= 1 || index < 0 || index >= quickSendList.Count)
-                    return false;
-
-                quickSendList.RemoveAt(index);
-                if (index < quickListNames.Count)
-                    quickListNames.RemoveAt(index);
-                if (_quickSendSelect >= quickSendList.Count)
-                    _quickSendSelect = quickSendList.Count - 1;
-                if (_quickSendSelect < 0)
-                    _quickSendSelect = 0;
+                lock (quickSendStateLock)
+                {
+                    EnsureQuickSendListStateUnsafe();
+                    if (quickSendList.Count <= 1 || index < 0 || index >= quickSendList.Count)
+                        return false;
+                }
+                if (!_suspendSave)
+                {
+                    var backup = Tools.QuickSendBackupService.CreateNow(this, "pre-delete-page");
+                    if (!backup.Succeeded)
+                        throw new IOException("删除前备份未成功，快捷发送页未删除 / Backup failed; quick-send page was not deleted. " + backup.Error);
+                }
+                EditQuickSendPageState(() =>
+                {
+                    quickSendList.RemoveAt(index);
+                    if (index < quickListNames.Count)
+                        quickListNames.RemoveAt(index);
+                    if (_quickSendSelect >= quickSendList.Count)
+                        _quickSendSelect = quickSendList.Count - 1;
+                    if (_quickSendSelect < 0)
+                        _quickSendSelect = 0;
+                });
+                return true;
             }
-            Save();
-            return true;
         }
 
         /// <summary>
@@ -1351,12 +1449,10 @@ namespace llcom_plus.Model
             }
             set
             {
-                lock (quickSendStateLock)
+                EditQuickSendPageState(() =>
                 {
-                    EnsureQuickSendListStateUnsafe();
                     _quickSendSelect = value < 0 || value >= quickSendList.Count ? 0 : value;
-                }
-                Save();
+                });
             }
         }
 

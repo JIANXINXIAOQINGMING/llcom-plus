@@ -84,4 +84,18 @@ $mainSubscriber = Get-SourceRegion $splitSource 'private void MainUart_UartDataR
 Assert-Check ($mainSubscriber -match '(?s)var received = e as UartReceiveEventArgs;.*?received\?\.Profile.*?owner.RunOnUi.*?!received.IsCurrent.*?return;.*?WriteDataLog\(data, false, profile') `
     'The main-port split subscriber must preserve receive metadata and reject a stale UI callback.'
 Write-Pass 'Source wiring: the main-port split subscriber carries its packet profile through UI dispatch.'
+
+$splitRead = Get-SourceRegion $splitSource 'private void Serial_DataReceived(' 'private void QueueReceivedData('
+Assert-Check ($splitRead -match '(?s)while \(true\).*?new byte\[Math.Min\(length, 65536\)\].*?QueueReceivedData\(read == block.Length \? block : block.Take\(read\).ToArray\(\),\s*generation, profile\)' -and
+    $splitRead -notmatch 'var result = new List<byte>') `
+    'Continuous split input must reach the bounded packet queue on every read, without an unbounded local aggregate.'
+Write-Pass 'Source wiring: continuous split input is delivered in bounded driver blocks before the stream becomes idle.'
+
+$mainSend = Get-SourceRegion $splitSource 'private void MainUart_UartDataSent(' 'private void MainUart_UartDataRecived('
+Assert-Check ($mainSend -match '(?s)var sent = e as UartSendEventArgs;.*?sent\?\.Profile.*?owner.RunOnUi.*?!sent.IsCurrent.*?return;.*?WriteDataLog\(data, true, profile') `
+    'Delayed main-UART send view callbacks must preserve the sending profile and reject retired connections.'
+$directSend = Get-SourceRegion $splitSource 'private bool SendCapturedDirect(' 'private void ControlLineCheckBox_Changed('
+Assert-Check ($directSend -match '(?s)WriteSessionLog\("send", data, profile.encoding\);.*?owner.RunOnUi.*?generation != connectionGeneration.*?return;.*?WriteDataLog\(data, true, profile, updateCounters: false, writeSessionLog: false\)') `
+    'Split send completion must persist before UI dispatch and reject retired view callbacks without duplicating files/counters.'
+Write-Pass 'Source wiring: main and split TX callbacks reject retired connections; split persistence precedes UI dispatch.'
 Write-Host "All $script:passed serial receive isolation checks passed ($Platform $Configuration)." -ForegroundColor Green

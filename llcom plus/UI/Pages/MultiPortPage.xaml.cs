@@ -1198,6 +1198,7 @@ namespace llcom_plus.Pages
                     return;
 
                 var visibilityChanged = profileSnapshot.showSend != profile.showSend ||
+                    profileSnapshot.showHexFormat != profile.showHexFormat ||
                     profileSnapshot.showLineEndings != profile.showLineEndings ||
                     !Settings.LogPrefixOptionsEqual(profileSnapshot, profile);
                 applyingProfile = true;
@@ -1225,6 +1226,7 @@ namespace llcom_plus.Pages
                 if (profile != null)
                 {
                     var visibilityChanged = profileSnapshot.showSend != profile.showSend ||
+                        profileSnapshot.showHexFormat != profile.showHexFormat ||
                         profileSnapshot.showLineEndings != profile.showLineEndings ||
                         !Settings.LogPrefixOptionsEqual(profileSnapshot, profile);
                     profileSnapshot = CloneProfile(profile);
@@ -2362,7 +2364,24 @@ namespace llcom_plus.Pages
                                 $"split:{owner.pageIdentity}:slot:{Index}:{portName}:{generation}",
                                 SerialTraceKind.Wake, message));
                     }
-                    owner.RunOnUi(() => WriteDataLog(data, true, profile));
+                    // Persist before queuing view work. Close/reopen must not move
+                    // these bytes into the next COM's session or lose them merely
+                    // because its dispatcher callback has not run yet.
+                    lock (serialLock)
+                    {
+                        if (serialDisposed || serialTransition || generation != connectionGeneration ||
+                            !ReferenceEquals(targetPort, serial))
+                            return true;
+                        Global.setting.SentCount += data.Length;
+                        WriteSessionLog("send", data, profile.encoding);
+                    }
+                    owner.RunOnUi(() =>
+                    {
+                        lock (serialLock)
+                            if (serialDisposed || serialTransition || generation != connectionGeneration ||
+                                !ReferenceEquals(targetPort, serial)) return;
+                        WriteDataLog(data, true, profile, updateCounters: false, writeSessionLog: false);
+                    });
                     return true;
                 }
                 catch (OperationCanceledException)
@@ -2492,7 +2511,6 @@ namespace llcom_plus.Pages
                         profile = GetProfileSnapshot();
                     }
                     RenewDtrWakeAfterReceive(generation);
-                    var result = new List<byte>();
                     while (true)
                     {
                         byte[] block;
@@ -2520,14 +2538,13 @@ namespace llcom_plus.Pages
                             $"split:{owner.pageIdentity}:slot:{Index}:{tracePort}:{generation}",
                             false, block, 0, read, profile.encoding);
                         RenewDtrWakeAfterReceive(generation);
-                        if (read == block.Length)
-                            result.AddRange(block);
-                        else
-                            result.AddRange(block.Take(read));
+                        // The aggregation queue already applies the configured
+                        // packet timer/size. Feed each bounded driver read into it
+                        // so a continuous stream need not become idle before any
+                        // bytes appear, and cannot grow an unbounded local List.
+                        QueueReceivedData(read == block.Length ? block : block.Take(read).ToArray(),
+                            generation, profile);
                     }
-
-                    if (result.Count > 0)
-                        QueueReceivedData(result.ToArray(), generation, profile);
                 }
                 catch (Exception ex) when (IsClosedSerialException(ex))
                 {
@@ -2701,8 +2718,14 @@ namespace llcom_plus.Pages
                 if (data == null || data.Length == 0)
                     return;
 
+                var sent = e as UartSendEventArgs;
+                var profile = sent?.Profile ?? GetProfileSnapshot();
                 owner.RunOnUi(() =>
-                    WriteDataLog(data, true, updateCounters: false, writeSessionLog: false));
+                {
+                    if (sent != null && !sent.IsCurrent)
+                        return;
+                    WriteDataLog(data, true, profile, updateCounters: false, writeSessionLog: false);
+                });
             }
 
             private void MainUart_UartDataRecived(object sender, EventArgs e)
@@ -2757,7 +2780,7 @@ namespace llcom_plus.Pages
                             : new ReceiveScriptContext { ScriptName = profile.recvScript }
                     },
                     profile,
-                    SelectedPortName);
+                    IsOpen ? PortName : SelectedPortName);
                 if (!displayItem.IsVisible)
                     return;
 
@@ -2864,6 +2887,9 @@ namespace llcom_plus.Pages
                 if (Global.setting == null || !Global.setting.sessionLogEnabled || !IsOpen)
                     return;
 
+                // Snapshot the connection identity before taking the writer lock;
+                // send completion takes serialLock before persisting its record.
+                var currentPortName = PortName;
                 lock (sessionLogLock)
                 {
                     if (sessionStringLogWriter != null || sessionHexLogWriter != null)
@@ -2878,7 +2904,7 @@ namespace llcom_plus.Pages
                             Global.setting.sessionLogFolder = folder;
                         }
 
-                        var safePortName = MakeSafeFileName(string.IsNullOrWhiteSpace(PortName) ? $"COM{Index}" : PortName);
+                        var safePortName = MakeSafeFileName(string.IsNullOrWhiteSpace(currentPortName) ? $"COM{Index}" : currentPortName);
                         var portFolder = Path.Combine(folder, safePortName);
                         var stringFolder = Path.Combine(portFolder, "STRING");
                         var hexFolder = Path.Combine(portFolder, "HEX");
@@ -2893,7 +2919,7 @@ namespace llcom_plus.Pages
                             fileName);
                         sessionStringLogWriter = writers.StringWriter;
                         sessionHexLogWriter = writers.HexWriter;
-                        var startLine = $"[START] {startedAt:yyyy-MM-dd HH:mm:ss.fff}  PORT={PortName}  SLOT={Index}";
+                        var startLine = $"[START] {startedAt:yyyy-MM-dd HH:mm:ss.fff}  PORT={currentPortName}  SLOT={Index}";
                         sessionStringLogWriter.WriteLine(startLine);
                         sessionHexLogWriter.WriteLine(startLine);
                     }
@@ -2928,7 +2954,7 @@ namespace llcom_plus.Pages
                 }
             }
 
-            private void WriteSessionLog(string direction, byte[] data)
+            private void WriteSessionLog(string direction, byte[] data, int? encodingCodePage = null)
             {
                 if (data == null || data.Length == 0)
                     return;
@@ -2951,7 +2977,7 @@ namespace llcom_plus.Pages
                         Logger.WriteSessionStringLine(
                             sessionStringLogWriter,
                             prefix,
-                            Byte2SessionString(data, GetProfileSnapshot().encoding));
+                            Byte2SessionString(data, encodingCodePage ?? GetProfileSnapshot().encoding));
                         sessionHexLogWriter?.WriteLine($"{prefix} │ {Global.Byte2Hex(data, " ", data.Length)}");
                     }
                     catch (Exception ex)

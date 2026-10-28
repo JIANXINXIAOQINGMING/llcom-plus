@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -40,6 +41,8 @@ namespace llcom_plus.Pages
         private int receiveCaptureEnabled = 0;
         private bool receiveSubscribed = false;
         private bool isUnloaded = false;
+        private ActiveSerialTarget replayTarget;
+        private long receiveAfterTraceId;
 
         private sealed class ReplayStepCollection : ObservableCollection<ReplayStep>
         {
@@ -88,9 +91,14 @@ namespace llcom_plus.Pages
             isUnloaded = false;
             if (!receiveSubscribed)
             {
-                Global.ActiveSerialTargetReceivedEvent += ActiveSerialTargetReceived;
+                SerialTraceHub.Recorded += ReplayTraceRecorded;
+                Global.ProgramClosedEvent += ReplayProgramClosed;
                 receiveSubscribed = true;
             }
+            SelectLogButton.IsEnabled = replayCts == null && loadCts == null;
+            StartReplayButton.IsEnabled = replayCts == null && loadCts == null && Steps.Count > 0;
+            StopReplayButton.IsEnabled = replayCts != null;
+            LoopReplayCheckBox.IsEnabled = replayCts == null;
         }
 
         private void Page_Unloaded(object sender, RoutedEventArgs e)
@@ -98,12 +106,34 @@ namespace llcom_plus.Pages
             isUnloaded = true;
             if (receiveSubscribed)
             {
-                Global.ActiveSerialTargetReceivedEvent -= ActiveSerialTargetReceived;
+                SerialTraceHub.Recorded -= ReplayTraceRecorded;
+                Global.ProgramClosedEvent -= ReplayProgramClosed;
                 receiveSubscribed = false;
             }
             CancelLogLoad();
             StopReplay();
             ClearReceiveBuffer();
+        }
+
+        private void ReplayProgramClosed(object sender, EventArgs e)
+        {
+            CancelLogLoad();
+            StopReplay();
+        }
+
+        private void ReplayTraceRecorded(object sender, SerialTraceEntry entry)
+        {
+            if (entry.Kind != SerialTraceKind.Rx || Volatile.Read(ref receiveCaptureEnabled) == 0) return;
+            lock (receiveLock)
+            {
+                // Recheck within the same lock as stop/clear: a previously queued
+                // trace callback must not enter a later replay's receive buffer.
+                var target = replayTarget;
+                if (Volatile.Read(ref receiveCaptureEnabled) == 0 ||
+                    entry.Id <= Interlocked.Read(ref receiveAfterTraceId) || target == null ||
+                    !SerialTraceHub.MatchesConnection(entry, target.Identity)) return;
+                AppendReceiveDataBounded(receiveBuffer, entry.GetData());
+            }
         }
 
         private void ActiveSerialTargetReceived(object sender, byte[] data)
@@ -221,7 +251,7 @@ namespace llcom_plus.Pages
 
         private async void StartReplayButton_Click(object sender, RoutedEventArgs e)
         {
-            if (Interlocked.CompareExchange(ref replayCts, null, null) != null)
+            if (isUnloaded || loadCts != null || Interlocked.CompareExchange(ref replayCts, null, null) != null)
                 return;
 
             ReplayStepsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
@@ -230,9 +260,10 @@ namespace llcom_plus.Pages
             if (Steps.Count == 0)
                 return;
 
-            if (!Global.EnsureActiveSerialTargetOpen())
+            var target = Global.CaptureActiveSerialTarget();
+            if (target == null || !target.IsOpen || target.Identity.StartsWith("serial-all:", StringComparison.Ordinal))
             {
-                ReplayStatusTextBlock.Text = TryFindResource("LogReplayPortNotOpen") as string ?? "Please open the serial port first";
+                ReplayStatusTextBlock.Text = "请手动打开并选择一个明确的串口；回放不会自动连接或向全部串口广播。";
                 return;
             }
 
@@ -248,13 +279,17 @@ namespace llcom_plus.Pages
                 return;
             }
 
+            replayTarget = target;
+            Interlocked.Exchange(ref receiveAfterTraceId, SerialTraceHub.LastId);
             ClearReceiveBuffer();
             Volatile.Write(ref receiveCaptureEnabled, 1);
             StartReplayButton.IsEnabled = false;
             StopReplayButton.IsEnabled = true;
             LoopReplayCheckBox.IsEnabled = false;
+            SelectLogButton.IsEnabled = false;
 
             var ok = true;
+            string failure = null;
             try
             {
                 do
@@ -281,6 +316,11 @@ namespace llcom_plus.Pages
             {
                 ok = false;
             }
+            catch (Exception ex)
+            {
+                ok = false;
+                failure = ex.GetBaseException().Message;
+            }
             finally
             {
                 Volatile.Write(ref receiveCaptureEnabled, 0);
@@ -289,17 +329,20 @@ namespace llcom_plus.Pages
                 var detached = ReferenceEquals(
                     Interlocked.CompareExchange(ref replayCts, null, cts),
                     cts);
+                if (detached) replayTarget = null;
                 cts.Dispose();
                 if (detached && !isUnloaded)
                 {
                     StopReplayButton.IsEnabled = false;
                     StartReplayButton.IsEnabled = Steps.Count > 0;
                     LoopReplayCheckBox.IsEnabled = true;
+                    SelectLogButton.IsEnabled = loadCts == null;
                     ReplayStatusTextBlock.Text = wasCancelled
                         ? (TryFindResource("LogReplayStopped") as string ?? "Stopped")
                         : (ok
                             ? (TryFindResource("LogReplayDone") as string ?? "Done")
-                            : (TryFindResource("LogReplayFailed") as string ?? "Failed"));
+                            : (TryFindResource("LogReplayFailed") as string ?? "Failed") +
+                                (failure == null ? "" : " · " + failure));
                 }
             }
         }
@@ -320,6 +363,7 @@ namespace llcom_plus.Pages
             for (int i = 0; i < Steps.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
+                AssertReplayTarget();
                 var step = Steps[i];
 
                 ReplayStepsGrid.ScrollIntoView(step);
@@ -327,11 +371,19 @@ namespace llcom_plus.Pages
                 {
                     ClearReceiveBuffer();
                     step.Status = TryFindResource("LogReplaySending") as string ?? "Sending";
-                    if (!Global.RequestSendRawData(step.Data))
+                    if (!await Global.RequestSendDataAsync(new UartSendRequest
+                    {
+                        Data = step.Data,
+                        IsHex = true,
+                        ApplySendProcessing = false,
+                        ExpectedTargetIdentity = replayTarget.Identity
+                    }, token))
                     {
                         step.Status = TryFindResource("LogReplaySendFail") as string ?? "Send failed";
                         return false;
                     }
+                    token.ThrowIfCancellationRequested();
+                    AssertReplayTarget();
                     step.Status = step.IgnoreResponseValue
                         ? (TryFindResource("LogReplaySentCountOnly") as string ?? "Sent (count only)")
                         : (TryFindResource("LogReplaySent") as string ?? "Sent");
@@ -362,6 +414,14 @@ namespace llcom_plus.Pages
             }
 
             return true;
+        }
+
+        private void AssertReplayTarget()
+        {
+            var selected = Global.CaptureActiveSerialTarget();
+            if (isUnloaded || replayTarget == null || !replayTarget.IsOpen || selected == null ||
+                !selected.IsOpen || !string.Equals(selected.Identity, replayTarget.Identity, StringComparison.Ordinal))
+                throw new InvalidOperationException("回放已停止：串口连接或发送目标已改变，不会改发到另一串口。请重新开始。");
         }
 
         private async Task<int> ContinueAfterReceiveCountAsync(int sendIndex, int timeoutMs, CancellationToken token)
@@ -990,10 +1050,11 @@ namespace llcom_plus.Pages
             bool anyResponse,
             CancellationToken token)
         {
-            var start = DateTime.UtcNow;
-            while ((DateTime.UtcNow - start).TotalMilliseconds < timeoutMs)
+            var start = Stopwatch.StartNew();
+            while (start.ElapsedMilliseconds < timeoutMs)
             {
                 token.ThrowIfCancellationRequested();
+                AssertReplayTarget();
                 lock (receiveLock)
                 {
                     if (anyResponse ? TryConsumeReceiveFrame(expected) : TryConsumeExpected(expected))

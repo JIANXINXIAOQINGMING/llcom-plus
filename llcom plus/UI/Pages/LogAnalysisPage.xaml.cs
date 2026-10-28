@@ -43,11 +43,17 @@ namespace llcom_plus.Pages
             jumpTime = timestamp;
             paused = timestamp.HasValue;
             PauseButton.Content = paused ? "继续视图" : "暂停视图";
-            dirty = true;
+            FilterChanged(null, null);
             Dispatcher.BeginInvoke(new Action(() => { SearchBox.Focus(); SearchBox.SelectAll(); Refresh(); }));
         }
-        private void FilterChanged(object sender, RoutedEventArgs e) { dirty = true; }
-        private void Search_Click(object sender, RoutedEventArgs e) { dirty = true; Refresh(); }
+        private void FilterChanged(object sender, RoutedEventArgs e)
+        {
+            dirty = true;
+            // A result belongs to the filter that started it, not the current UI.
+            // Dispose only when its worker has completed; cancellation is immediate.
+            searchCancellation?.Cancel();
+        }
+        private void Search_Click(object sender, RoutedEventArgs e) { FilterChanged(sender, e); Refresh(); }
         private void PortsOpened(object sender, EventArgs e)
         {
             var text = PortBox.Text;
@@ -61,6 +67,7 @@ namespace llcom_plus.Pages
             searching = true;
             searchCancellation?.Dispose();
             var cancellation = searchCancellation = new CancellationTokenSource();
+            var token = cancellation.Token;
             var snapshot = SerialTraceHub.Snapshot();
             var lastId = snapshot.LastOrDefault()?.Id ?? 0;
             var query = SearchBox.Text;
@@ -72,7 +79,7 @@ namespace llcom_plus.Pages
             var only = BookmarksOnly.IsChecked == true;
             try
             {
-                var found = await Task.Run(() => SerialTraceQuery.Find(snapshot, query, mode, port, kind, marks, only, cancellation.Token));
+                var found = await Task.Run(() => SerialTraceQuery.Find(snapshot, query, mode, port, kind, marks, only, token), token);
                 if (cancellation.IsCancellationRequested || !IsLoaded) return;
                 result = found;
                 renderedId = lastId;
@@ -98,20 +105,31 @@ namespace llcom_plus.Pages
                 if (snapshot.Count == 0) Status.Text = "暂无事件。连接串口后，收发、引脚和通知事件会出现在这里。";
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Status.Text = ex.Message; renderedId = lastId; }
-            finally { searching = false; }
+            catch (Exception ex)
+            {
+                if (!token.IsCancellationRequested && IsLoaded) { Status.Text = ex.Message; renderedId = lastId; }
+            }
+            finally
+            {
+                searching = false;
+                if (ReferenceEquals(searchCancellation, cancellation))
+                {
+                    searchCancellation = null;
+                    cancellation.Dispose();
+                }
+            }
         }
         private void Pause_Click(object sender, RoutedEventArgs e)
         {
             paused = !paused;
             PauseButton.Content = paused ? "继续视图" : "暂停视图";
-            dirty = true; Refresh();
+            FilterChanged(sender, e); Refresh();
         }
         private void Bookmark_Click(object sender, RoutedEventArgs e)
         {
             foreach (var row in Records.SelectedItems.Cast<SerialTraceRow>())
                 if (!bookmarks.Add(row.Id)) bookmarks.Remove(row.Id);
-            dirty = true; Refresh();
+            FilterChanged(sender, e); Refresh();
         }
         private void Records_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {

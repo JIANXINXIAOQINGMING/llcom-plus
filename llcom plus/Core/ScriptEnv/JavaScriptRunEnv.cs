@@ -325,6 +325,8 @@ namespace llcom_plus.ScriptEnv
 
                 ScriptApis.PrintLog("JavaScript脚本启动：" + Path.GetFileName(scriptPath));
                 var localEngine = JavaScriptLoader.CreateEngine("script", session.Token);
+                localEngine.SetValue("__apiSend", new Func<string, object, object, bool>((channel, data, options) =>
+                    ScriptApis.SendFromSession(channel, data, options, session.Token, () => IsCurrentSession(session))));
                 localEngine.SetValue("apiStartTimer", new Func<int, int, int>((id, time) =>
                     StartTimer(session, id, time)));
                 localEngine.SetValue("apiStopTimer", new Action<int>(id => StopTimer(session, id)));
@@ -486,6 +488,8 @@ namespace llcom_plus.ScriptEnv
                 return 0;
             if (data is byte[] bytes)
                 return bytes.LongLength;
+            if (data is ScriptApis.MqttChannelData mqtt)
+                return mqtt.PayloadByteCount;
             if (data is string text)
                 return Encoding.UTF8.GetByteCount(text);
             if (data is char[] characters)
@@ -630,6 +634,12 @@ namespace llcom_plus.ScriptEnv
                             var copy = new byte[externalBytes.Length];
                             Buffer.BlockCopy(externalBytes, 0, copy, 0, externalBytes.Length);
                             ownedData = copy;
+                        }
+                        else if (data is ScriptApis.MqttChannelData mqtt)
+                        {
+                            // The nested payload counts against the same byte budget
+                            // and is copied only after admission, just like raw bytes.
+                            ownedData = mqtt.Copy();
                         }
 
                         pendingEvents.Enqueue(new ScriptPool

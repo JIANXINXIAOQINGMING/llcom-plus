@@ -19,6 +19,7 @@ namespace llcom_plus.Pages
         private string selectedFilePath = "";
         private CancellationTokenSource calculationCts = null;
         private CancellationTokenSource sendCts = null;
+        internal bool IsSending => Interlocked.CompareExchange(ref sendCts, null, null) != null;
         private int calculationVersion = 0;
         private long sendRunVersion = 0;
         private bool isUnloaded = false;
@@ -44,6 +45,9 @@ namespace llcom_plus.Pages
         {
             var wasUnloaded = isUnloaded;
             isUnloaded = false;
+            // Unload detaches the cancelled send, so its completion deliberately
+            // cannot restore this cached page's controls on a later visit.
+            SetSendingState(Interlocked.CompareExchange(ref sendCts, null, null) != null);
             if (wasUnloaded)
                 _ = UpdateSelectedSourceResultAsync();
         }

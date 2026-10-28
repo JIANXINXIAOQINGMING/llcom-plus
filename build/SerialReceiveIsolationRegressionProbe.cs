@@ -50,6 +50,7 @@ public static class SerialReceiveIsolationRegressionProbe
         var profileType = assembly.GetType("llcom_plus.Model.UartPortProfile", true);
         var leaseType = uartType.GetNestedType("ConnectionLease", BindingFlags.NonPublic);
         var eventType = assembly.GetType("llcom_plus.Model.UartReceiveEventArgs", true);
+        var sendEventType = assembly.GetType("llcom_plus.Model.UartSendEventArgs", true);
         var uart = FormatterServices.GetUninitializedObject(uartType);
         SetField(uart, "lifecycleLock", new object());
         SetField(uart, "connectionGeneration", 11L);
@@ -66,24 +67,35 @@ public static class SerialReceiveIsolationRegressionProbe
             var lease = Activator.CreateInstance(leaseType, Instance, null,
                 new object[] { uart, port, 11L, "COM_TEST", profile }, null);
             var eventArgs = Activator.CreateInstance(eventType, Instance, null, new[] { lease }, null);
+            var sendEventArgs = Activator.CreateInstance(sendEventType, Instance, null,
+                new object[] { "recorded-override", lease }, null);
             Assert((bool)Get(lease, "IsCurrent") && (bool)Get(eventArgs, "IsCurrent"),
                 "A matching unopened connection identity should remain current.");
             Assert(!(bool)Get(lease, "IsOpen"), "The fixture must never open a serial port.");
             passed.Add("Main UART lease distinguishes current identity from an actually open serial port.");
+            Assert((bool)Get(sendEventArgs, "IsCurrent") &&
+                (string)Get(sendEventArgs, "PortName") == "COM_TEST" &&
+                (string)Get(sendEventArgs, "SessionStringLogOverride") == "recorded-override" &&
+                ReferenceEquals(Get(sendEventArgs, "Connection"), lease),
+                "Send completion lost its captured connection or log override.");
 
             SetField(uart, "connectionGeneration", 12L);
-            Assert(!(bool)Get(lease, "IsCurrent") && !(bool)Get(eventArgs, "IsCurrent"),
+            Assert(!(bool)Get(lease, "IsCurrent") && !(bool)Get(eventArgs, "IsCurrent") &&
+                !(bool)Get(sendEventArgs, "IsCurrent"),
                 "Old-generation receive events survived a reconnect.");
             SetField(uart, "connectionGeneration", 11L);
             SetField(uart, "serial", replacement);
-            Assert(!(bool)Get(lease, "IsCurrent") && !(bool)Get(eventArgs, "IsCurrent"),
+            Assert(!(bool)Get(lease, "IsCurrent") && !(bool)Get(eventArgs, "IsCurrent") &&
+                !(bool)Get(sendEventArgs, "IsCurrent"),
                 "Receive events survived replacement of their serial object.");
             SetField(uart, "serial", port);
             SetField(uart, "isShuttingDown", true);
-            Assert(!(bool)Get(lease, "IsCurrent") && !(bool)Get(eventArgs, "IsCurrent"),
+            Assert(!(bool)Get(lease, "IsCurrent") && !(bool)Get(eventArgs, "IsCurrent") &&
+                !(bool)Get(sendEventArgs, "IsCurrent"),
                 "Receive events remained current after shutdown.");
             SetField(uart, "isShuttingDown", false);
             passed.Add("Main UART receive events reject changed generation, replaced port, and shutdown.");
+            passed.Add("Main UART send completion rejects changed generations, replaced ports, and shutdown.");
 
             var capturedProfile = Get(lease, "Profile");
             Assert(!ReferenceEquals(capturedProfile, profile), "A lease retained the mutable live profile.");
@@ -96,6 +108,8 @@ public static class SerialReceiveIsolationRegressionProbe
                 "Later settings changes altered a captured receive profile.");
             Assert(ReferenceEquals(Get(eventArgs, "Profile"), capturedProfile),
                 "Receive event metadata lost its packet's captured profile.");
+            Assert(ReferenceEquals(Get(sendEventArgs, "Profile"), capturedProfile),
+                "Send completion lost the profile used when its bytes were sent.");
             passed.Add("A receive lease independently captures decoding, formatting, and script settings.");
         }
 

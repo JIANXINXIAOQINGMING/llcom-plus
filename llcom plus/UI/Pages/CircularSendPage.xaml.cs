@@ -25,6 +25,8 @@ namespace llcom_plus.Pages
         private const int ZeroDelayYieldBatchSize = 64;
         private bool suppressSave = false;
         private bool suppressSelectionHeader = false;
+        private bool storageLoadFailed;
+        private string lastStoredItems;
         private CancellationTokenSource loopCts = null;
         internal bool IsWorkflowRunning => loopCts != null;
         private string lastStorageNotificationMessage = string.Empty;
@@ -82,12 +84,8 @@ namespace llcom_plus.Pages
                 Items.Clear();
                 if (File.Exists(StoragePath))
                 {
-                    var loaded = JsonConvert.DeserializeObject<List<CircularSendItem>>(File.ReadAllText(StoragePath));
-                    if (loaded != null)
-                    {
-                        foreach (var item in loaded.Where(item => item != null))
-                            AddItem(item);
-                    }
+                    foreach (var item in ReadStoredItems(StoragePath))
+                        AddItem(item);
                 }
 
                 if (Items.Count == 0)
@@ -100,15 +98,61 @@ namespace llcom_plus.Pages
             }
             catch (Exception ex)
             {
+                storageLoadFailed = true;
+                foreach (var item in Items) item.Changed -= Item_Changed;
                 Items.Clear();
-                for (var i = 0; i < DefaultRowCount; i++)
-                    AddItem(new CircularSendItem());
+                bool recovered = false;
+                try
+                {
+                    foreach (var item in ReadStoredItems(StoragePath + ".bak"))
+                        AddItem(item);
+                    recovered = true;
+                }
+                catch (Exception) { /* Keep the unreadable primary and backup untouched. */ }
+                if (Items.Count == 0)
+                    for (var i = 0; i < DefaultRowCount; i++)
+                        AddItem(new CircularSendItem());
                 RefreshIndexes();
-                ShowStorageError(ex);
+                bool english = (Global.setting?.language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase);
+                string message = recovered
+                    ? (english ? "Loaded the previous backup. The unreadable original is preserved; it will be archived on your next edit. "
+                        : "已读取上次备份。原文件已保留，下次编辑保存时将另存为恢复副本。")
+                    : (english ? "The original file is preserved. Leaving this page will not replace it with empty rows. "
+                        : "原文件已保留，离开页面不会用空白条目覆盖。 ");
+                ShowStorageError(new IOException(message + ex.Message, ex));
             }
             finally
             {
+                // An unchanged fallback view is not a new user configuration.
+                lastStoredItems = JsonConvert.SerializeObject(Items, Formatting.Indented);
                 suppressSave = false;
+            }
+        }
+
+        internal static List<CircularSendItem> ReadStoredItems(string path)
+        {
+            var items = JsonConvert.DeserializeObject<List<CircularSendItem>>(File.ReadAllText(path));
+            if (items == null) throw new InvalidDataException("Circular-send configuration is null.");
+            return items.Where(item => item != null).ToList();
+        }
+
+        internal static void WriteStoredItems(string path, string json, bool preserveUnreadable)
+        {
+            var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(tempPath, json, new UTF8Encoding(false));
+                if (File.Exists(path))
+                    // Preserve one previous valid save, and one unreadable original
+                    // independently. A failed replacement never truncates the primary.
+                    File.Replace(tempPath, path, path + (preserveUnreadable ? ".load-error.bak" : ".bak"));
+                else
+                    File.Move(tempPath, path);
+            }
+            finally
+            {
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
             }
         }
 
@@ -130,12 +174,14 @@ namespace llcom_plus.Pages
             if (suppressSave)
                 return;
 
-            var tempPath = StoragePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                Directory.CreateDirectory(Global.ProfilePath);
-                File.WriteAllText(tempPath, JsonConvert.SerializeObject(Items, Formatting.Indented));
-                File.Copy(tempPath, StoragePath, true);
+                var json = JsonConvert.SerializeObject(Items, Formatting.Indented);
+                if (string.Equals(json, lastStoredItems, StringComparison.Ordinal))
+                    return;
+                WriteStoredItems(StoragePath, json, storageLoadFailed);
+                storageLoadFailed = false;
+                lastStoredItems = json;
                 StorageErrorTextBlock.Text = string.Empty;
                 StorageErrorTextBlock.Visibility = Visibility.Collapsed;
                 lastStorageNotificationMessage = string.Empty;
@@ -143,10 +189,6 @@ namespace llcom_plus.Pages
             catch (Exception ex)
             {
                 ShowStorageError(ex);
-            }
-            finally
-            {
-                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
             }
         }
 

@@ -25,6 +25,7 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Button
+                Name="SelectLogButton"
                 MinWidth="90"
                 Margin="0,0,6,0"
                 Click="SelectLogButton_Click"

@@ -150,6 +150,8 @@
     <system:String x:Key="QuickSendBackupSelectFirst">请先选择一个快照。</system:String>
     <system:String x:Key="QuickSendBackupRestoreConfirm">恢复后会替换当前全部快捷发送页，当前内容会先自动备份。是否继续？</system:String>
     <system:String x:Key="QuickSendBackupRestoreDone">快捷发送已从快照恢复。</system:String>
+    <system:String x:Key="QuickSendBackupRestoreFailed">恢复未完成，已保留当前快捷发送。</system:String>
+    <system:String x:Key="QuickSendPageChangeFailed">快捷发送页面操作保存失败，当前数据已保留。</system:String>
     <system:String x:Key="QuickSendBackupDeleteConfirm">确定删除所选快照吗？</system:String>
     <system:String x:Key="QuickSendBackupExportDone">快照已导出。</system:String>
     <system:String x:Key="QuickSendBackupLegacyCandidatePrompt">当前快捷发送为空，但旧备份中仍有数据。旧数据已安全保留为快照，是否立即恢复？</system:String>

@@ -40,6 +40,7 @@
   <PropertyGroup>
     <ApplicationIcon>Resources\Assets\AppIcon.ico</ApplicationIcon>
     <UpdateSigningPublicKeyFile Condition="'$(UpdateSigningPublicKeyFile)' == ''">$(MSBuildProjectDirectory)\Resources\UpdateSigningPublicKey.xml</UpdateSigningPublicKeyFile>
+    <ReleaseArtifactDirectory Condition="'$(ReleaseArtifactDirectory)' == ''">$(MSBuildProjectDirectory)\..\artifacts\release</ReleaseArtifactDirectory>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
     <DebugSymbols>true</DebugSymbols>
@@ -690,15 +691,15 @@
       <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>
       <ReleasePackagePlatform Condition="'$(ReleasePackagePlatform)' == ''">$(Platform)</ReleasePackagePlatform>
       <ReleasePackageRoot>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)release_package\$(AssemblyName)_$(ReleasePackageVersion)_$(ReleasePackagePlatform)</ReleasePackageRoot>
-      <ReleasePackageZip>$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
+      <ReleasePackageZip>$(ReleaseArtifactDirectory)\llcom.plus_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
-      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json;$(TargetDir)settings.json.bakup;$(TargetDir).credentials\**\*;$(TargetDir)quick-send-backups\**\*;$(TargetDir)circular_send.json;$(TargetDir)ch347-presets.json*;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json*;$(TargetDir).credentials\**\*;$(TargetDir)quick-send-backups\**\*;$(TargetDir)circular_send.json*;$(TargetDir)plot-settings.json*;$(TargetDir)ch347-presets.json*;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
       <ReleasePackageFile Include="$(TargetDir)UpdateSigningPublicKey.xml" Condition="Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
-      <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
-      <OldReleasePackageZip Include="$(MSBuildProjectDirectory)\..\artifacts\release\llcom.plus_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
+      <OldReleasePackageZip Include="$(ReleaseArtifactDirectory)\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
+      <OldReleasePackageZip Include="$(ReleaseArtifactDirectory)\llcom.plus_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
     </ItemGroup>
-    <MakeDir Directories="$(MSBuildProjectDirectory)\..\artifacts\release" />
+    <MakeDir Directories="$(ReleaseArtifactDirectory)" />
     <RemoveDir Directories="$(ReleasePackageRoot)" Condition="Exists('$(ReleasePackageRoot)')" />
     <MakeDir Directories="$(ReleasePackageRoot)" />
     <Copy SourceFiles="@(ReleasePackageFile)" DestinationFiles="@(ReleasePackageFile->'$(ReleasePackageRoot)\%(RecursiveDir)%(Filename)%(Extension)')" />

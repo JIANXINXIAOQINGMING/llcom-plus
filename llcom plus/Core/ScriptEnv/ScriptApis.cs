@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace llcom_plus.ScriptEnv
 {
@@ -232,6 +233,14 @@ namespace llcom_plus.ScriptEnv
 
         public static IDisposable SendChannelsRegister(string channel, Func<byte[], object, bool> cb)
         {
+            if (cb == null)
+                throw new ArgumentNullException(nameof(cb));
+            return SendChannelsRegisterCancelable(channel, (data, options, token, current) => cb(data, options));
+        }
+
+        internal static IDisposable SendChannelsRegisterCancelable(string channel,
+            Func<byte[], object, CancellationToken, Func<bool>, bool> cb)
+        {
             if (channel == null)
                 throw new ArgumentNullException(nameof(channel));
             if (cb == null)
@@ -249,23 +258,53 @@ namespace llcom_plus.ScriptEnv
 
         public static bool Send(string channel, object data, object options)
         {
+            return SendFromSession(channel, data, options, CancellationToken.None, null);
+        }
+
+        internal static bool SendFromSession(string channel, object data, object options,
+            CancellationToken token, Func<bool> isCurrent)
+        {
+            AssertSendCurrent(token, isCurrent);
             if (!SendChannels.TryGetValue(channel, out var registration))
                 return false;
-            return registration.Callback(ToBytes(data), options);
+            var bytes = ToBytes(data);
+            AssertSendCurrent(token, isCurrent);
+            return registration.Callback(bytes, options, token, isCurrent);
+        }
+
+        private static void AssertSendCurrent(CancellationToken token, Func<bool> isCurrent)
+        {
+            token.ThrowIfCancellationRequested();
+            if (isCurrent?.Invoke() == false)
+                throw new OperationCanceledException("The script runtime was stopped or replaced.", token);
+        }
+
+        internal static bool SendUartFromSession(byte[] data, CancellationToken token, Func<bool> isCurrent,
+            Func<Tools.ActiveSerialTarget> capture)
+        {
+            if (data == null) return false;
+            AssertSendCurrent(token, isCurrent);
+            var target = capture();
+            // Capture can wait for the UI dispatcher. Retire changes identity
+            // synchronously, before asynchronous token cancellation has run.
+            AssertSendCurrent(token, isCurrent);
+            if (target?.IsOpen != true) return false;
+            AssertSendCurrent(token, isCurrent);
+            return target.Send(data, token, null);
         }
 
         private sealed class SendChannelRegistration : IDisposable
         {
             private int disposed = 0;
 
-            public SendChannelRegistration(string channel, Func<byte[], object, bool> callback)
+            public SendChannelRegistration(string channel, Func<byte[], object, CancellationToken, Func<bool>, bool> callback)
             {
                 Channel = channel;
                 Callback = callback;
             }
 
             public string Channel { get; }
-            public Func<byte[], object, bool> Callback { get; }
+            public Func<byte[], object, CancellationToken, Func<bool>, bool> Callback { get; }
 
             public void Dispose()
             {
@@ -279,6 +318,22 @@ namespace llcom_plus.ScriptEnv
         public static void SendChannelsReceived(string channel, object data)
         {
             JavaScriptRunEnv.ChannelReceived(channel, data);
+        }
+
+        internal sealed class MqttChannelData
+        {
+            internal MqttChannelData(string topic, byte[] payload, int qos)
+            {
+                this.topic = topic ?? string.Empty;
+                this.payload = payload ?? Array.Empty<byte>();
+                this.qos = qos;
+            }
+            // Preserve the public JavaScript field names used by existing scripts.
+            public string topic { get; }
+            public byte[] payload { get; }
+            public int qos { get; }
+            internal long PayloadByteCount => (long)Encoding.UTF8.GetByteCount(topic) + payload.LongLength + sizeof(int);
+            internal MqttChannelData Copy() => new MqttChannelData(topic, (byte[])payload.Clone(), qos);
         }
 
         public static string BytesToString(object data)

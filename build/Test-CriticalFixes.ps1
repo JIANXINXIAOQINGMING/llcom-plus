@@ -5,6 +5,7 @@ param(
     [ValidateSet('x64', 'x86')]
     [string]$Platform = 'x64',
     [switch]$SkipBuild,
+    [string]$OutputDirectory = '',
     [ValidateRange(1, 28)]
     [int]$CheckFrom = 1,
     [ValidateRange(1, 28)]
@@ -15,6 +16,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 if ($CheckFrom -gt $CheckThrough) {
     throw 'CheckFrom must be less than or equal to CheckThrough.'
+}
+if (-not $SkipBuild -and -not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    throw 'Build the custom output directory first and use -SkipBuild -OutputDirectory.'
 }
 
 # A platform-targeted .NET Framework/WPF executable must run in a same-bitness,
@@ -107,12 +111,17 @@ if (-not $isWindowsPowerShell51 -or -not $isMatchingBitness -or -not $isStaThrea
     if ($SkipBuild) {
         $relaunchArguments += '-SkipBuild'
     }
+    if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
+        $relaunchArguments += @('-OutputDirectory', $OutputDirectory)
+    }
     & $matchingPowerShell @relaunchArguments
     exit $LASTEXITCODE
 }
 $root = Split-Path -Parent $PSScriptRoot
 $projectDir = Join-Path $root 'llcom plus'
-$outputDir = Join-Path $projectDir "bin\$Platform\$Configuration"
+$outputDir = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $projectDir "bin\$Platform\$Configuration"
+} else { [IO.Path]::GetFullPath($OutputDirectory) }
 $exePath = Join-Path $outputDir 'llcom plus.exe'
 $failures = New-Object System.Collections.Generic.List[string]
 $executedCheckCount = 0
@@ -1191,6 +1200,9 @@ public static class LlcomCriticalReflectionExceptionProbe
             $viewUnloaded,
             $calculationCancelled,
             $calculationExceptionType)
+        Add-Type -Path (Join-Path $PSScriptRoot 'DataCalcLifecycleRegressionProbe.cs') `
+            -ReferencedAssemblies @('System.dll', 'System.Core.dll', 'WindowsBase', 'PresentationCore', 'PresentationFramework', 'System.Xaml')
+        [DataCalcLifecycleRegressionProbe]::Run($assembly)
     }
 
     Invoke-CriticalCheck 13 'Log replay gates receive data and enforces explicit resource limits' {
@@ -1299,6 +1311,8 @@ public static class LlcomCriticalReflectionExceptionProbe
             $fileExceptionType,
             ([IO.FileInfo]$oversizedLogPath).Length,
             $maxFile)
+        Add-Type -Path (Join-Path $PSScriptRoot 'LogReplayRegressionProbe.cs')
+        [LogReplayRegressionProbe]::Run($assembly)
     }
 
     Invoke-CriticalCheck 14 'Quick-send import preserves both modes and rejects every configured limit class' {

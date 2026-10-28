@@ -993,25 +993,40 @@ namespace llcom_plus
                         return null;
 
                     var displayName = TryFindResource("SplitSendTargetAll") as string ?? "全部";
-                    return new ActiveSerialTarget(
+                    return GuardToolSerialTarget(new ActiveSerialTarget(
                         "serial-all:" + string.Join("|", targets.Select(target => target.Identity)),
                         displayName,
                         () => targets.All(target => target.IsOpen),
                         (data, token, committedBytes) =>
                             SendToCapturedSerialTargets(targets, data, token, committedBytes),
-                        supportsResumableCommits: false);
+                        supportsResumableCommits: false));
                 }
 
-                return page.CaptureSerialTarget(GetSelectedSerialSplitSlot());
+                return GuardToolSerialTarget(page.CaptureSerialTarget(GetSelectedSerialSplitSlot()));
             }
 
             var connection = Tools.Global.uart.CaptureConnectionLease();
-            return new ActiveSerialTarget(
+            return GuardToolSerialTarget(new ActiveSerialTarget(
                 connection.Identity,
                 connection.DisplayName,
                 () => connection.IsOpen,
                 (data, token, committedBytes) =>
-                    connection.Send(data, token, committedBytes, raiseEvents: false));
+                    connection.Send(data, token, committedBytes, raiseEvents: false)));
+        }
+
+        private ActiveSerialTarget GuardToolSerialTarget(ActiveSerialTarget target)
+        {
+            if (target == null) return null;
+            // Identity/open state remain usable by reply-driven workflows. Only
+            // raw tool writes are blocked, including leases captured before the
+            // quick workflow began and writes made during its dispatch bypass.
+            return new ActiveSerialTarget(target.Identity, target.DisplayName, () => target.IsOpen,
+                (data, token, committedBytes) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    AssertToolSerialSendAllowed();
+                    return target.Send(data, token, committedBytes);
+                }, target.SupportsResumableCommits);
         }
 
         private static bool SendToCapturedSerialTargets(
@@ -1060,6 +1075,8 @@ namespace llcom_plus
         {
             if (!Dispatcher.CheckAccess())
                 return Dispatcher.Invoke(new Func<bool>(EnsureActiveSerialTargetOpenForTools));
+
+            AssertToolSerialSendAllowed();
 
             if (IsSerialSplitModeActive())
             {
@@ -1376,20 +1393,6 @@ namespace llcom_plus
         private void NormalizeQuickSendRows()
         {
             var defaultButtonText = TryFindResource("QuickSendButton") as string ?? "?!";
-            var sampleTexts = new HashSet<string>
-            {
-                "example string",
-                "JavaScript可通过接口获取此处数据",
-                "aa 01 02 0d 0a",
-                "此处数据会被JavaScript处理",
-                "右击序号可以更改这一行的位置"
-            };
-            var sampleButtons = new HashSet<string>
-            {
-                "右击更改此处文字",
-                "Hex数据也能发"
-            };
-
             foreach (var list in Tools.Global.setting.GetAllQuickSendLists())
             {
                 if (list == null)
@@ -1397,16 +1400,9 @@ namespace llcom_plus
 
                 foreach (var item in list.Where(item => item != null))
                 {
-                    var hasSampleButton = sampleButtons.Contains(item.commit ?? "");
-                    if (sampleTexts.Contains(item.text ?? "") || hasSampleButton)
-                    {
-                        item.text = "";
-                        item.hex = false;
-                        item.appendCrlf = true;
-                        item.disableSuggestion = false;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(item.commit) || hasSampleButton)
+                    // Old example text/captions can also be legitimate user data.
+                    // Fill missing UI labels without rewriting any saved command.
+                    if (string.IsNullOrWhiteSpace(item.commit))
                         item.commit = defaultButtonText;
                 }
             }
@@ -1513,8 +1509,10 @@ namespace llcom_plus
 
         private void Uart_UartDataSent(object sender, EventArgs e)
         {
-            Tools.Logger.ShowSerialData(sender as byte[], true, (e as UartSendEventArgs)?.SessionStringLogOverride,
-                null, (e as UartSendEventArgs)?.PortName ?? Tools.Logger.CaptureMainPortName());
+            var sent = e as UartSendEventArgs;
+            Tools.Logger.ShowCapturedSerialData(sender as byte[], true, sent?.SessionStringLogOverride,
+                null, sent?.PortName ?? Tools.Logger.CaptureMainPortName(), sent?.Profile,
+                sent == null ? (Func<bool>)null : () => sent.IsCurrent);
         }
 
         private void Uart_UartDataRecived(object sender, EventArgs e)
@@ -1597,7 +1595,7 @@ namespace llcom_plus
                 if (!string.IsNullOrEmpty(request.ExpectedTargetIdentity))
                 {
                     var target = Tools.Global.CaptureActiveSerialTarget();
-                    if (target == null || !target.IsOpen ||
+                    if (IsMainSendTargetSelected() || target == null || !target.IsOpen ||
                         !string.Equals(target.Identity, request.ExpectedTargetIdentity, StringComparison.Ordinal))
                         throw new InvalidOperationException("测试已停止：串口连接或发送目标已改变，请重新开始测试。");
                 }
@@ -5096,23 +5094,37 @@ namespace llcom_plus
                 select == Global.setting.quickSendSelect)
                 return;
 
-            SaveSendList(null, EventArgs.Empty);
-            canSaveSendList = false;
-            toSendListItems.Clear();
-            Global.setting.quickSendSelect = select;
-            LoadQuickSendList();
-            canSaveSendList = true;
+            TryChangeQuickSendPage(() => Global.setting.quickSendSelect = select);
+        }
+
+        private bool TryChangeQuickSendPage(Action change)
+        {
+            var previousCanSave = canSaveSendList;
+            try
+            {
+                SaveSendList(null, EventArgs.Empty);
+                canSaveSendList = false;
+                // Keep the current rows visible until the settings transaction
+                // commits. LoadQuickSendList replaces them only after success.
+                change();
+                LoadQuickSendList();
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                canSaveSendList = false;
+                RefreshQuickSendPageSelector();
+                Tools.MessageBox.Show((TryFindResource("QuickSendPageChangeFailed") as string ??
+                    "Could not save the quick-send page change. Current data was kept.") + "\n" + ex.Message);
+                return false;
+            }
+            finally { canSaveSendList = previousCanSave; }
         }
 
         private void AddQuickSendPageButton_Click(object sender, RoutedEventArgs e)
         {
             QuickListSelectComboBox.IsDropDownOpen = false;
-            SaveSendList(null, EventArgs.Empty);
-            canSaveSendList = false;
-            toSendListItems.Clear();
-            Global.setting.AddQuickSendPage();
-            LoadQuickSendList();
-            canSaveSendList = true;
+            if (!TryChangeQuickSendPage(() => Global.setting.AddQuickSendPage())) return;
             QuickListNameTextBox.Focus();
             QuickListNameTextBox.SelectAll();
         }
@@ -5136,13 +5148,7 @@ namespace llcom_plus
                     return;
             }
 
-            SaveSendList(null, EventArgs.Empty);
-            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-page");
-            canSaveSendList = false;
-            toSendListItems.Clear();
-            Global.setting.RemoveQuickSendPage(Global.setting.quickSendSelect);
-            LoadQuickSendList();
-            canSaveSendList = true;
+            TryChangeQuickSendPage(() => Global.setting.RemoveQuickSendPage(Global.setting.quickSendSelect));
         }
 
         private async void QuickSendImportButton_Click(object sender, RoutedEventArgs e)
@@ -5444,7 +5450,6 @@ namespace llcom_plus
                 throw QuickSendImportError("解析结果为空。");
 
             SaveSendList(null, EventArgs.Empty);
-            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-import");
             var previousCanSave = canSaveSendList;
             canSaveSendList = false;
             try
@@ -5568,29 +5573,13 @@ namespace llcom_plus
             List<List<ToSendData>> allData,
             List<string> allNames)
         {
-            var previousLists = Tools.Global.setting.GetAllQuickSendLists();
-            var previousNames = Tools.Global.setting.GetAllQuickListNames();
             var previousCanSave = canSaveSendList;
             canSaveSendList = false;
             try
             {
-                Tools.Global.setting.SetAllQuickSendLists(allData);
-                if (allNames != null)
-                    Tools.Global.setting.SetAllQuickListNames(allNames);
+                Tools.Global.setting.ApplyQuickSendImport(allData, allNames, true);
                 toSendListItems.Clear();
                 LoadQuickSendList();
-            }
-            catch
-            {
-                try
-                {
-                    Tools.Global.setting.SetAllQuickSendLists(previousLists);
-                    Tools.Global.setting.SetAllQuickListNames(previousNames);
-                    toSendListItems.Clear();
-                    LoadQuickSendList();
-                }
-                catch { }
-                throw;
             }
             finally
             {
@@ -5600,25 +5589,13 @@ namespace llcom_plus
 
         private void ApplyImportedQuickSendList(List<ToSendData> data)
         {
-            var previousData = Tools.Global.setting.quickSend;
             var previousCanSave = canSaveSendList;
             canSaveSendList = false;
             try
             {
-                Tools.Global.setting.quickSend = data;
+                Tools.Global.setting.ApplyQuickSendImport(new List<List<ToSendData>> { data }, null, false);
                 toSendListItems.Clear();
                 LoadQuickSendList();
-            }
-            catch
-            {
-                try
-                {
-                    Tools.Global.setting.quickSend = previousData;
-                    toSendListItems.Clear();
-                    LoadQuickSendList();
-                }
-                catch { }
-                throw;
             }
             finally
             {
@@ -5675,15 +5652,12 @@ namespace llcom_plus
             if (answer != MessageBoxResult.Yes)
                 return;
 
-            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-restore");
             var previousCanSave = canSaveSendList;
             canSaveSendList = false;
             try
             {
-                Tools.Global.setting.SetAllQuickSendState(
-                    state.CreateModelLists(),
-                    state.Names,
-                    state.SelectedIndex);
+                if (!TryApplyQuickSendRestore(state, "pre-restore"))
+                    return;
                 toSendListItems.Clear();
                 LoadQuickSendList();
             }
@@ -5713,15 +5687,12 @@ namespace llcom_plus
             if (answer != MessageBoxResult.Yes)
                 return;
 
-            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-legacy-recovery");
             var previousCanSave = canSaveSendList;
             canSaveSendList = false;
             try
             {
-                Tools.Global.setting.SetAllQuickSendState(
-                    candidate.CreateModelLists(),
-                    candidate.Names,
-                    candidate.SelectedIndex);
+                if (!TryApplyQuickSendRestore(candidate, "pre-legacy-recovery"))
+                    return;
                 toSendListItems.Clear();
                 LoadQuickSendList();
             }
@@ -5733,6 +5704,21 @@ namespace llcom_plus
             Tools.MessageBox.Show(
                 TryFindResource("QuickSendBackupRecoveredLegacy") as string ??
                 "Quick send data was restored from the legacy backup.");
+        }
+
+        private bool TryApplyQuickSendRestore(Tools.QuickSendBackupState state, string reason)
+        {
+            try
+            {
+                Tools.Global.setting.ApplyQuickSendRestore(state, reason);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Tools.MessageBox.Show((TryFindResource("QuickSendBackupRestoreFailed") as string ??
+                    "Could not restore quick send. Current data was kept.") + "\n" + ex.Message);
+                return false;
+            }
         }
 
         private void ExportQuickSend(bool exportAll)

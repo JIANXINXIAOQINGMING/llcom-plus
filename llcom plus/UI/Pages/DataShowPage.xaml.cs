@@ -74,6 +74,7 @@ namespace llcom_plus.Pages
         private int plainLogCharCount;
         private bool displayedShowSend = true;
         private bool displayedLineEndings = true;
+        private int displayedHexFormat;
         private UartPortProfile displayedPrefix;
         private Settings subscribedSettings;
         private Window ownerWindow;
@@ -103,6 +104,7 @@ namespace llcom_plus.Pages
                 subscribedSettings.UartProcessingSettingsChanged += Settings_UartProcessingSettingsChanged;
                 displayedShowSend = subscribedSettings.showSend;
                 displayedLineEndings = subscribedSettings.ShowLineEndings;
+                displayedHexFormat = subscribedSettings.showHexFormat;
                 displayedPrefix = subscribedSettings.GetLogPrefixProfile();
 
                 LogOptionsButton.DataContext = Tools.Global.setting;
@@ -220,13 +222,15 @@ namespace llcom_plus.Pages
             var showSend = Tools.Global.setting?.showSend != false;
             var lineEndings = Tools.Global.setting?.ShowLineEndings != false;
             var packed = Tools.Global.setting?.timeout >= 0;
+            var hexFormat = Tools.Global.setting?.showHexFormat ?? 0;
             var prefix = Tools.Global.setting?.GetLogPrefixProfile();
-            if (displayedShowSend == showSend && displayedLineEndings == lineEndings && lastPackShowMode == packed &&
+            if (displayedShowSend == showSend && displayedLineEndings == lineEndings && displayedHexFormat == hexFormat && lastPackShowMode == packed &&
                 Settings.LogPrefixOptionsEqual(displayedPrefix, prefix))
                 return;
             displayedPrefix = prefix;
             displayedShowSend = showSend;
             displayedLineEndings = lineEndings;
+            displayedHexFormat = hexFormat;
             lastPackShowMode = packed;
             MainPackedTextBox.Visibility = packed ? Visibility.Visible : Visibility.Collapsed;
             MainTextBox.Visibility = packed ? Visibility.Collapsed : Visibility.Visible;
@@ -393,6 +397,7 @@ namespace llcom_plus.Pages
                 target.Document.Blocks.Add(CreateLogParagraph(item, showLineEndings, prefixProfile));
                 return;
             }
+            item = item.ForDisplayFormat(prefixProfile?.showHexFormat ?? Tools.Global.setting?.showHexFormat ?? 0);
             if (plainParagraph == null)
             {
                 plainParagraph = new Paragraph { Margin = new Thickness(0), FontFamily = new FontFamily("Consolas,Microsoft YaHei,微软雅黑"), FontSize = 15 };
@@ -404,6 +409,7 @@ namespace llcom_plus.Pages
 
         internal static Paragraph CreateLogParagraph(DataShow item, bool showLineEndings = true, UartPortProfile prefixProfile = null)
         {
+            item = item.ForDisplayFormat(prefixProfile?.showHexFormat ?? Tools.Global.setting?.showHexFormat ?? 0);
             var paragraph = new Paragraph
             {
                 Margin = new Thickness(0),
@@ -476,19 +482,24 @@ namespace llcom_plus.Pages
 
         private void Logger_DataShowTask(object sender, Tools.DataShow e)
         {
+            var serialSource = e as DataShowPara;
+            if (serialSource?.isCurrent?.Invoke() == false)
+                return;
             // Keep direction-aware history even when TX is hidden. View changes never
             // rerun receive scripts, touch the serial connection, or rewrite session files.
             var data = e is DataShowRaw raw
                 ? new DataShow(raw.title, raw.data, raw.time, raw.color)
-                : new DataShow(e as DataShowPara);
+                : new DataShow(serialSource, serialSource?.profile);
             if (data?.IsVisible == true)
             {
-                if (Tools.Global.setting.timeout < 0 && e is DataShowPara serialData)
+                if ((serialSource?.profile?.timeout ?? Tools.Global.setting.timeout) < 0 && serialSource != null)
                 {
-                    data = data.AsPlainText(Tools.Global.setting.showHexFormat == 2);
+                    data = data.AsPlainText((serialSource.profile?.showHexFormat ?? Tools.Global.setting.showHexFormat) == 2);
                 }
                 DoInvoke(() =>
                 {
+                    if (serialSource?.isCurrent?.Invoke() == false)
+                        return;
                     RefreshTxVisibility();
                     AppendPackedLogItem(data);
                     if (!LockLog && !IsSearchActive)
@@ -717,9 +728,27 @@ namespace llcom_plus.Pages
             private string dataWithoutLineEndings;
             private string rawWithLineEndings;
             private string rawWithoutLineEndings;
+            // Both projections come from the same post-script payload. Switching
+            // views must not run conversion scripts again or rewrite export text.
+            private string serialReadableData;
+            private string serialHexData;
+            private bool displayAsHex;
 
-            internal string GetDisplayData(bool show) => (show ? dataWithLineEndings : dataWithoutLineEndings) ?? DataText;
+            internal string GetDisplayData(bool show) => displayAsHex ? DataText :
+                (show ? dataWithLineEndings : dataWithoutLineEndings) ?? DataText;
             internal string GetDisplayRaw(bool show) => (show ? rawWithLineEndings : rawWithoutLineEndings) ?? RawText;
+
+            internal DataShow ForDisplayFormat(int format)
+            {
+                if (serialHexData == null) return this;
+                var result = Clone();
+                result.displayAsHex = format == 2;
+                result.DataText = result.displayAsHex ? serialHexData : serialReadableData;
+                if (result.IsPlainText && result.displayAsHex && !string.IsNullOrEmpty(result.DataText))
+                    result.DataText += " ";
+                result.HexText = !result.IsPlainText && format == 0 ? "\nHex: " + serialHexData : null;
+                return result;
+            }
 
             // Charge the largest projection to the display budget, including markers.
             // Compute lengths without allocating another full copy of every record.
@@ -729,7 +758,9 @@ namespace llcom_plus.Pages
                 {
                     if (IsRestoredSnapshot) return RawText?.Length ?? 0;
                     var dataLength = Math.Max(DataText?.Length ?? 0,
-                        Math.Max(GetDisplayData(true)?.Length ?? 0, GetDisplayData(false)?.Length ?? 0));
+                        Math.Max(dataWithLineEndings?.Length ?? 0, dataWithoutLineEndings?.Length ?? 0));
+                    dataLength = Math.Max(dataLength, serialReadableData?.Length ?? 0);
+                    dataLength = Math.Max(dataLength, (serialHexData?.Length ?? 0) + (IsPlainText && serialHexData != null ? 1 : 0));
                     if (IsPlainText) return dataLength;
                     var rawLength = Math.Max(RawText?.Length ?? 0,
                         Math.Max(GetDisplayRaw(true)?.Length ?? 0, GetDisplayRaw(false)?.Length ?? 0));
@@ -737,8 +768,9 @@ namespace llcom_plus.Pages
                     // Reserve enough for the largest safe custom prefix without resizing
                     // retained history every time a display checkbox is changed.
                     if (IsSerialData && LogTime.HasValue) prefixLength = Math.Max(prefixLength, 96);
+                    var hexLength = Math.Max(HexText?.Length ?? 0, serialHexData == null ? 0 : serialHexData.Length + 6);
                     return dataLength + rawLength + prefixLength +
-                        (RawTitle?.Length ?? 0) + (HexText?.Length ?? 0) + Environment.NewLine.Length;
+                        (RawTitle?.Length ?? 0) + hexLength + Environment.NewLine.Length;
                 }
             }
 
@@ -797,7 +829,10 @@ namespace llcom_plus.Pages
                     dataWithLineEndings = dataWithLineEndings,
                     dataWithoutLineEndings = dataWithoutLineEndings,
                     rawWithLineEndings = rawWithLineEndings,
-                    rawWithoutLineEndings = rawWithoutLineEndings
+                    rawWithoutLineEndings = rawWithoutLineEndings,
+                    serialReadableData = serialReadableData,
+                    serialHexData = serialHexData,
+                    displayAsHex = displayAsHex
                 };
             }
 
@@ -811,12 +846,42 @@ namespace llcom_plus.Pages
                     start++;
                 var retained = CreatePlain(text.Substring(start), IsSent);
                 retained.IsSerialData = IsSerialData;
+                if (serialHexData != null)
+                {
+                    // Large records keep a bounded tail for every selectable
+                    // projection, including one originally received in HEX mode.
+                    // Leave room for the separator added to continuous HEX text.
+                    var projectionLimit = Math.Max(0, limit - 1);
+                    retained.serialReadableData = Tail(serialReadableData, projectionLimit);
+                    retained.serialHexData = TailHex(serialHexData, projectionLimit);
+                    retained.dataWithLineEndings = Tail(dataWithLineEndings, projectionLimit);
+                    retained.dataWithoutLineEndings = Tail(dataWithoutLineEndings, projectionLimit);
+                    retained.displayAsHex = displayAsHex;
+                    return retained;
+                }
                 if (dataWithLineEndings != null || rawWithLineEndings != null)
                 {
                     retained.dataWithLineEndings = TailDisplayText(true, limit);
                     retained.dataWithoutLineEndings = TailDisplayText(false, limit);
                 }
                 return retained;
+            }
+
+            private static string Tail(string text, int limit)
+            {
+                if (text == null || text.Length <= limit) return text;
+                var start = text.Length - limit;
+                if (start < text.Length && start > 0 && char.IsLowSurrogate(text[start]) && char.IsHighSurrogate(text[start - 1])) start++;
+                return text.Substring(start);
+            }
+
+            private static string TailHex(string text, int limit)
+            {
+                if (text == null || text.Length <= limit) return text;
+                var start = text.Length - limit;
+                // Byte2Hex uses "AA BB": never retain a leading half-byte or space.
+                if (start % 3 != 0) start += 3 - start % 3;
+                return text.Substring(Math.Min(start, text.Length));
             }
 
             private string TailDisplayText(bool show, int limit)
@@ -893,19 +958,15 @@ namespace llcom_plus.Pages
                 //主要数据
                 if (temp != null && temp.Length > 0)
                 {
-                    DataText = showHexFormat switch
-                    {
-                        2 => Tools.Global.Byte2Hex(temp, " ", len),
-                        _ => Tools.Global.Byte2Readable(temp, len, encoding, enableSymbol),
-                    };
-                    if (showHexFormat != 2)
-                    {
-                        dataWithLineEndings = Tools.Global.Byte2LogDisplay(temp, len, encoding, enableSymbol, true);
-                        dataWithoutLineEndings = Tools.Global.Byte2LogDisplay(temp, len, encoding, enableSymbol, false);
-                    }
+                    serialHexData = Tools.Global.Byte2Hex(temp, " ", len);
+                    serialReadableData = Tools.Global.Byte2Readable(temp, len, encoding, enableSymbol);
+                    dataWithLineEndings = Tools.Global.Byte2LogDisplay(temp, len, encoding, enableSymbol, true);
+                    dataWithoutLineEndings = Tools.Global.Byte2LogDisplay(temp, len, encoding, enableSymbol, false);
+                    displayAsHex = showHexFormat == 2;
+                    DataText = displayAsHex ? serialHexData : serialReadableData;
                     //同时显示模式时，才显示小字hex
                     if (showHexFormat == 0)
-                        HexText = "\nHex: " + Tools.Global.Byte2Hex(temp, " ", len);
+                        HexText = "\nHex: " + serialHexData;
                 }
                 IsVisible = true;
             }

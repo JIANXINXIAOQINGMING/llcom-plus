@@ -35,7 +35,8 @@ namespace llcom_plus.ScriptEnv
             engine.SetValue("__apiInputBox", new Func<string, string, string, string>((prompt, defaultInput, title) =>
                 ScriptApis.InputBox(prompt, defaultInput, title, cancellationToken)));
             engine.SetValue("apiAddPoint", new Action<double, int>(ScriptApis.AddPoint));
-            engine.SetValue("__apiSend", new Func<string, object, object, bool>(ScriptApis.Send));
+            engine.SetValue("__apiSend", new Func<string, object, object, bool>((channel, data, options) =>
+                ScriptApis.SendFromSession(channel, data, options, cancellationToken, null)));
             engine.SetValue("apiBytesToString", new Func<object, string>(ScriptApis.BytesToString));
             engine.SetValue("apiStringToBytes", new Func<object, byte[]>(ScriptApis.StringToBytes));
             engine.SetValue("apiHexToBytes", new Func<object, byte[]>(ScriptApis.HexToBytes));

@@ -329,6 +329,9 @@ public static class LineEndingsUiExceptionObserver
         Assert-Ending ((Visible-Text $firstBox) -ceq $beforeHex -and $beforeHex.Contains('48 45 58 0D 0A')) "Split HEX view timeout=$timeout is unaffected by the CR/LF display setting."
     }
 
+    # Emit main-port samples to the COM98 file after the previous COM99
+    # per-pane option checks; records from another COM are intentionally rejected.
+    $split.SetActiveSlot(1)
     $settings.showHexFormat = 1
     $settings.sessionLogEnabled = $true
     $settings.sessionLogFolder = Join-Path $testRoot 'session_logs'

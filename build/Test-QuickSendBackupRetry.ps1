@@ -3,7 +3,8 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
     [ValidateSet('x64', 'x86')]
-    [string]$Platform = 'x64'
+    [string]$Platform = 'x64',
+    [string]$OutputDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,9 @@ if ($PSVersionTable.PSVersion.Major -ne 5 -or
     throw 'Run with matching-bitness Windows PowerShell 5.1. This test does not build the application.'
 }
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$outputDir = Join-Path $repoRoot "llcom plus\bin\$Platform\$Configuration"
+$outputDir = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $repoRoot "llcom plus\bin\$Platform\$Configuration"
+} else { [IO.Path]::GetFullPath($OutputDirectory) }
 $exePath = Join-Path $outputDir 'llcom plus.exe'
 if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
     throw "Build the application before running this test: $exePath"
@@ -32,7 +35,7 @@ try {
     $assembly = [Reflection.Assembly]::LoadFrom($exePath)
     Add-Type -Path (Join-Path $PSScriptRoot 'QuickSendBackupRetryProbe.cs')
     [QuickSendBackupRetryProbe]::Run($assembly, $testRoot)
-    Write-Host 'PASS  All 6 quick-send backup retry/atomic-state checks.'
+    Write-Host 'PASS  All 20 quick-send backup retry/atomic-state/restore/import/page checks.'
 }
 finally {
     # Only this invocation's GUID-named directory may be removed.

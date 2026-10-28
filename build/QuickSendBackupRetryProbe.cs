@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +40,17 @@ public static class QuickSendBackupRetryProbe
             Thread.Sleep(5);
         }
         return true;
+    }
+
+    private static void RejectRestore(Action action, string message)
+    {
+        try { action(); }
+        catch (TargetInvocationException ex)
+        {
+            if (ex.InnerException is IOException || ex.InnerException is UnauthorizedAccessException) return;
+            throw ex.InnerException;
+        }
+        throw new InvalidOperationException(message);
     }
 
     // Mutex ownership is thread-affine. Keep the competing lease on its own
@@ -151,6 +163,30 @@ public static class QuickSendBackupRetryProbe
         }
 
         internal object Flush() { return Invoke(Service, "FlushPending"); }
+        internal object Capture(object settings) { return Invoke(Service, "CaptureState", settings); }
+        internal void Restore(object settings, object state)
+        {
+            Settings.GetField("_suspendSave", Instance).SetValue(settings, false);
+            Settings.GetMethod("ApplyQuickSendRestore", Instance).Invoke(settings, new[] { state, "pre-restore" });
+        }
+        internal void Import(object settings, object[] incoming, bool allPages, bool includeNames = true)
+        {
+            Settings.GetField("_suspendSave", Instance).SetValue(settings, false);
+            Settings.GetMethod("ApplyQuickSendImport", Instance).Invoke(settings,
+                new[] { incoming[0], includeNames ? incoming[1] : null, (object)allPages });
+        }
+        internal void AssertState(object settings, string prefix, int pageCount)
+        {
+            var state = Capture(settings);
+            var pages = (IList)Property(state, "QuickSendList");
+            var names = (IList)Property(state, "QuickListNames");
+            Assert(pages.Count == pageCount && names.Count == pageCount &&
+                (int)Property(state, "Selected") == pageCount - 1, "Restore changed the page structure unexpectedly.");
+            for (int index = 0; index < pageCount; index++)
+                Assert((string)names[index] == prefix + index &&
+                    (string)Property(((IList)pages[index])[0], "Text") == prefix + index,
+                    "Restore changed the wrong command or page name.");
+        }
         internal bool Pending { get { return (bool)Field("autoSnapshotPending"); } }
         internal object Field(string name)
         {
@@ -301,6 +337,243 @@ public static class QuickSendBackupRetryProbe
                 }
             }
             Console.WriteLine("PASS  Concurrent page replacement captures contents, names and selected index together.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "restore-blocked-backup")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            var incoming = fixture.Capture(fixture.CreateSettings("replacement"));
+            var backupDirectory = Path.Combine(fixture.Profile, "quick-send-backups");
+            Directory.Delete(backupDirectory);
+            File.WriteAllText(backupDirectory, "isolated backup directory blocker");
+            RejectRestore(() => fixture.Restore(settings, incoming), "Restore continued without a recovery snapshot.");
+            fixture.AssertState(settings, "keep", 2);
+            Assert(!File.Exists(Path.Combine(fixture.Profile, "settings.json")), "Failed backup still committed replacement settings.");
+            Console.WriteLine("PASS  An unwritable recovery directory blocks restore before changing any current command.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "restore-busy-backup")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            var incoming = fixture.Capture(fixture.CreateSettings("replacement"));
+            using (fixture.BlockStore())
+                RejectRestore(() => fixture.Restore(settings, incoming), "Restore continued while the backup store was busy.");
+            fixture.AssertState(settings, "keep", 2);
+            Assert(fixture.Snapshots.Count == 0, "Busy-store restore unexpectedly wrote a recovery snapshot.");
+            Console.WriteLine("PASS  A busy backup store blocks restore without replacing the current pages.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "restore-commit-failure")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            var incoming = fixture.Capture(fixture.CreateSettings("replacement"));
+            var settingsPath = Path.Combine(fixture.Profile, "settings.json");
+            const string previousFile = "{\"sentinel\":\"previous settings\"}";
+            File.WriteAllText(settingsPath, previousFile);
+            using (var held = new FileStream(settingsPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                RejectRestore(() => fixture.Restore(settings, incoming), "A blocked settings commit unexpectedly succeeded.");
+            fixture.AssertState(settings, "keep", 2);
+            Assert(File.ReadAllText(settingsPath) == previousFile, "Failed commit changed the previous settings file.");
+            Assert(fixture.Snapshots.Count == 1 && !fixture.Pending, "Failed restore did not preserve its recovery snapshot or scheduled replacement backup.");
+            Assert(Directory.GetFiles(fixture.Profile, "settings.json.*.tmp").Length == 0, "Failed restore left a settings temporary file.");
+            Console.WriteLine("PASS  A failed settings commit rolls memory back and preserves the existing file and recovery snapshot.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "restore-success")))
+        {
+            var settings = fixture.CreateSettings("previous", 2);
+            var incoming = fixture.Capture(fixture.CreateSettings("restored", 3));
+            fixture.Restore(settings, incoming);
+            fixture.AssertState(settings, "restored", 3);
+            var persisted = File.ReadAllText(Path.Combine(fixture.Profile, "settings.json"));
+            Assert(persisted.Contains("restored2") && !persisted.Contains("previous0"), "Successful restore was not persisted.");
+            var prior = fixture.Snapshots.Cast<object>().FirstOrDefault(item =>
+                (string)Property(item, "Reason") == "pre-restore");
+            Assert(prior != null, "Successful restore lost its prior recovery snapshot.");
+            var priorPath = (string)Property(prior, "FilePath");
+            Assert(File.ReadAllText(priorPath).Contains("previous0"), "Recovery snapshot does not contain the pre-restore commands.");
+            Console.WriteLine("PASS  A successful restore saves all pages and selection while retaining the previous commands for recovery.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "import-blocked-backup")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            var directory = Path.Combine(fixture.Profile, "quick-send-backups");
+            Directory.Delete(directory);
+            File.WriteAllText(directory, "isolated import backup blocker");
+            foreach (bool all in new[] { false, true })
+            {
+                var incoming = fixture.StateArguments("incoming", all ? 3 : 1);
+                RejectRestore(() => fixture.Import(settings, incoming, all), "Import continued without a pre-import snapshot.");
+                fixture.AssertState(settings, "keep", 2);
+                Assert(!File.Exists(Path.Combine(fixture.Profile, "settings.json")), "Failed import backup still changed settings.");
+            }
+            Console.WriteLine("PASS  Single-page and all-page imports stop before mutation when the recovery backup is unwritable.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "import-busy-backup")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            using (fixture.BlockStore())
+                foreach (bool all in new[] { false, true })
+                {
+                    var incoming = fixture.StateArguments("incoming", all ? 3 : 1);
+                    RejectRestore(() => fixture.Import(settings, incoming, all), "Import continued while its backup was skipped.");
+                    fixture.AssertState(settings, "keep", 2);
+                }
+            Assert(fixture.Snapshots.Count == 0, "Contended import unexpectedly wrote a backup.");
+            Console.WriteLine("PASS  A busy backup store blocks both import modes without changing current commands.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "import-commit-failure")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            var originalRows = (IList)fixture.Settings.GetMethod("GetAllQuickSendLists", Instance).Invoke(settings, null);
+            var path = Path.Combine(fixture.Profile, "settings.json");
+            const string original = "{\"sentinel\":\"before import\"}";
+            File.WriteAllText(path, original);
+            using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                foreach (bool all in new[] { false, true })
+                {
+                    var incoming = fixture.StateArguments("incoming", all ? 3 : 1);
+                    RejectRestore(() => fixture.Import(settings, incoming, all), "Import ignored a failed atomic settings commit.");
+                    fixture.AssertState(settings, "keep", 2);
+                    var restoredRows = (IList)fixture.Settings.GetMethod("GetAllQuickSendLists", Instance).Invoke(settings, null);
+                    for (int index = 0; index < originalRows.Count; index++)
+                        Assert(ReferenceEquals(((IList)originalRows[index])[0], ((IList)restoredRows[index])[0]),
+                            "Failed import replaced a retained UI row object instead of restoring its original reference.");
+                    Assert(File.ReadAllText(path) == original, "Failed import changed the original settings file.");
+                }
+            Assert(fixture.Snapshots.Count == 1 && !fixture.Pending &&
+                Directory.GetFiles(fixture.Profile, "settings.json.*.tmp").Length == 0,
+                "Failed imports lost the pre-import snapshot, scheduled failed state, or leaked temporary files.");
+            Console.WriteLine("PASS  Failed single/all-page commits roll back contents, names and selection without a second disk-write rollback.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "import-single-success")))
+        {
+            var settings = fixture.CreateSettings("original", 2);
+            var incoming = fixture.StateArguments("imported", 1);
+            fixture.Import(settings, incoming, false);
+            var state = fixture.Capture(settings);
+            var pages = (IList)Property(state, "QuickSendList");
+            var names = (IList)Property(state, "QuickListNames");
+            Assert(pages.Count == 2 && (int)Property(state, "Selected") == 1 &&
+                (string)Property(((IList)pages[0])[0], "Text") == "original0" &&
+                (string)Property(((IList)pages[1])[0], "Text") == "imported0" &&
+                (string)names[0] == "original0" && (string)names[1] == "original1",
+                "Single-page import changed another page, its name or the selected index.");
+            var snapshot = fixture.Snapshots.Cast<object>().Single(item => (string)Property(item, "Reason") == "pre-import");
+            Assert(File.ReadAllText((string)Property(snapshot, "FilePath")).Contains("original1") &&
+                File.ReadAllText(Path.Combine(fixture.Profile, "settings.json")).Contains("imported0"),
+                "Successful single-page import lost the prior configuration or did not persist.");
+            Console.WriteLine("PASS  Single-page import replaces only the selected page and preserves every page name with a recovery snapshot.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "import-all-success")))
+        {
+            var settings = fixture.CreateSettings("original", 2);
+            fixture.Import(settings, fixture.StateArguments("imported", 3), true);
+            var state = fixture.Capture(settings);
+            var pages = (IList)Property(state, "QuickSendList");
+            var names = (IList)Property(state, "QuickListNames");
+            Assert(pages.Count == 3 && names.Count == 3 && (int)Property(state, "Selected") == 1,
+                "All-page import did not preserve the selected index or complete page/name state.");
+            for (int index = 0; index < pages.Count; index++)
+                Assert((string)Property(((IList)pages[index])[0], "Text") == "imported" + index &&
+                    (string)names[index] == "imported" + index, "All-page import mixed names and commands.");
+            var persisted = File.ReadAllText(Path.Combine(fixture.Profile, "settings.json"));
+            Assert(persisted.Contains("imported2") && !persisted.Contains("original0"), "All-page import was only partly persisted.");
+            Console.WriteLine("PASS  All-page import commits contents and names together and keeps a still-valid selected page.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "import-legacy-success")))
+        {
+            var settings = fixture.CreateSettings("original", 3);
+            fixture.Import(settings, fixture.StateArguments("legacy", 2), true, false);
+            var state = fixture.Capture(settings);
+            var pages = (IList)Property(state, "QuickSendList");
+            var names = (IList)Property(state, "QuickListNames");
+            Assert(pages.Count == 2 && names.Count == 2 && (int)Property(state, "Selected") == 0 &&
+                (string)names[0] == "original0" && (string)names[1] == "original1" &&
+                (string)Property(((IList)pages[0])[0], "Text") == "legacy0" &&
+                (string)Property(((IList)pages[1])[0], "Text") == "legacy1",
+                "Legacy import without names did not preserve existing names and reset invalid selection.");
+            Console.WriteLine("PASS  Legacy all-page imports without names retain compatible page names and reset an invalid selection to the first page.");
+        }
+
+        foreach (string operation in new[] { "add", "select", "remove" })
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "page-" + operation + "-commit-failure")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            var originalRows = (IList)fixture.Settings.GetMethod("GetAllQuickSendLists", Instance).Invoke(settings, null);
+            fixture.Settings.GetField("_suspendSave", Instance).SetValue(settings, false);
+            var path = Path.Combine(fixture.Profile, "settings.json");
+            const string original = "{\"sentinel\":\"before page operation\"}";
+            File.WriteAllText(path, original);
+            Action changePage = () =>
+            {
+                if (operation == "add") fixture.Settings.GetMethod("AddQuickSendPage", Instance).Invoke(settings, null);
+                else if (operation == "select") fixture.Settings.GetProperty("quickSendSelect", Instance).SetValue(settings, 0, null);
+                else Assert((bool)fixture.Settings.GetMethod("RemoveQuickSendPage", Instance).Invoke(settings, new object[] { 0 }),
+                    "Removing one of two valid pages was unexpectedly rejected.");
+            };
+            using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                RejectRestore(changePage, "Page " + operation + " ignored the failed settings commit.");
+                fixture.AssertState(settings, "keep", 2);
+                var restoredRows = (IList)fixture.Settings.GetMethod("GetAllQuickSendLists", Instance).Invoke(settings, null);
+                for (int index = 0; index < originalRows.Count; index++)
+                    Assert(ReferenceEquals(((IList)originalRows[index])[0], ((IList)restoredRows[index])[0]),
+                        "Page " + operation + " rollback replaced the retained UI command object.");
+            }
+            Assert(File.ReadAllText(path) == original && Directory.GetFiles(fixture.Profile, "settings.json.*.tmp").Length == 0,
+                "Failed page " + operation + " changed the previous file or leaked its temporary file.");
+
+            changePage();
+            var state = fixture.Capture(settings);
+            var pages = (IList)Property(state, "QuickSendList");
+            var names = (IList)Property(state, "QuickListNames");
+            int selected = (int)Property(state, "Selected");
+            if (operation == "add")
+                Assert(pages.Count == 3 && names.Count == 3 && selected == 2 &&
+                    (string)Property(((IList)pages[0])[0], "Text") == "keep0" &&
+                    (string)Property(((IList)pages[1])[0], "Text") == "keep1",
+                    "Adding a page after write recovery changed earlier commands or selection.");
+            else if (operation == "select")
+                Assert(pages.Count == 2 && names.Count == 2 && selected == 0 &&
+                    (string)Property(((IList)pages[0])[0], "Text") == "keep0" &&
+                    (string)Property(((IList)pages[1])[0], "Text") == "keep1",
+                    "Selecting a page after write recovery changed page contents.");
+            else
+                Assert(pages.Count == 1 && names.Count == 1 && selected == 0 &&
+                    (string)Property(((IList)pages[0])[0], "Text") == "keep1" && (string)names[0] == "keep1",
+                    "Removing a page after write recovery removed the wrong page or name.");
+            var persisted = File.ReadAllText(path);
+            Assert(persisted != original && persisted.Contains("\"quickSendSelect\":" + selected),
+                "Recovered page " + operation + " did not persist its selected index.");
+            Console.WriteLine("PASS  Page " + operation + " rolls back original rows/names/selection on an exclusive-file failure and succeeds after write recovery.");
+        }
+
+        using (var fixture = new Fixture(assembly, Path.Combine(testRoot, "page-delete-blocked-backup")))
+        {
+            var settings = fixture.CreateSettings("keep", 2);
+            var originalRows = (IList)fixture.Settings.GetMethod("GetAllQuickSendLists", Instance).Invoke(settings, null);
+            fixture.Settings.GetField("_suspendSave", Instance).SetValue(settings, false);
+            var path = Path.Combine(fixture.Profile, "settings.json");
+            const string original = "{\"sentinel\":\"before page deletion\"}";
+            File.WriteAllText(path, original);
+            string directory = Path.Combine(fixture.Profile, "quick-send-backups");
+            Directory.Delete(directory);
+            File.WriteAllText(directory, "isolated page-deletion backup blocker");
+            RejectRestore(() => fixture.Settings.GetMethod("RemoveQuickSendPage", Instance).Invoke(settings, new object[] { 0 }),
+                "Page deletion continued without a recovery snapshot.");
+            fixture.AssertState(settings, "keep", 2);
+            var restoredRows = (IList)fixture.Settings.GetMethod("GetAllQuickSendLists", Instance).Invoke(settings, null);
+            Assert(ReferenceEquals(((IList)originalRows[0])[0], ((IList)restoredRows[0])[0]) &&
+                ReferenceEquals(((IList)originalRows[1])[0], ((IList)restoredRows[1])[0]) && File.ReadAllText(path) == original,
+                "A failed pre-deletion backup changed commands, their UI identities or the settings file.");
+            Console.WriteLine("PASS  An unwritable backup directory blocks page deletion without changing data, names, selection or row identities.");
         }
     }
 }

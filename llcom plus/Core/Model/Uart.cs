@@ -861,7 +861,7 @@ namespace llcom_plus.Model
     internal sealed class UartSendEventArgs : EventArgs
     {
         internal UartSendEventArgs(string sessionStringLogOverride)
-            : this(sessionStringLogOverride, null)
+            : this(sessionStringLogOverride, (string)null)
         {
         }
 
@@ -871,8 +871,17 @@ namespace llcom_plus.Model
             PortName = portName;
         }
 
+        internal UartSendEventArgs(string sessionStringLogOverride, Uart.ConnectionLease connection)
+            : this(sessionStringLogOverride, connection?.PortName)
+        {
+            Connection = connection;
+        }
+
         internal string SessionStringLogOverride { get; }
         internal string PortName { get; }
+        internal Uart.ConnectionLease Connection { get; }
+        internal bool IsCurrent => Connection?.IsCurrent != false;
+        internal UartPortProfile Profile => Connection?.Profile;
     }
 
     internal sealed class UartReceiveEventArgs : EventArgs
@@ -1184,15 +1193,8 @@ namespace llcom_plus.Model
 
             // Script sends resolve the active serial target at call time. The returned
             // lease then pins the chosen page/slot/connection for this one send.
-            ScriptApis.SendChannelsRegister("uart", (data, _) =>
-            {
-                if (data == null)
-                    return false;
-
-                var target = Tools.Global.CaptureActiveSerialTarget();
-                return target?.IsOpen == true &&
-                    target.Send(data, CancellationToken.None, null);
-            });
+            ScriptApis.SendChannelsRegisterCancelable("uart", (data, _, token, current) =>
+                ScriptApis.SendUartFromSession(data, token, current, Tools.Global.CaptureActiveSerialTarget));
         }
 
         /// <summary>
@@ -1690,7 +1692,7 @@ namespace llcom_plus.Model
             if (dataRaw != null && profile.showSendRaw)
                 UartDataRawSent?.Invoke(dataRaw, EventArgs.Empty);
             if (profile.showSend)
-                UartDataSent?.Invoke(data, new UartSendEventArgs(sessionStringLogOverride, lease?.PortName));
+                UartDataSent?.Invoke(data, new UartSendEventArgs(sessionStringLogOverride, lease));
         }
 
         private void WriteData(

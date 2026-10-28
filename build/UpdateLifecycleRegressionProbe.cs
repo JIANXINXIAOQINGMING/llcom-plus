@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 
 // Pure in-memory tests. These probes do not start the application, contact a
 // server, open a serial port, or install an update.
@@ -50,11 +51,47 @@ public static class UpdateLifecycleRegressionProbe
         }
     }
 
+    // Models the Framework HTTP response stream: a read already in progress
+    // ignores its token and only finishes when the response stream is closed.
+    private sealed class CloseInterruptedInput : Stream
+    {
+        private readonly TaskCompletionSource<int> pending = new TaskCompletionSource<int>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int Reads;
+        internal bool Closed;
+        public override bool CanRead { get { return true; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanWrite { get { return false; } }
+        public override long Length { get { throw new NotSupportedException(); } }
+        public override long Position
+        {
+            get { throw new NotSupportedException(); }
+            set { throw new NotSupportedException(); }
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token)
+        {
+            Reads++;
+            return pending.Task;
+        }
+        protected override void Dispose(bool disposing)
+        {
+            Closed = true;
+            pending.TrySetException(new IOException("The simulated HTTP response was closed."));
+            base.Dispose(disposing);
+        }
+        public override int Read(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+        public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+        public override void SetLength(long value) { throw new NotSupportedException(); }
+        public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+        public override void Flush() { }
+    }
+
     public static string[] RunCopyAndInspectionChecks(Assembly assembly)
     {
         var updater = assembly.GetType("llcom_plus.Tools.GitHubReleaseUpdater", true);
         var copy = updater.GetMethod("CopyUpdateEntry", Static);
         var inspect = updater.GetMethod("InspectUpdatePackage", Static);
+        var readResponse = updater.GetMethod("ReadUpdateResponseBlockAsync", Static);
         var passed = new List<string>();
         var bytes = new byte[81920 * 3 + 13];
         for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(i % 251);
@@ -102,6 +139,39 @@ public static class UpdateLifecycleRegressionProbe
             ExpectCancellation(() => Invoke(inspect, "\0invalid-update-path", new Version(1, 2, 3),
                 cancellation.Token), cancellation.Token);
             passed.Add("InspectUpdatePackage honors pre-cancellation before validating or opening a path.");
+        }
+
+        using (var cancellation = new CancellationTokenSource())
+        using (var input = new CloseInterruptedInput())
+        {
+            cancellation.Cancel();
+            var task = (Task<int>)Invoke(readResponse, input, new byte[16], cancellation.Token);
+            ExpectCancellation(() => task.GetAwaiter().GetResult(), cancellation.Token);
+            Assert(input.Reads == 0 && !input.Closed, "A pre-canceled HTTP read touched its response stream.");
+            passed.Add("Pre-canceled HTTP reads preserve the caller token without touching the response stream.");
+        }
+
+        using (var cancellation = new CancellationTokenSource())
+        using (var input = new CloseInterruptedInput())
+        {
+            var task = (Task<int>)Invoke(readResponse, input, new byte[16], cancellation.Token);
+            Assert(input.Reads == 1 && !task.IsCompleted, "The HTTP fixture did not start a blocked read.");
+            cancellation.Cancel();
+            Assert(((IAsyncResult)task).AsyncWaitHandle.WaitOne(3000),
+                "Cancellation left an HTTP response read blocked after its stream ignored the token.");
+            ExpectCancellation(() => task.GetAwaiter().GetResult(), cancellation.Token);
+            Assert(input.Closed && input.Reads == 1, "HTTP cancellation failed to close the stream or retried its read.");
+            passed.Add("Cancellation interrupts an HTTP read that ignores tokens by closing only its response stream.");
+        }
+
+        using (var input = new MemoryStream(bytes, false))
+        {
+            var buffer = new byte[17];
+            var task = (Task<int>)Invoke(readResponse, input, buffer, CancellationToken.None);
+            Assert(task.GetAwaiter().GetResult() == buffer.Length && input.CanRead,
+                "A successful HTTP response read was closed or changed its length.");
+            for (int i = 0; i < buffer.Length; i++) Assert(buffer[i] == bytes[i], "HTTP response read changed a byte.");
+            passed.Add("Successful HTTP reads retain every byte and leave the response open for following blocks.");
         }
 
         return passed.ToArray();

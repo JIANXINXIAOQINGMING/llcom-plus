@@ -44,16 +44,25 @@ namespace llcom_plus.Tools
         internal static void ShowSerialData(byte[] data, bool send, string sessionStringText,
             ReceiveScriptContext receiveScriptContext, string portName)
         {
+            ShowCapturedSerialData(data, send, sessionStringText, receiveScriptContext, portName, null, null);
+        }
+
+        internal static void ShowCapturedSerialData(byte[] data, bool send, string sessionStringText,
+            ReceiveScriptContext receiveScriptContext, string portName, Model.UartPortProfile profile,
+            Func<bool> isCurrent)
+        {
             var showData = new DataShowPara
             {
                 data = data,
                 send = send,
                 receiveScriptContext = receiveScriptContext,
-                portName = portName
+                portName = portName,
+                profile = profile,
+                isCurrent = isCurrent
             };
-            WriteSessionLog(showData.time, send ? "send" : "recv", data, sessionStringText);
+            WriteSessionLog(showData.time, send ? "send" : "recv", data, sessionStringText, portName, profile?.encoding, isCurrent);
             // Display suppression must never suppress the on-disk session record.
-            if (Tools.Global.setting.DisableLog)
+            if (Tools.Global.setting.DisableLog || isCurrent?.Invoke() == false)
                 return;
             DataShowTask?.Invoke(null, showData);
         }
@@ -422,10 +431,15 @@ namespace llcom_plus.Tools
 
         internal static string Byte2SessionString(byte[] data)
         {
-            var encoding = Tools.Global.GetEncoding(
+            return Byte2SessionStringForEncoding(data,
                 Tools.Global.uart?.GetRuntimeEncodingCodePage() ??
                 Tools.Global.setting?.encoding ??
                 65001);
+        }
+
+        private static string Byte2SessionStringForEncoding(byte[] data, int encodingCodePage)
+        {
+            var encoding = Tools.Global.GetEncoding(encodingCodePage);
             var text = new StringBuilder();
             var plainBytes = new List<byte>();
             foreach (var b in data)
@@ -575,19 +589,29 @@ namespace llcom_plus.Tools
             return $"{time:yyyy-MM-dd HH:mm:ss.fff}  {label}";
         }
 
-        private static void WriteSessionLog(DateTime time, string direction, byte[] data, string stringText = null)
+        private static void WriteSessionLog(DateTime time, string direction, byte[] data, string stringText = null,
+            string expectedPortName = null, int? encodingCodePage = null, Func<bool> isCurrent = null)
         {
             if (data == null || data.Length == 0)
                 return;
 
             lock (sessionLogLock)
             {
+                if (isCurrent?.Invoke() == false)
+                    return;
+                // A send callback can arrive after close/reopen. Never append an
+                // old COM's bytes to the newly opened connection's session file.
+                if (!string.IsNullOrWhiteSpace(expectedPortName) &&
+                    !string.Equals(sessionLogPortName, NormalizePortName(expectedPortName), StringComparison.OrdinalIgnoreCase))
+                    return;
                 if (sessionStringLogWriter == null && sessionHexLogWriter == null)
                     return;
                 try
                 {
                     var prefix = BuildSessionLogPrefix(time, direction);
-                    var readable = stringText == null ? Byte2SessionString(data) : EscapeSessionString(stringText);
+                    var readable = stringText == null
+                        ? (encodingCodePage.HasValue ? Byte2SessionStringForEncoding(data, encodingCodePage.Value) : Byte2SessionString(data))
+                        : EscapeSessionString(stringText);
                     var hex = Tools.Global.Byte2Hex(data, " ", data.Length);
                     WriteSessionStringLine(sessionStringLogWriter, prefix, readable);
                     sessionHexLogWriter?.WriteLine($"{prefix} │ {hex}");
@@ -650,6 +674,8 @@ namespace llcom_plus.Tools
         public bool send;
         public string portName;
         public ReceiveScriptContext receiveScriptContext;
+        public Model.UartPortProfile profile;
+        public Func<bool> isCurrent;
     }
 
     class ReceiveScriptContext

@@ -4,11 +4,15 @@ param(
     [ValidateSet('x64', 'x86')]
     [string]$Platform = 'x64',
     [switch]$SkipBuild,
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+    [string]$ReleaseArtifactDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+if (-not $SkipBuild -and -not [string]::IsNullOrWhiteSpace($ReleaseArtifactDirectory)) {
+    throw 'Build the custom artifact directory first and use -SkipBuild -ReleaseArtifactDirectory.'
+}
 
 # Reflection cannot load an x86 .NET Framework executable into a 64-bit test
 # host (or vice versa). Relaunch in same-bitness STA Windows PowerShell 5.1 so
@@ -99,6 +103,9 @@ if (-not $isWindowsPowerShell51 -or -not $isMatchingBitness -or -not $isStaThrea
     if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
         $relaunchArguments += @('-OutputDirectory', $OutputDirectory)
     }
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseArtifactDirectory)) {
+        $relaunchArguments += @('-ReleaseArtifactDirectory', $ReleaseArtifactDirectory)
+    }
     & $matchingPowerShell @relaunchArguments
     exit $LASTEXITCODE
 }
@@ -108,6 +115,9 @@ $projectDir = Join-Path $root 'llcom plus'
 $outputDir = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     Join-Path $projectDir "bin\$Platform\$Configuration"
 } else { [IO.Path]::GetFullPath($OutputDirectory) }
+$releaseArtifacts = if ([string]::IsNullOrWhiteSpace($ReleaseArtifactDirectory)) {
+    Join-Path $root 'artifacts\release'
+} else { [IO.Path]::GetFullPath($ReleaseArtifactDirectory) }
 $exePath = Join-Path $outputDir 'llcom plus.exe'
 $failures = New-Object System.Collections.Generic.List[string]
 
@@ -1208,7 +1218,7 @@ Test-Condition (
 if ($Configuration -eq 'Release') {
     $versionProps = [xml](Get-Content -LiteralPath (Join-Path $root 'Version.props'))
     $version = $versionProps.Project.PropertyGroup.AppVersion
-    $zipPath = Join-Path $root "artifacts\release\llcom.plus_${version}_${Platform}.zip"
+    $zipPath = Join-Path $releaseArtifacts "llcom.plus_${version}_${Platform}.zip"
     Test-Condition (Test-Path -LiteralPath $zipPath) 'Release ZIP exists'
     if (Test-Path -LiteralPath $zipPath) {
         Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -1231,11 +1241,18 @@ if ($Configuration -eq 'Release') {
             }
             Test-Condition ($null -ne $zip.GetEntry('llcom-plus-taskbar-v2.ico')) 'Release ZIP contains the dedicated taskbar icon'
             Test-Condition ($null -ne $zip.GetEntry('OpenSSL/openssl.exe')) 'Release ZIP contains OpenSSL'
-            Test-Condition ($null -eq $zip.GetEntry('settings.json')) 'Release ZIP excludes settings.json'
+            Test-Condition (
+                @($zip.Entries | Where-Object { $_.FullName -like 'settings.json*' }).Count -eq 0
+            ) 'Release ZIP excludes settings, backup and temporary files'
             Test-Condition (
                 @($zip.Entries | Where-Object { $_.FullName -like 'quick-send-backups/*' }).Count -eq 0
             ) 'Release ZIP excludes user quick-send snapshots'
-            Test-Condition ($null -eq $zip.GetEntry('circular_send.json')) 'Release ZIP excludes circular_send.json'
+            Test-Condition (
+                @($zip.Entries | Where-Object { $_.FullName -like 'circular_send.json*' }).Count -eq 0
+            ) 'Release ZIP excludes circular-send settings and recovery files'
+            Test-Condition (
+                @($zip.Entries | Where-Object { $_.FullName -like 'plot-settings.json*' }).Count -eq 0
+            ) 'Release ZIP excludes plot settings and recovery files'
             Test-Condition (
                 @($zip.Entries | Where-Object { $_.FullName -like 'ch347-presets.json*' }).Count -eq 0
             ) 'Release ZIP excludes user CH347 presets, backups and temporary files'

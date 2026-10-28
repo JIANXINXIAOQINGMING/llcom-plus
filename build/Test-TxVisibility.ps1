@@ -28,10 +28,45 @@ try {
     Add-Type -AssemblyName PresentationFramework
     Add-Type -ReferencedAssemblies @('WindowsBase','PresentationCore','PresentationFramework','System.Xaml') -TypeDefinition @'
 using System;
+using System.Reflection;
+using System.Threading;
 using System.Windows;
+using System.Windows.Threading;
 public static class TxUiExceptionObserver
 {
     public static int Count;
+    public static volatile bool ConnectionCurrent = true;
+    public static Func<bool> ConnectionPredicate { get { return () => ConnectionCurrent; } }
+    public static void PublishAcrossReconnect(Dispatcher dispatcher, MethodInfo publish, object[] arguments)
+    {
+        // The worker reaches the real UI queue while the test thread keeps the
+        // dispatcher paused. Reconnect before pumping that queued operation.
+        Exception failure = null;
+        Thread worker = null;
+        using (var queued = new ManualResetEvent(false))
+        {
+            DispatcherHookEventHandler onPosted = (sender, e) => {
+                if (Thread.CurrentThread == worker) queued.Set();
+            };
+            dispatcher.Hooks.OperationPosted += onPosted;
+            ConnectionCurrent = true;
+            worker = new Thread(() => {
+                try { publish.Invoke(null, arguments); }
+                catch (Exception ex) { failure = ex; }
+            });
+            worker.IsBackground = true;
+            try
+            {
+                worker.Start();
+                if (!queued.WaitOne(5000)) throw new InvalidOperationException("Send callback never reached the UI queue.");
+                ConnectionCurrent = false;
+                dispatcher.Invoke(new Action(() => {}), DispatcherPriority.Background);
+                if (!worker.Join(5000)) throw new InvalidOperationException("Send callback did not complete after dispatcher drain.");
+                if (failure != null) throw failure;
+            }
+            finally { dispatcher.Hooks.OperationPosted -= onPosted; }
+        }
+    }
     public static void InstallDependencyRedirect(string directory)
     {
         // PowerShell does not load the application's .exe.config redirects.
@@ -219,6 +254,9 @@ public static class TxUiExceptionObserver
     $settings.showSend = $true
     Assert-Order (Single-Text) @('TX_FIRST','RX_MIDDLE','TX_LAST') 'Single/split roundtrip can restore previously hidden TX in its original position.'
 
+    # The following file belongs to the main COM98 connection, rather than the
+    # COM99 pane selected by the preceding per-port settings assertions.
+    $split.SetActiveSlot(1)
     $settings.sessionLogEnabled = $true
     $settings.sessionLogFolder = Join-Path $testRoot 'session_logs'
     $settings.showSend = $false
@@ -229,10 +267,33 @@ public static class TxUiExceptionObserver
     $settings.DisableLog = $true
     Send-Sample 'DISPLAY_DISABLED_BYTES' $true
     $settings.DisableLog = $false
+    $settings.showSend = $true
+    [void](Invoke-Static $loggerType 'ClearData')
+    $capturedProfile = [Activator]::CreateInstance($profileType, $true)
+    $capturedProfile.encoding = 65001
+    $capturedProfile.showHexFormat = 1
+    $capturedProfile.timeout = 50
+    $settings.showHexFormat = 2
+    [TxUiExceptionObserver]::ConnectionCurrent = $true
+    $capturedArgs = [object[]]@([Text.Encoding]::UTF8.GetBytes('CAPTURED_TEXT_TX'), $true, $null, $null, 'COM98', $capturedProfile, [TxUiExceptionObserver]::ConnectionPredicate)
+    [void](Invoke-Static $loggerType 'ShowCapturedSerialData' $capturedArgs)
+    $capturedHex = [BitConverter]::ToString([Text.Encoding]::UTF8.GetBytes('CAPTURED_TEXT_TX')).Replace('-', ' ')
+    Assert-Tx ((Single-Text).Contains($capturedHex) -and -not (Single-Text).Contains('CAPTURED_TEXT_TX')) 'Main TX retains the sending connection metadata while its display follows the current COM format.'
+    [void](Invoke-Static $loggerType 'ShowCapturedSerialData' ([object[]]@([Text.Encoding]::UTF8.GetBytes('OTHER_COM_TX'), $true, $null, $null, 'COM97', $capturedProfile, $null)))
+    [TxUiExceptionObserver]::ConnectionCurrent = $false
+    [void](Invoke-Static $loggerType 'ShowCapturedSerialData' ([object[]]@([Text.Encoding]::UTF8.GetBytes('STALE_SAME_COM_TX'), $true, $null, $null, 'COM98', $capturedProfile, [TxUiExceptionObserver]::ConnectionPredicate)))
+    Assert-Tx (-not (Single-Text).Contains('STALE_SAME_COM_TX')) 'A retired same-COM generation cannot publish another TX record.'
+    [void](Invoke-Static $loggerType 'ClearData')
+    $queuedArgs = [object[]]@([Text.Encoding]::UTF8.GetBytes('QUEUED_BEFORE_RECONNECT_TX'), $true, $null, $null, 'COM98', $capturedProfile, [TxUiExceptionObserver]::ConnectionPredicate)
+    [TxUiExceptionObserver]::PublishAcrossReconnect($app.Dispatcher, $loggerType.GetMethod('ShowCapturedSerialData', $staticFlags), $queuedArgs)
+    Assert-Tx (-not (Single-Text).Contains('QUEUED_BEFORE_RECONNECT_TX')) 'A send already waiting in the dispatcher is rejected if its connection retires before display.'
+    [TxUiExceptionObserver]::ConnectionCurrent = $true
+    $settings.showHexFormat = 1
     [void](Invoke-Static $loggerType 'StopSessionLog')
     $stringFile = [IO.File]::ReadAllText($stringPath)
     $hexFile = [IO.File]::ReadAllText($hexPath)
     Assert-Tx ($stringFile.Contains('HIDDEN_TX_BYTES') -and $stringFile.Contains('DISPLAY_DISABLED_BYTES') -and $hexFile.Contains('48 49 44 44 45 4E 5F 54 58 5F 42 59 54 45 53')) 'Main STRING and HEX session files record actual TX while TX/the display is hidden.'
+    Assert-Tx ($stringFile.Contains('CAPTURED_TEXT_TX') -and $stringFile.Contains('QUEUED_BEFORE_RECONNECT_TX') -and -not $stringFile.Contains('OTHER_COM_TX') -and -not $stringFile.Contains('STALE_SAME_COM_TX')) 'Session files keep pre-reconnect TX while rejecting another COM and an already retired same-COM generation.'
 
     $slotStringPath = Join-Path $testRoot 'slot-hidden-string.log'
     $slotHexPath = Join-Path $testRoot 'slot-hidden-hex.log'

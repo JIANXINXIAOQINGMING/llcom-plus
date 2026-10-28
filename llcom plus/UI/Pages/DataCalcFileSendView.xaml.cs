@@ -27,6 +27,7 @@ namespace llcom_plus.Pages
         private string selectedFilePath = "";
         private long selectedFileLength = 0;
         private CancellationTokenSource sendCts = null;
+        internal bool IsSending => Interlocked.CompareExchange(ref sendCts, null, null) != null;
         private CancellationTokenSource calculationCts = null;
         private SendRunState sendState = SendRunState.Ready;
         private string resumeSourceKey = "";
@@ -462,9 +463,12 @@ namespace llcom_plus.Pages
         {
             Interlocked.Exchange(ref activeCalculationRunId, 0);
             var cts = Interlocked.Exchange(ref calculationCts, null);
-            if (cts == null)
-                return;
-            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+            if (cts != null)
+                try { cts.Cancel(); } catch (ObjectDisposedException) { }
+            // Detaching invalidates the worker's finally path. Input edits must
+            // restore the button here, without waiting for that obsolete result.
+            if (!isUnloaded && CalculateDataButton != null)
+                CalculateDataButton.IsEnabled = sendCts == null;
         }
 
         private static byte[] ParseManualData(

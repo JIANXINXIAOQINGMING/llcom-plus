@@ -15,7 +15,7 @@ namespace llcom_plus
         private CancellationTokenSource quickWorkflowCts;
         private bool quickWorkflowDispatching;
         private Dictionary<int, llcom_plus.Model.ToSendData> quickWorkflowSourceRows;
-        internal bool IsQuickWorkflowRunning => quickWorkflowCts != null;
+        internal bool IsQuickWorkflowRunning => Volatile.Read(ref quickWorkflowCts) != null;
 
         private async void QuickWorkflowRun_Click(object sender, RoutedEventArgs e)
         {
@@ -38,7 +38,7 @@ namespace llcom_plus
                     target.Identity.StartsWith("serial-all:", StringComparison.Ordinal))
                     throw new InvalidOperationException("请先选择并打开一个明确的串口；回复流程不支持“全部”广播或网络目标。");
                 if (ScriptEnv.JavaScriptRunEnv.isRunning || quickSendImportCts != null || OtherSerialWorkflowRunning())
-                    throw new InvalidOperationException("请先停止脚本、循环发送及日志回放，并等待导入完成，再运行快捷指令流程。");
+                    throw new InvalidOperationException("请先停止脚本、循环发送、日志回放及文件发送，并等待导入完成，再运行快捷指令流程。");
                 var uncheckedCount = plan.Count(step => step.Options.Mode == SerialTestMatchMode.None);
                 var retryCount = plan.Count(step => step.Options.Retries > 0);
                 var prompt = "向 " + target.DisplayName + " 顺序执行当前页 " + plan.Count + " 条指令？\r\n" +
@@ -98,7 +98,9 @@ namespace llcom_plus
                 var content = module.PeekContent();
                 var page = content is Frame frame ? frame.Content : content;
                 if (page is Pages.CircularSendPage circular && circular.IsWorkflowRunning ||
-                    page is Pages.LogReplayPage replay && replay.IsWorkflowRunning) return true;
+                    page is Pages.LogReplayPage replay && replay.IsWorkflowRunning ||
+                    page is Pages.DataCalcPage calculation && calculation.IsSending ||
+                    page is Pages.DataCalcFileSendView fileSend && fileSend.IsSending) return true;
             }
             return false;
         }
@@ -109,6 +111,12 @@ namespace llcom_plus
             if (windowIsClosing || Global.isMainWindowsClosed || IsMainSendTargetSelected() ||
                 !expected.IsOpen || selected == null || !selected.IsOpen || selected.Identity != expected.Identity)
                 throw new InvalidOperationException("串口连接或发送目标已改变。流程停止，不会改发到另一串口，请重新开始。");
+        }
+
+        private void AssertToolSerialSendAllowed()
+        {
+            if (IsQuickWorkflowRunning)
+                throw new InvalidOperationException("快捷指令流程正在运行，请先停止流程，再开始文件或原始数据发送。");
         }
 
         private async Task SendQuickWorkflowStepAsync(QuickWorkflowStep step, ActiveSerialTarget target, CancellationToken token)

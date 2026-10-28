@@ -161,6 +161,19 @@ public static class OfflineUiExceptionObserver
     Assert-Main ($null -ne $timelineFrame.Content -and [object]::ReferenceEquals($tabs.SelectedItem, $timelineTab) -and $tabs.Items.IndexOf($timelineTab) -eq $tabs.Items.IndexOf($selectedTab) + 1) 'Timeline is a lazily initialized peer tab directly beside Quick Send.'
     $timelinePage = $windowType.GetField('mainTimelinePage', $flags).GetValue($window)
     Assert-Main ($timelinePage.FindName('PageHeading').Visibility -eq [Windows.Visibility]::Visible -and $null -eq $window.FindName('TimelineDrawerRow') -and $null -eq $window.FindName('MainTimelineButton') -and [object]::ReferenceEquals($frame.Content, $single)) 'Timeline has its full page and does not split or replace the original serial log.'
+    # An old in-flight filter must be invalidated by the actual TextChanged
+    # wiring, before its background result could resume on the dispatcher.
+    $cancellationField = $timelinePage.GetType().GetField('searchCancellation', $flags)
+    $filterCancellation = New-Object Threading.CancellationTokenSource
+    try {
+        $cancellationField.SetValue($timelinePage, $filterCancellation)
+        $timelinePage.FindName('SearchBox').Text = 'changed while searching'
+        Assert-Main $filterCancellation.IsCancellationRequested 'Editing a timeline filter immediately cancels its obsolete background query.'
+    }
+    finally {
+        $cancellationField.SetValue($timelinePage, $null)
+        $filterCancellation.Dispose()
+    }
     $timelinePage.FindName('SearchBox').Text = 'preserved filter'
     $selectedTab.IsSelected = $true
     $timelineTab.IsSelected = $true

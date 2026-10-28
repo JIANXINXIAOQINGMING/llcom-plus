@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 public static class SerialTraceRegressionProbe
 {
@@ -75,6 +76,67 @@ public static class SerialTraceRegressionProbe
         Assert(text.StartsWith("\"'=") && text.Contains("\"\"bad\"\""), "CSV must escape formulas and quotes.");
         Assert(((byte[])entry.GetType().GetMethod("GetData").Invoke(entry, null))[0] == 65, "Search/export cannot alter raw log.");
         passes.Add("CSV neutralizes spreadsheet formulas and queries preserve raw data.");
+
+        // Check repeated-prefix fallback against a small independent oracle.
+        var random = new Random(1701);
+        for (int trial = 0; trial < 80; trial++)
+        {
+            var sample = new byte[random.Next(1, 100)];
+            var needle = new byte[random.Next(1, 20)];
+            for (int i = 0; i < sample.Length; i++) sample[i] = (byte)random.Next(3);
+            for (int i = 0; i < needle.Length; i++) needle[i] = (byte)random.Next(3);
+            bool expected = false;
+            for (int start = 0; start <= sample.Length - needle.Length; start++)
+            {
+                int matched = 0;
+                while (matched < needle.Length && sample[start + matched] == needle[matched]) matched++;
+                if (matched == needle.Length) { expected = true; break; }
+            }
+            string port = "HEX_ORACLE_" + trial;
+            Data(port, port, false, sample);
+            int count = ((IEnumerable)Find(BitConverter.ToString(needle).Replace("-", ""), "Hex", port, "Rx", null,
+                false, CancellationToken.None)).Cast<object>().Count();
+            Assert((count == 1) == expected, "HEX repeated-prefix search disagreed with the byte oracle.");
+        }
+        passes.Add("HEX searches handle overlapping and repeated prefixes without false matches.");
+
+        bool emptyCanceled = false;
+        try
+        {
+            Call(query, "Find", Array.CreateInstance(assembly.GetType("llcom_plus.Tools.SerialTraceEntry", true), 0),
+                "", Enum.Parse(mode, "Text"), "", "", null, false, new CancellationToken(true));
+        }
+        catch (OperationCanceledException) { emptyCanceled = true; }
+        Assert(emptyCanceled, "An empty search ignored an already cancelled request.");
+        passes.Add("Already-cancelled searches are rejected even when the trace is empty.");
+
+        var repeated = Enumerable.Repeat((byte)0xAA, 16 * 1024 * 1024).ToArray();
+        Data("HEX_LARGE", "HEX_LARGE", false, repeated);
+        string nearMatch = new string('A', 1022) + "FF";
+        var largeSearch = Task.Run(() => ((IEnumerable)Find(nearMatch, "Hex", "HEX_LARGE", "Rx", null,
+            false, CancellationToken.None)).Cast<object>().Count());
+        Assert(largeSearch.Wait(4000) && largeSearch.GetAwaiter().GetResult() == 0,
+            "A single repeated 16 MiB record exceeded the search deadline or produced a false match.");
+        using (var cancellation = new CancellationTokenSource())
+        {
+            var search = Task.Run(() => Find(nearMatch, "Hex", "HEX_LARGE", "Rx", null, false, cancellation.Token));
+            cancellation.CancelAfter(10);
+            bool canceledLarge = false;
+            try
+            {
+                Assert(search.Wait(2000), "Cancellation did not interrupt a large HEX record promptly.");
+                search.GetAwaiter().GetResult();
+            }
+            catch (AggregateException ex)
+            {
+                if (!(ex.InnerException is OperationCanceledException)) throw;
+                canceledLarge = true;
+            }
+            catch (OperationCanceledException) { canceledLarge = true; }
+            Assert(canceledLarge, "A large in-flight HEX search ignored cancellation.");
+        }
+        passes.Add("A large repeated HEX record stays bounded and can be cancelled during its scan.");
+
         var data = new byte[140000];
         Call(hub, "RecordBuffer", "COM43", "uart:COM43:1", false, data, 0, data.Length, 65001);
         var blocks = Snapshot().Where(e => (string)Value(e, "PortName") == "COM43").ToArray();

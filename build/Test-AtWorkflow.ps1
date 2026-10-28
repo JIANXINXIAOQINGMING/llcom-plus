@@ -33,4 +33,9 @@ if ($globalSource -notmatch 'ExpectedTargetIdentity = request.ExpectedTargetIden
 }
 $passed++
 Write-Host 'PASS  Request cloning and UI target validation preserve the whole-job connection.' -ForegroundColor Green
+if ($sendSource -notmatch '(?s)if\s*\(!string.IsNullOrEmpty\(request.ExpectedTargetIdentity\)\).*?if\s*\(IsMainSendTargetSelected\(\)\s*\|\|.*?throw new InvalidOperationException.*?sendUartData') {
+    throw 'Captured serial workflows must reject a selected network send target before requesting any send.'
+}
+$passed++
+Write-Host 'PASS  A captured serial workflow cannot redirect data to an MQTT/TCP main send target.' -ForegroundColor Green
 Write-Host "All $passed AT workflow checks passed ($Platform $Configuration)." -ForegroundColor Green

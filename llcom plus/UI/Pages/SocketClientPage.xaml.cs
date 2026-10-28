@@ -192,6 +192,35 @@ namespace llcom_plus.Pages
             ShowData(title, Encoding.UTF8.GetBytes(text ?? string.Empty), send);
         }
 
+        private void PublishInteractiveData(long epoch, byte[] data)
+        {
+            if (data == null || data.Length == 0) return;
+            RunInteractiveCallback(epoch, () => DataRecived?.Invoke(null, data));
+        }
+
+        private void RunInteractiveCallback(long epoch, Action callback)
+        {
+            if (Volatile.Read(ref nativeSocketEpoch) != epoch ||
+                Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+                return;
+            Action publish = () =>
+            {
+                // An SSH/OpenSSL read can finish while its old process is being
+                // closed. Recheck after dispatch, before logs and script channels.
+                if (Volatile.Read(ref nativeSocketEpoch) == epoch)
+                    callback();
+            };
+            try
+            {
+                if (Dispatcher.CheckAccess()) publish();
+                else Dispatcher.Invoke(publish);
+            }
+            catch (InvalidOperationException) when (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            {
+                // Closing the page/application retires queued transport callbacks.
+            }
+        }
+
         private readonly object reconnectTimerLock = new object();
         private System.Timers.Timer reconnectTimer;
         private long reconnectGeneration;
@@ -559,6 +588,7 @@ namespace llcom_plus.Pages
 
         private void ConnectOpenSsl(int protocol)
         {
+            var epoch = Interlocked.Increment(ref nativeSocketEpoch);
             try
             {
                 Changeable = false;
@@ -583,8 +613,8 @@ namespace llcom_plus.Pages
                 var connectionEstablished = false;
                 connection = OpenSslCli.StartInteractive(
                     options,
-                    data => DataRecived?.Invoke(null, data),
-                    text =>
+                    data => PublishInteractiveData(epoch, data),
+                    text => RunInteractiveCallback(epoch, () =>
                     {
                         if (Tools.Global.setting.tcpClientSslPrintDetails && !string.IsNullOrWhiteSpace(text))
                         {
@@ -592,7 +622,7 @@ namespace llcom_plus.Pages
                             if (!string.IsNullOrWhiteSpace(detail))
                                 ShowTextData("🔐 OpenSSL detail", detail);
                         }
-                    },
+                    }),
                     () => Dispatcher.BeginInvoke(new Action(() =>
                     {
                         if (socketNow == null || !socketNow.Owns(connection))
@@ -647,6 +677,7 @@ namespace llcom_plus.Pages
 
         private void ConnectSsh()
         {
+            var epoch = Interlocked.Increment(ref nativeSocketEpoch);
             try
             {
                 Changeable = false;
@@ -658,7 +689,7 @@ namespace llcom_plus.Pages
                 var connectionEstablished = false;
                 connection = SshCli.StartInteractive(
                     options,
-                    data => DataRecived?.Invoke(null, data),
+                    data => PublishInteractiveData(epoch, data),
                     () => Dispatcher.BeginInvoke(new Action(() =>
                     {
                         if (socketNow == null || !socketNow.Owns(connection))

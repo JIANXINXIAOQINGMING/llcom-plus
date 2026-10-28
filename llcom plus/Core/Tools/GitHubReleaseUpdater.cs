@@ -384,11 +384,8 @@ namespace llcom_plus.Tools
                             idleCts.CancelAfter(DownloadIdleTimeout);
                             try
                             {
-                                bytesRead = await input.ReadAsync(
-                                    buffer,
-                                    0,
-                                    buffer.Length,
-                                    idleCts.Token).ConfigureAwait(false);
+                                bytesRead = await ReadUpdateResponseBlockAsync(
+                                    input, buffer, idleCts.Token).ConfigureAwait(false);
                             }
                             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                             {
@@ -425,6 +422,32 @@ namespace llcom_plus.Tools
                 throw new ArgumentOutOfRangeException(nameof(maximumBytes));
             if (value < 0 || value > maximumBytes)
                 throw new InvalidDataException($"{source ?? "Update data"} is outside the 0..{maximumBytes} byte limit.");
+        }
+
+        private static async Task<int> ReadUpdateResponseBlockAsync(
+            Stream input, byte[] buffer, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            // .NET Framework's HTTP response stream inherits Stream.ReadAsync:
+            // its token can only cancel before BeginRead, not a blocked read.
+            // Closing this response's stream interrupts the outstanding network
+            // read so owner shutdown and idle/total timeouts remain effective.
+            using (cancellationToken.Register(() =>
+            {
+                try { input.Dispose(); }
+                catch { /* Preserve cancellation even if response cleanup fails. */ }
+            }))
+            {
+                try
+                {
+                    return await input.ReadAsync(buffer, 0, buffer.Length,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+            }
         }
 
         private static void EnsureDownloadDiskSpace(string destinationPath, long remainingBytes)
@@ -871,11 +894,8 @@ namespace llcom_plus.Tools
                                 idleCts.CancelAfter(ReleaseMetadataIdleTimeout);
                                 try
                                 {
-                                    read = await input.ReadAsync(
-                                        buffer,
-                                        0,
-                                        buffer.Length,
-                                        idleCts.Token).ConfigureAwait(false);
+                                    read = await ReadUpdateResponseBlockAsync(
+                                        input, buffer, idleCts.Token).ConfigureAwait(false);
                                 }
                                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                                 {

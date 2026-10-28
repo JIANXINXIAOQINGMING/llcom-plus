@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
-    [ValidateSet('x64', 'x86')][string]$Platform = 'x64'
+    [ValidateSet('x64', 'x86')][string]$Platform = 'x64',
+    [string]$OutputDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
@@ -9,7 +10,9 @@ if ($PSVersionTable.PSVersion.Major -ne 5 -or [Environment]::Is64BitProcess -ne 
     throw 'Use matching-bitness Windows PowerShell 5.1 with -STA. This test does not build or open ports.'
 }
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$outputDir = Join-Path $repoRoot "llcom plus\bin\$Platform\$Configuration"
+$outputDir = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $repoRoot "llcom plus\bin\$Platform\$Configuration"
+} else { [IO.Path]::GetFullPath($OutputDirectory) }
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
 $testName = 'llcom-quick-edit-' + [Guid]::NewGuid().ToString('N')
 $testRoot = Join-Path $tempBase $testName
@@ -65,7 +68,55 @@ try {
         Invoke-Edit 'ClearQuickSendUndo'
         $window.SaveSendList($null, [EventArgs]::Empty)
     }
+    foreach ($entry in @(
+        @('example string', 'User caption'),
+        @([regex]::Unescape('JavaScript\u53ef\u901a\u8fc7\u63a5\u53e3\u83b7\u53d6\u6b64\u5904\u6570\u636e'), 'User caption'),
+        @('aa 01 02 0d 0a', 'User caption'),
+        @([regex]::Unescape('\u6b64\u5904\u6570\u636e\u4f1a\u88abJavaScript\u5904\u7406'), 'User caption'),
+        @([regex]::Unescape('\u53f3\u51fb\u5e8f\u53f7\u53ef\u4ee5\u66f4\u6539\u8fd9\u4e00\u884c\u7684\u4f4d\u7f6e'), 'User caption'),
+        @('AT+USER', [regex]::Unescape('\u53f3\u51fb\u66f4\u6539\u6b64\u5904\u6587\u5b57')),
+        @('AT+USER', [regex]::Unescape('Hex\u6570\u636e\u4e5f\u80fd\u53d1'))
+    )) {
+        Set-OnlyRow $entry[0]
+        $retained = $rows[0]
+        $retained.commit = $entry[1]
+        $retained.hex = $true
+        $retained.appendCrlf = $false
+        $retained.disableSuggestion = $true
+        $retained.recvScriptPath = 'user-selected-script'
+        $retained.recvScriptPara = 'keep script parameters'
+        $retained.responseMode = 2
+        $retained.expectedResponse = 'KEEP_OK'
+        $retained.responseTimeoutMs = 1234
+        $window.SaveSendList($null, [EventArgs]::Empty)
+        $type.GetField('canSaveSendList', $flags).SetValue($window, $false)
+        try { Invoke-Edit 'LoadQuickSendList' }
+        finally { $type.GetField('canSaveSendList', $flags).SetValue($window, $true) }
+        Assert-Edit ($rows.Count -eq 1 -and [object]::ReferenceEquals($rows[0], $retained) -and
+            $retained.text -ceq $entry[0] -and $retained.commit -ceq $entry[1] -and $retained.hex -and
+            -not $retained.appendCrlf -and $retained.disableSuggestion -and
+            $retained.recvScriptPath -eq 'user-selected-script' -and $retained.recvScriptPara -eq 'keep script parameters' -and
+            $retained.responseMode -eq 2 -and $retained.expectedResponse -eq 'KEEP_OK' -and $retained.responseTimeoutMs -eq 1234) `
+            "Loading real user data preserves legacy-example text/captions and all command settings ($($entry[0]) / $($entry[1]))."
+    }
     Set-OnlyRow '41 54'
+    $beforeFailedChange = @($rows)
+    $pageChangeFailed = $false
+    try {
+        Invoke-Edit 'TryChangeQuickSendPage' ([object[]]@([Action]{ throw 'isolated page-change failure' }))
+    }
+    catch {
+        $pageChangeFailed = $_.Exception.Message.Contains('isolated page-change failure')
+    }
+    Assert-Edit ($pageChangeFailed -and $type.GetField('canSaveSendList', $flags).GetValue($window) -and
+        $rows.Count -eq $beforeFailedChange.Count -and [object]::ReferenceEquals($rows[0], $beforeFailedChange[0])) `
+        'A failed page change retains the visible command objects and restores automatic saving.'
+    $windowSource = [IO.File]::ReadAllText((Join-Path $repoRoot 'llcom plus\UI\View\MainWindow.xaml.cs'))
+    foreach ($handler in @('SelectQuickSendPage','AddQuickSendPageButton_Click','DeleteQuickSendPageButton_Click')) {
+        $body = [regex]::Match($windowSource, '(?ms)^        private void ' + $handler + '\([^\r\n]*\).*?(?=^        private |\z)').Value
+        Assert-Edit ($body.Contains('TryChangeQuickSendPage(') -and -not $body.Contains('toSendListItems.Clear()')) `
+            "$handler commits through the guarded page change before replacing visible rows."
+    }
     $original = $rows[0]
     $original.hex = $true
     $original.appendCrlf = $false

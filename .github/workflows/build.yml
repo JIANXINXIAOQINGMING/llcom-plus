@@ -83,6 +83,32 @@ jobs:
             }
           }
 
+      - name: Test serial log display history without hardware (x64 and x86)
+        shell: pwsh
+        run: |
+          foreach ($architecture in @('x64', 'x86')) {
+            $shellDirectory = if ($architecture -eq 'x64') { 'System32' } else { 'SysWOW64' }
+            $testPowerShell = Join-Path $env:WINDIR "$shellDirectory\WindowsPowerShell\v1.0\powershell.exe"
+            foreach ($suite in @('Test-LogDisplayMode.ps1', 'Test-TxVisibility.ps1', 'Test-LineEndings.ps1', 'Test-LogPrefix.ps1')) {
+              & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File (Join-Path '.\build' $suite) -Configuration Release -Platform $architecture
+              if ($LASTEXITCODE -ne 0) { throw "Serial log display regression failed: $suite ($architecture)" }
+            }
+          }
+
+      - name: Test data replacement and tool lifecycles without hardware (x64 and x86)
+        shell: pwsh
+        run: |
+          foreach ($architecture in @('x64', 'x86')) {
+            $shellDirectory = if ($architecture -eq 'x64') { 'System32' } else { 'SysWOW64' }
+            $testPowerShell = Join-Path $env:WINDIR "$shellDirectory\WindowsPowerShell\v1.0\powershell.exe"
+            foreach ($suite in @('Test-QuickSendBackupRetry.ps1', 'Test-QuickCommandEditing.ps1', 'Test-AtWorkflow.ps1', 'Test-WorkflowToolGate.ps1', 'Test-ScriptSessionSend.ps1', 'Test-SerialTrace.ps1', 'Test-SocketCallbacks.ps1', 'Test-MqttAttempts.ps1', 'Test-MainLogIntegration.ps1')) {
+              & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File (Join-Path '.\build' $suite) -Configuration Release -Platform $architecture
+              if ($LASTEXITCODE -ne 0) { throw "Data/tool regression failed: $suite ($architecture)" }
+            }
+            & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File .\build\Test-CriticalFixes.ps1 -Configuration Release -Platform $architecture -SkipBuild
+            if ($LASTEXITCODE -ne 0) { throw "Critical regressions failed: $architecture" }
+          }
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -115,6 +141,19 @@ jobs:
           UPDATE_SIGNING_PRIVATE_KEY_XML: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_XML }}
         run: |
           .\build\Sign-Release.ps1 -ArtifactsDirectory "${{ env.RELEASE_ARTIFACT_DIR }}" -Version "${{ github.ref_name }}"
+
+      - name: Validate signed release packages (x64 and x86)
+        shell: pwsh
+        run: |
+          foreach ($architecture in @('x64', 'x86')) {
+            $zip = Join-Path '${{ env.RELEASE_ARTIFACT_DIR }}' "llcom.plus_${{ github.ref_name }}_$architecture.zip"
+            $output = Join-Path $env:RUNNER_TEMP "llcom-release-validation-$architecture"
+            Expand-Archive -LiteralPath $zip -DestinationPath $output
+            $shellDirectory = if ($architecture -eq 'x64') { 'System32' } else { 'SysWOW64' }
+            $testPowerShell = Join-Path $env:WINDIR "$shellDirectory\WindowsPowerShell\v1.0\powershell.exe"
+            & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File .\build\Test-Release.ps1 -Configuration Release -Platform $architecture -SkipBuild -OutputDirectory $output -ReleaseArtifactDirectory '${{ env.RELEASE_ARTIFACT_DIR }}'
+            if ($LASTEXITCODE -ne 0) { throw "Signed package regression failed: $architecture" }
+          }
 
       - name: Prepare release files
         shell: pwsh
