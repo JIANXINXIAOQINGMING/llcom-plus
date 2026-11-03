@@ -26,14 +26,18 @@ internal static class Program
     }
     private static int Fake()
     {
+        bool stopObserved = false;
+        try
+        {
         var input = Console.OpenStandardInput(); var output = Console.OpenStandardOutput();
         MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Hello,
             MonitorBrokerProtocol.Hello(Process.GetCurrentProcess().Id, Environment.Is64BitProcess ? 64 : 32));
         var start = MonitorBrokerProtocol.Read(input);
         if (start == null || start.Type == MonitorBrokerProtocol.Kind.Stop)
-        { MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Stopped, BitConverter.GetBytes(2)); return 0; }
+        { stopObserved = true; MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Stopped, BitConverter.GetBytes(2)); return 0; }
         uint com = BitConverter.ToUInt32(start.Payload, 4);
         if (com == 80) return 0;
+        if (com == 83) { Console.Error.WriteLine("FAKE_MONITOR_STARTUP_FAILURE_83"); return 83; }
         if (com == 81) Thread.Sleep(300);
         MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Status, BitConverter.GetBytes(1));
         if (com == 78)
@@ -52,9 +56,19 @@ internal static class Program
         }
         else if (com == 77) MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Packet, Packet(com));
         var stop = MonitorBrokerProtocol.Read(input);
+        stopObserved = stop == null || stop.Type == MonitorBrokerProtocol.Kind.Stop;
         if (com == 82) MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Packet, Packet(com));
         MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Stopped, BitConverter.GetBytes(2));
         return stop == null || stop.Type == MonitorBrokerProtocol.Kind.Stop ? 0 : 1;
+        }
+        catch (IOException error) when (stopObserved)
+        {
+            // Retirement can close stdout after the stop request was consumed.
+            // Keep the diagnostic, but do not classify this expected shutdown
+            // as an unexpected startup failure.
+            Console.Error.WriteLine("Fake monitoring helper pipe closed after stop: " + error);
+            return 0;
+        }
     }
     private sealed class ShortStream : MemoryStream
     {
@@ -80,14 +94,10 @@ internal static class Program
     {
         string arch = Environment.Is64BitProcess ? "x64" : "x86";
         string helper = SerialMonitorBrokerClient.GetHelperPath(root, arch);
-        Directory.CreateDirectory(Path.GetDirectoryName(helper));
-        File.Copy(Assembly.GetExecutingAssembly().Location, helper);
-        File.Copy(Assembly.GetExecutingAssembly().Location, Path.Combine(Path.GetDirectoryName(helper), "serial_monitor.dll"));
+        CopyFakeHelper(Assembly.GetExecutingAssembly().Location, helper);
         string opposite = arch == "x64" ? "x86" : "x64";
         string oppositeHelper = SerialMonitorBrokerClient.GetHelperPath(root, opposite);
-        Directory.CreateDirectory(Path.GetDirectoryName(oppositeHelper));
-        File.Copy(oppositeExecutable, oppositeHelper);
-        File.Copy(oppositeExecutable, Path.Combine(Path.GetDirectoryName(oppositeHelper), "serial_monitor.dll"));
+        CopyFakeHelper(oppositeExecutable, oppositeHelper);
         using (var cross = new SerialMonitorBrokerClient(root))
         using (var crossData = new ManualResetEvent(false))
         {
@@ -136,6 +146,16 @@ internal static class Program
             await client.StopAsync();
         }
         using (var client = new SerialMonitorBrokerClient(root))
+        {
+            try { await client.StartAsync(424242, 83, 1, arch, null, null, CancellationToken.None); throw new Exception("Unexpected helper startup failure accepted."); }
+            catch (IOException error)
+            {
+                Assert(error.Message.Contains("FAKE_MONITOR_STARTUP_FAILURE_83") &&
+                    error.Message.Contains("0x00000053"), "Helper startup failure lost its stderr diagnostic or hexadecimal exit code: " + error.Message);
+            }
+            await client.StopAsync();
+        }
+        using (var client = new SerialMonitorBrokerClient(root))
         using (var canceled = new CancellationTokenSource())
         {
             canceled.CancelAfter(50);
@@ -143,7 +163,20 @@ internal static class Program
             catch (OperationCanceledException) { }
             Assert(await client.StopAsync() == 2 && !client.IsRunning, "Canceled startup did not complete a graceful stop.");
         }
-        Pass("Unexpected helper EOF and cancellation during pending startup settle without target/process killing.");
+        Pass("Unexpected helper EOF preserves bounded stderr/exit diagnostics; cancellation during pending startup settles without target/process killing.");
+    }
+    private static void CopyFakeHelper(string executable, string helper)
+    {
+        string sourceConfig = executable + ".config";
+        Assert(File.Exists(sourceConfig), "The fake monitoring helper runtime configuration is missing: " + sourceConfig);
+        string configuration = File.ReadAllText(sourceConfig);
+        Assert(configuration.Contains("version=\"v4.0\"") && configuration.Contains("sku=\".NETFramework,Version=v4.8\""),
+            "The fake monitoring helper must explicitly select .NET Framework 4.8.");
+        Directory.CreateDirectory(Path.GetDirectoryName(helper));
+        File.Copy(executable, helper);
+        File.Copy(sourceConfig, helper + ".config");
+        Assert(File.ReadAllText(helper + ".config") == configuration, "Copied helper runtime configuration differs from its source.");
+        File.Copy(executable, Path.Combine(Path.GetDirectoryName(helper), "serial_monitor.dll"));
     }
     private static void RelayChecks(string actualHelper)
     {
@@ -242,7 +275,11 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "--owned-target") { Console.OpenStandardInput().ReadByte(); return 0; }
-        if (args.Length == 2 && int.TryParse(args[0], out _)) { try { return Fake(); } catch (IOException) { return 0; } }
+        if (args.Length == 2 && int.TryParse(args[0], out _))
+        {
+            try { return Fake(); }
+            catch (Exception error) { Console.Error.WriteLine("Fake monitoring helper failed: " + error); return 1; }
+        }
         if (args.Length != 3) { Console.Error.WriteLine("Expected isolated test root, actual helper, and opposite-architecture test executable."); return 1; }
         try { ProtocolChecks(); ClientChecks(args[0], args[2]).GetAwaiter().GetResult(); RelayChecks(args[1]); IdentityAndParentChecks(args[1]); return 0; }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }

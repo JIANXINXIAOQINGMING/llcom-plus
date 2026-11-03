@@ -12,6 +12,7 @@
     <Compile Include="..\..\SerialMonitorBroker\MonitorBrokerProtocol.cs"><Link>MonitorBrokerProtocol.cs</Link></Compile>
     <Compile Include="..\..\llcom plus\Core\Tools\SerialMonitorBrokerClient.cs"><Link>SerialMonitorBrokerClient.cs</Link></Compile>
     <Compile Include="Program.cs" />
+    <None Include="App.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

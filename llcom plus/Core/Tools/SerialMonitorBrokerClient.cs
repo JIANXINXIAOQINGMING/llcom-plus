@@ -21,6 +21,7 @@ namespace llcom_plus.Tools
             internal readonly object InputGate = new object();
             internal readonly TaskCompletionSource<int> Ready = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
             internal readonly TaskCompletionSource<int> Stopped = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            internal readonly TaskCompletionSource<bool> DiagnosticsDrained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             internal readonly StringBuilder Diagnostic = new StringBuilder();
             internal readonly uint Com;
             internal readonly int Bits;
@@ -175,6 +176,7 @@ namespace llcom_plus.Tools
             finally
             {
                 Volatile.Write(ref session.Running, 0);
+                if (Volatile.Read(ref session.StopRequested) == 0) failure = DescribeUnexpectedExit(session, failure);
                 session.Ready.TrySetException(new IOException(failure));
                 session.Stopped.TrySetResult(4);
                 bool notify;
@@ -185,6 +187,26 @@ namespace llcom_plus.Tools
                     _ = BeginStop(session);
                 }
             }
+        }
+        private static string DescribeUnexpectedExit(Session session, string failure)
+        {
+            try
+            {
+                // This reader runs off the UI thread. Give an already-closing
+                // helper a bounded window to finish flushing its diagnostics.
+                if (session.Process.WaitForExit(100))
+                {
+                    session.DiagnosticsDrained.Task.Wait(500);
+                    failure += " Exit code: 0x" + session.Process.ExitCode.ToString("X8", CultureInfo.InvariantCulture) + ".";
+                }
+            }
+            catch { }
+            lock (session.Diagnostic)
+            {
+                string diagnostic = session.Diagnostic.ToString().Trim();
+                if (diagnostic.Length != 0) failure += " " + diagnostic;
+            }
+            return failure;
         }
         private static void DrainDiagnostics(Session session)
         {
@@ -197,6 +219,7 @@ namespace llcom_plus.Tools
                         if (session.Diagnostic.Length < 2048) session.Diagnostic.Append(buffer, 0, Math.Min(read, 2048 - session.Diagnostic.Length));
             }
             catch { }
+            finally { session.DiagnosticsDrained.TrySetResult(true); }
         }
         internal Task<int> StopAsync()
         {
