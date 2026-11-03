@@ -112,6 +112,16 @@ try {
         $rows.Count -eq $beforeFailedChange.Count -and [object]::ReferenceEquals($rows[0], $beforeFailedChange[0])) `
         'A failed page change retains the visible command objects and restores automatic saving.'
     $windowSource = [IO.File]::ReadAllText((Join-Path $repoRoot 'llcom plus\UI\View\MainWindow.xaml.cs'))
+    Add-Type -Path (Join-Path $PSScriptRoot 'QuickCommandDeletionRegressionProbe.cs') -ReferencedAssemblies @(
+        'System.dll','System.Core.dll','System.Xaml.dll',
+        [Windows.DependencyObject].Assembly.Location,[Windows.Media.Brushes].Assembly.Location,
+        [Windows.Controls.Primitives.Selector].Assembly.Location)
+    foreach ($message in [QuickCommandDeletionRegressionProbe]::Run($assembly,$window,$settings,$testRoot)) {
+        Write-Host "PASS $message"
+    }
+    Assert-Edit ($windowSource.Contains('if (!TryRemoveQuickSendItem(item, out var error)')) `
+        'The visible delete action uses the same guarded deletion path and reports backup failures.'
+    Set-OnlyRow '41 54'
     foreach ($handler in @('SelectQuickSendPage','AddQuickSendPageButton_Click','DeleteQuickSendPageButton_Click')) {
         $body = [regex]::Match($windowSource, '(?ms)^        private void ' + $handler + '\([^\r\n]*\).*?(?=^        private |\z)').Value
         Assert-Edit ($body.Contains('TryChangeQuickSendPage(') -and -not $body.Contains('toSendListItems.Clear()')) `

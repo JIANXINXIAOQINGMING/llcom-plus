@@ -646,7 +646,7 @@ try {
         $aboutWindow = [Activator]::CreateInstance($assembly.GetType('llcom_plus.AboutProjectWindow', $true))
         try {
             Test-Condition (
-                $aboutWindow.FindName('AuthorText').Text -eq 'lawrenc.liu' -and
+                $aboutWindow.FindName('AuthorText').Text -eq 'lawrence.liu' -and
                 $aboutWindow.FindName('VersionText').Text.Contains($assembly.GetName().Version.ToString(3)) -and
                 $aboutWindow.FindName('VersionText').Text.Contains($Platform)
             ) 'About displays the requested author and the actual running version and architecture'
@@ -1226,6 +1226,14 @@ if ($Configuration -eq 'Release') {
         try {
             Test-Condition ($null -ne $zip.GetEntry('llcom plus.exe')) 'Release ZIP contains the application'
             Test-Condition ($null -ne $zip.GetEntry('serial_monitor.dll')) 'Release ZIP contains the native serial monitor'
+            foreach ($monitorArchitecture in @('x86', 'x64')) {
+                Test-Condition (
+                    $null -ne $zip.GetEntry("Monitor/$monitorArchitecture/SerialMonitorBroker.exe") -and
+                    $null -ne $zip.GetEntry("Monitor/$monitorArchitecture/SerialMonitorBroker.exe.config") -and
+                    $null -ne $zip.GetEntry("Monitor/$monitorArchitecture/serial_monitor.dll")
+                ) "Release ZIP contains the $monitorArchitecture serial-monitor helper and native runtime"
+            }
+            Test-Condition ($null -ne $zip.GetEntry('Monitor/MinHook-LICENSE.txt')) 'Release ZIP includes the MinHook license'
             Test-Condition ($null -ne $zip.GetEntry('CH347/CH347DLL.dll')) 'Release ZIP contains the CH347 vendor runtime'
             $ch347Entry = $zip.GetEntry('CH347/CH347DLL.dll')
             if ($null -ne $ch347Entry) {
@@ -1247,6 +1255,19 @@ if ($Configuration -eq 'Release') {
             Test-Condition (
                 @($zip.Entries | Where-Object { $_.FullName -like 'quick-send-backups/*' }).Count -eq 0
             ) 'Release ZIP excludes user quick-send snapshots'
+            Test-Condition (
+                @($zip.Entries | Where-Object { $_.FullName -like 'workspaces/*' }).Count -eq 0
+            ) 'Release ZIP excludes user workspaces and recovery files'
+            Test-Condition (
+                @($zip.Entries | Where-Object {
+                    $_.FullName -like 'user_script_run/*' -or
+                    $_.FullName -like 'user_script_send_convert/*' -or
+                    $_.FullName -like 'user_script_recv_convert/*'
+                }).Count -eq 0
+            ) 'Release ZIP excludes editable user scripts and their dependencies'
+            Test-Condition (
+                @($zip.Entries | Where-Object { $_.FullName -like 'session_logs/*' }).Count -eq 0
+            ) 'Release ZIP excludes default serial session logs'
             Test-Condition (
                 @($zip.Entries | Where-Object { $_.FullName -like 'circular_send.json*' }).Count -eq 0
             ) 'Release ZIP excludes circular-send settings and recovery files'

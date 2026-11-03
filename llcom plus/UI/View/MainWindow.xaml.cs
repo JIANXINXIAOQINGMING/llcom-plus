@@ -3511,12 +3511,26 @@ namespace llcom_plus
 
         private void RemoveQuickSendItem(ToSendData item)
         {
+            if (!TryRemoveQuickSendItem(item, out var error) && !string.IsNullOrEmpty(error))
+                Tools.MessageBox.Show(error);
+        }
+
+        private bool TryRemoveQuickSendItem(ToSendData item, out string error)
+        {
+            error = null;
             if (item == null || !toSendListItems.Contains(item))
-                return;
+                return false;
+
+            var backup = Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
+            if (!backup.Succeeded)
+            {
+                error = (TryFindResource("QuickSendDeleteBackupFailed") as string ??
+                    "删除前备份未成功，已保留当前指令。请稍后重试或检查历史版本目录。 / Backup failed; the command was kept.") +
+                    Environment.NewLine + backup.Error;
+                return false;
+            }
 
             CloseQuickCommandActions();
-
-            Tools.QuickSendBackupService.CreateNow(Tools.Global.setting, "pre-delete-item");
             RememberQuickSendDeletion(item);
             ExitQuickSendKeyboardNavigation();
             if (toSendListItems.Count <= 1)
@@ -3524,12 +3538,13 @@ namespace llcom_plus
                 ClearQuickSendItem(item, 1);
                 CaptureQuickSendPlaceholder();
                 SaveSendList(null, EventArgs.Empty);
-                return;
+                return true;
             }
 
             toSendListItems.Remove(item);
             CheckToSendListId();
             SaveSendList(null, EventArgs.Empty);
+            return true;
         }
 
         private ToSendData CreateBlankQuickSendItem(int id)

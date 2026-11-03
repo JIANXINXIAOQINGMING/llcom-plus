@@ -56,10 +56,35 @@ jobs:
           .\serial_monitor_rs\build.ps1 -Config Release -Arch All -RustToolchain 1.82.0
 
       - name: Build x64
+        # Both monitor architectures are verified before either application is packaged.
         run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x64 /p:RequireNativeSourceBuild=true /v:normal
 
       - name: Build x86
         run: msbuild "${{ env.PROJECT_PATH }}" /p:Configuration=Release /p:Platform=x86 /p:RequireNativeSourceBuild=true /v:normal
+
+      - name: Test monitor native hooks in owned test processes (x64 and x86)
+        shell: pwsh
+        working-directory: serial_monitor_rs
+        run: |
+          foreach ($target in @('x86_64-pc-windows-msvc', 'i686-pc-windows-msvc')) {
+            foreach ($crate in @('serial_monitor_hook', 'serial_monitor')) {
+              cargo +1.82.0 test -p $crate --target $target --release -- --test-threads=1
+              if ($LASTEXITCODE -ne 0) { throw "Native monitor regression failed: $crate ($target)" }
+            }
+          }
+          .\test-exports.ps1 -Arch All
+
+      - name: Test monitor broker and UI without remote injection (x64 and x86)
+        shell: pwsh
+        run: |
+          foreach ($architecture in @('x64', 'x86')) {
+            $shellDirectory = if ($architecture -eq 'x64') { 'System32' } else { 'SysWOW64' }
+            $testPowerShell = Join-Path $env:WINDIR "$shellDirectory\WindowsPowerShell\v1.0\powershell.exe"
+            foreach ($suite in @('Test-SerialMonitorBroker.ps1', 'Test-SerialMonitorUi.ps1')) {
+              & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File (Join-Path '.\build' $suite) -Configuration Release -Platform $architecture
+              if ($LASTEXITCODE -ne 0) { throw "Monitor regression failed: $suite ($architecture)" }
+            }
+          }
 
       - name: Test CH347 transactions without hardware (x64 and x86)
         shell: pwsh
@@ -77,7 +102,7 @@ jobs:
           foreach ($architecture in @('x64', 'x86')) {
             $shellDirectory = if ($architecture -eq 'x64') { 'System32' } else { 'SysWOW64' }
             $testPowerShell = Join-Path $env:WINDIR "$shellDirectory\WindowsPowerShell\v1.0\powershell.exe"
-            foreach ($suite in @('Test-SerialPortAccess.ps1', 'Test-SerialDisconnection.ps1', 'Test-SerialReceiveIsolation.ps1')) {
+            foreach ($suite in @('Test-SerialPortAccess.ps1', 'Test-SerialDisconnection.ps1', 'Test-SerialReceiveIsolation.ps1', 'Test-SplitReceivePersistence.ps1')) {
               & $testPowerShell -NoProfile -NonInteractive -STA -ExecutionPolicy RemoteSigned -File (Join-Path '.\build' $suite) -Configuration Release -Platform $architecture
               if ($LASTEXITCODE -ne 0) { throw "Serial regression failed: $suite ($architecture)" }
             }

@@ -1,229 +1,52 @@
-# serial_monitor_rs
+# 串口进程监听 / Serial process monitor
 
-Rust rewrite of the closed-source `serial_monitor.dll` used by [llcom](https://github.com/chenxuuu/llcom).
+用于观察指定程序对指定 COM 的 Win32 串口读写。它与 llcom plus 自己打开串口进行收发的功能独立；进程列表也不代表这些进程正在使用当前选择的 COM。
 
-Maintains full API compatibility with the original DLL so it drops in as a replacement in `llcom plus/Runtime/Native/x64/` or `llcom plus/Runtime/Native/x86/`.
+## 位数与组件
 
----
+主界面按目标程序的位数选择监听助手，x64 主程序可以监听 x86 目标，x86 主程序在 64 位 Windows 上也可以选择 x64 目标。助手和注入到目标的模块始终与目标保持相同位数，不直接跨位数加载 DLL。
 
-## Architecture
-
-```
-llcom plus.exe
-  │
-  │  MonitorComm(pid, port, callback)
-  ▼
-serial_monitor.dll  (this crate)
-  │  creates named pipe \\.\pipe\llcom_plus_smv2_<our_pid>
-  │  writes pipe name to shared memory Local\llcom_plus_smv2_session
-  │  extracts serial_monitor_hook.dll to %TEMP%\llcom_plus_smv2\
-  │  injects hook DLL into target process via CreateRemoteThread+LoadLibraryW
-  │  worker thread polls pipe and calls C# callback for each Udata packet
-  ▼
-serial_monitor_hook.dll  (embedded inside serial_monitor.dll)
-  │  DllMain: reads pipe name from shared memory, connects as pipe client
-  │  installs inline hooks on kernel32: CreateFileW/A, ReadFile, WriteFile, CloseHandle
-  │  COM port detection: \\.\COMx or \Device\Serialx
-  │  for each read/write on a COM handle → writes Udata to the pipe
+```text
+llcom plus.exe (x86 or x64)
+  └─ inherited stdin/stdout, bounded versioned frames
+       └─ Monitor/{target-architecture}/SerialMonitorBroker.exe
+            └─ serial_monitor.dll (same architecture)
+                 └─ serial_monitor_hook DLL embedded in host
+                      └─ selected process, selected COM only
 ```
 
-### Udata wire format (Pack=1, matches C# `Udata` struct)
+`serial_monitor_hook` 的 x64 实现沿用固定版本 retour 0.3.1；x86 使用固定版本 MinHook 1.3.4 的指令解码、跳板和线程上下文处理。第三方源码、许可证及本地严格错误处理补丁的来源见 `vendor/minhook/UPSTREAM.md`。不使用固定截取五字节的手工补丁。
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `com_port` | `u8` | COM port number |
-| `comm_state` | `u8` | 2=Disconnect, 3=Receive, 4=Send |
-| `file_handle` | `i32` | Windows HANDLE (cast to 32-bit) |
-| `data_size` | `i32` | Valid bytes in `data` |
-| `data` | `[u8; 8192]` | Payload |
+不支持 ARM64 目标或无法可靠判断位数的目标。权限不足、受系统保护或不允许注入的进程会拒绝启动，不自动提权或绕过保护。目标须由用户明确选择，PID 与创建时间一起绑定，进程重启后需重新选择。
 
-Total: **8202 bytes**.
+## 数据与生命周期
 
----
+- ABI 版本为 **3**。固定头部 64 字节，加最多 8192 字节负载，总包长 **8256 字节**，采用小端、`Pack=1`。
+- 线上的句柄值使用 `u64`，不传递进程内指针或托管回调地址。包包含连接代次、序号、COM、方向、分片信息和丢包计数。
+- 原生 hook 与助手回调均使用有界队列；慢界面或慢管道不能无限积压，也不能阻塞目标程序的串口回调。丢包计数随下一包传回界面。
+- `DllMain` 不连接管道、不安装 hook；通过显式初始化握手启动。
+- 停止先阻止新回调并清空托管队列，再请求原生捕获停止。旧助手和旧连接的回调不能进入新会话。
+- 已安装的 hook 模块保留到目标退出，不强制卸载正在使用的代码。原生停用仍待清理时，助手保留到清理完成或目标退出；主界面可以继续操作。
+- 离开监听页、关闭软件或父进程退出都会关闭本次监听。只管理本工具启动的助手，不结束被监听程序。
 
-## Building
+这是一种运行时调试机制，不能保证每一种串口库、内核驱动、受保护软件或已经打开的句柄都能被观察到；应在目标测试程序中核对实际数据。它不替代硬件串口分析仪。
 
-### Prerequisites
+## 构建
 
-- Rust toolchain (nightly or stable ≥ 1.75)
-- MSVC target: `rustup target add x86_64-pc-windows-msvc`
-- Visual Studio Build Tools (MSVC linker)
-
-### Build and copy DLL
+使用固定 Rust **1.82.0**、MSVC 工具链，以及 `x86_64-pc-windows-msvc` 和 `i686-pc-windows-msvc` 两个目标：
 
 ```powershell
-cd serial_monitor_rs
-.\build.ps1
+.\serial_monitor_rs\build.ps1 -Config Release -Arch All -RustToolchain 1.82.0
 ```
 
-This builds `serial_monitor.dll` (x64 release) and copies it to `llcom plus/Runtime/Native/x64/serial_monitor.dll`.
+脚本先构建 hook，再将匹配架构的 hook 嵌入 host DLL，最后更新 `llcom plus/Runtime/Native/{x86|x64}/serial_monitor.dll` 与来源校验记录。脚本不自动安装工具链。
 
-### Manual build
+主项目构建时会生成两种位数的监听助手，分别与对应的原生 DLL 一起放到输出目录的 `Monitor/x86` 和 `Monitor/x64`。Release 构建使用 `RequireNativeSourceBuild=true` 校验两份原生组件的来源记录，版本包同时包含两套助手及 MinHook 许可证。
 
-```powershell
-cd serial_monitor_rs
-cargo build --release -p serial_monitor --target x86_64-pc-windows-msvc
-# Output: target/x86_64-pc-windows-msvc/release/serial_monitor.dll
-```
+## 验证范围
 
----
+默认回归验证协议大小与边界、位数选择、过期回调、启动取消、停止和助手退出，以及原生本地合成函数的调用约定、跳板与并发切换。测试不向用户正在运行的软件注入，也不打开真实串口。
 
-## C# Interface (unchanged from original DLL)
+实际程序的读取方式、同步或异步 I/O、权限、启停及串口数据仍需在专门测试环境验证。不要用系统服务作为首次联调目标。
 
-```csharp
-public delegate int CallbackDelegate(IntPtr param);
-
-[DllImport("serial_monitor.dll")]
-static extern bool UnMonitorComm();
-
-[DllImport("serial_monitor.dll")]
-static extern bool MonitorComm(uint Pid, uint ComIndex, CallbackDelegate lpCallFunc);
-
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct Udata {
-    public byte ComPort;
-    public byte CommState;   // 2=Disconnect, 3=Receive, 4=Send
-    public int FileHandle;
-    public int DataSize;
-    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8192)]
-    public byte[] Data;
-}
-```
-
----
-
-## Crate structure
-
-| Crate | Purpose |
-|-------|---------|
-| `serial_monitor` | Public DLL; manages injection and pipe server |
-| `serial_monitor_hook` | Injected hook DLL; intercepts COM I/O in target process |
-
----
-
----
-
-# serial_monitor_rs（中文说明）
-
-用 Rust 重写的 `serial_monitor.dll`，替换 [llcom](https://github.com/chenxuuu/llcom) 原先使用的同名闭源 DLL。
-
-保持与原 DLL 完全相同的导出接口，可直接覆盖 `llcom plus/Runtime/Native/x64/` 或 `llcom plus/Runtime/Native/x86/` 目录下的旧文件。
-
----
-
-## 整体架构
-
-```
-llcom plus.exe
-  │
-  │  MonitorComm(pid, port, callback)
-  ▼
-serial_monitor.dll  （本项目）
-  │  创建命名管道 \\.\pipe\llcom_plus_smv2_<自身pid>
-  │  将管道名写入共享内存 Local\llcom_plus_smv2_session
-  │  将 serial_monitor_hook.dll 解压到 %TEMP%\llcom_plus_smv2\
-  │  通过 CreateRemoteThread+LoadLibraryW 将 Hook DLL 注入目标进程
-  │  工作线程轮询管道，每收到一个 Udata 数据包就调用 C# 回调
-  ▼
-serial_monitor_hook.dll  （内嵌于 serial_monitor.dll 中）
-  │  DllMain：从共享内存读取管道名，以客户端身份连接管道
-  │  对 kernel32 进行内联 Hook：CreateFileW/A、ReadFile、WriteFile、CloseHandle
-  │  串口检测：路径含 \\.\COMx 或 \Device\Serialx
-  │  每次对串口句柄执行读/写 → 向管道写入一个 Udata 数据包
-```
-
-### Udata 数据格式（Pack=1，与 C# 端 `Udata` 结构体一致）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `com_port` | `u8` | COM 口编号 |
-| `comm_state` | `u8` | 2=断开连接，3=接收数据，4=发送数据 |
-| `file_handle` | `i32` | Windows HANDLE（截断为 32 位） |
-| `data_size` | `i32` | `data` 中的有效字节数 |
-| `data` | `[u8; 8192]` | 有效载荷 |
-
-合计：**8202 字节**。
-
----
-
-## 编译方法
-
-### 前置条件
-
-- Rust 工具链（stable ≥ 1.75 或 nightly）
-- MSVC 目标：`rustup target add x86_64-pc-windows-msvc`
-- Visual Studio Build Tools（提供 MSVC 链接器）
-
-### 一键编译并复制 DLL
-
-```powershell
-cd serial_monitor_rs
-.\build.ps1
-```
-
-脚本会依次编译 Hook DLL 和主 DLL（x64 release），并将 `serial_monitor.dll` 复制到 `llcom plus/Runtime/Native/x64/`。
-
-### 手动编译
-
-```powershell
-cd serial_monitor_rs
-# 必须先编译 Hook DLL
-cargo build --release -p serial_monitor_hook --target x86_64-pc-windows-msvc
-# 再编译主 DLL（build.rs 会自动嵌入上一步产出的 Hook DLL）
-cargo build --release -p serial_monitor --target x86_64-pc-windows-msvc
-# 输出：target/x86_64-pc-windows-msvc/release/serial_monitor.dll
-```
-
-> **注意**：不能在同一个 `cargo build` 命令中同时编译两个 crate，因为 `serial_monitor` 的 `build.rs` 需要先找到已编译好的 `serial_monitor_hook.dll` 才能将其嵌入。
-
----
-
-## C# 接口（与原 DLL 保持一致）
-
-```csharp
-public delegate int CallbackDelegate(IntPtr param);
-
-[DllImport("serial_monitor.dll")]
-static extern bool UnMonitorComm();
-
-[DllImport("serial_monitor.dll")]
-static extern bool MonitorComm(uint Pid, uint ComIndex, CallbackDelegate lpCallFunc);
-
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct Udata {
-    public byte ComPort;
-    public byte CommState;   // 2=断开连接  3=接收  4=发送
-    public int FileHandle;
-    public int DataSize;
-    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8192)]
-    public byte[] Data;
-}
-```
-
----
-
-## 项目结构
-
-| Crate | 说明 |
-|-------|------|
-| `serial_monitor` | 主 DLL；负责进程注入与命名管道服务端 |
-| `serial_monitor_hook` | Hook DLL（注入目标进程）；拦截串口 I/O |
-
-`serial_monitor_hook.dll` is **embedded** inside `serial_monitor.dll` via `include_bytes!` (see `serial_monitor/build.rs`). No separate deployment needed.
-
----
-
-## Limitations
-
-- **x64 only**: The hook DLL must match the bitness of the target process. If the target serial application is 32-bit, an x86 build is needed (not currently provided).
-- **Synchronous I/O only**: Overlapped (async) `ReadFile`/`WriteFile` calls in the target process are not captured.
-- **Windows only** (`#[cfg(windows)]` implied by the windows crate).
-- **No FTDI/USB-serial drivers that bypass kernel32**: If an application uses a custom I/O path that doesn't call kernel32 `ReadFile`/`WriteFile`, those calls won't be captured.
-
----
-
-## How llcom plus integrates it
-
-`llcom plus/llcom plus.csproj` copies the platform-specific DLL from `llcom plus/Runtime/Native/x64/` or `llcom plus/Runtime/Native/x86/` into the application output directory during build.
-
-After building this Rust project, rebuild the C# project so the selected native DLL is copied next to `llcom plus.exe`.
+参考：[MinHook 官方项目](https://github.com/TsudaKageyu/minhook)、[Microsoft Detours 的位数说明](https://github.com/microsoft/Detours/wiki/Detouring-32-bit-and-64-bit-Processes)。

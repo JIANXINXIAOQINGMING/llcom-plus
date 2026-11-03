@@ -292,6 +292,10 @@
     <Compile Include="Core\Tools\SerialPinMonitor.cs" />
     <Compile Include="Core\Tools\SerialConnectionMonitor.cs" />
     <Compile Include="Core\Tools\SerialPortAccessCoordinator.cs" />
+    <Compile Include="Core\Tools\SerialMonitorBrokerClient.cs" />
+    <Compile Include="..\SerialMonitorBroker\MonitorBrokerProtocol.cs">
+      <Link>Core\Tools\MonitorBrokerProtocol.cs</Link>
+    </Compile>
     <Compile Include="UI\View\AboutProjectWindow.xaml.cs">
       <DependentUpon>AboutProjectWindow.xaml</DependentUpon>
     </Compile>
@@ -640,6 +644,34 @@
     <Error Condition="'@(NativeRuntimeFile)' != '' And !Exists('%(NativeRuntimeFile.Identity)')" Text="Missing native runtime file: %(NativeRuntimeFile.Identity)" />
     <Exec Condition="'$(RequireNativeSourceBuild)' == 'true'" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\serial_monitor_rs\verify-build.ps1&quot; -Architecture &quot;$(NativeRuntimeArchitecture)&quot; -Configuration &quot;$(Configuration)&quot; -RuntimeDll &quot;@(NativeRuntimeFile)&quot; -StampFile &quot;$(NativeRuntimeBuildStamp)&quot; -RustToolchain 1.82.0" />
   </Target>
+  <Target Name="BuildSerialMonitorBrokers">
+    <PropertyGroup>
+      <SerialMonitorBrokerBuildRoot>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)monitor-brokers\</SerialMonitorBrokerBuildRoot>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\SerialMonitorBroker\SerialMonitorBroker.csproj" Targets="Build" BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=x86;PlatformTarget=x86;OutputPath=$(SerialMonitorBrokerBuildRoot)x86\;IntermediateOutputPath=$(SerialMonitorBrokerBuildRoot)obj\x86\" />
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\SerialMonitorBroker\SerialMonitorBroker.csproj" Targets="Build" BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=x64;PlatformTarget=x64;OutputPath=$(SerialMonitorBrokerBuildRoot)x64\;IntermediateOutputPath=$(SerialMonitorBrokerBuildRoot)obj\x64\" />
+  </Target>
+  <Target Name="CopySerialMonitorBrokerFiles" AfterTargets="Build" DependsOnTargets="BuildSerialMonitorBrokers">
+    <ItemGroup>
+      <SerialMonitorBrokerArchitecture Include="x86;x64" />
+      <SerialMonitorBrokerFile Include="$(SerialMonitorBrokerBuildRoot)x86\SerialMonitorBroker.exe;$(SerialMonitorBrokerBuildRoot)x86\SerialMonitorBroker.exe.config">
+        <Architecture>x86</Architecture>
+      </SerialMonitorBrokerFile>
+      <SerialMonitorBrokerFile Include="$(SerialMonitorBrokerBuildRoot)x64\SerialMonitorBroker.exe;$(SerialMonitorBrokerBuildRoot)x64\SerialMonitorBroker.exe.config">
+        <Architecture>x64</Architecture>
+      </SerialMonitorBrokerFile>
+    </ItemGroup>
+    <Error Condition="!Exists('%(SerialMonitorBrokerFile.Identity)')" Text="Serial monitor helper output is missing: %(SerialMonitorBrokerFile.Identity)" />
+    <Exec Condition="'$(RequireNativeSourceBuild)' == 'true'"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\serial_monitor_rs\verify-build.ps1&quot; -Architecture &quot;%(SerialMonitorBrokerArchitecture.Identity)&quot; -Configuration &quot;$(Configuration)&quot; -RuntimeDll &quot;$(MSBuildProjectDirectory)\Runtime\Native\%(SerialMonitorBrokerArchitecture.Identity)\serial_monitor.dll&quot; -StampFile &quot;$(MSBuildProjectDirectory)\..\serial_monitor_rs\target\native-build-%(SerialMonitorBrokerArchitecture.Identity).json&quot; -RustToolchain 1.82.0" />
+    <MakeDir Directories="$(TargetDir)Monitor\x86;$(TargetDir)Monitor\x64" />
+    <Copy SourceFiles="@(SerialMonitorBrokerFile)" DestinationFiles="@(SerialMonitorBrokerFile->'$(TargetDir)Monitor\%(Architecture)\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Runtime\Native\%(SerialMonitorBrokerArchitecture.Identity)\serial_monitor.dll"
+          DestinationFiles="$(TargetDir)Monitor\%(SerialMonitorBrokerArchitecture.Identity)\serial_monitor.dll" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\serial_monitor_rs\vendor\minhook\LICENSE.txt" DestinationFiles="$(TargetDir)Monitor\MinHook-LICENSE.txt" />
+  </Target>
   <Target Name="CopyNativeRuntimeFiles" AfterTargets="Build" DependsOnTargets="ResolveNativeRuntimeFiles">
     <Copy SourceFiles="@(NativeRuntimeFile)" DestinationFiles="@(NativeRuntimeFile->'$(TargetDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
@@ -685,7 +717,7 @@
   <Target Name="CopyTaskbarIcon" AfterTargets="Build" DependsOnTargets="GenerateApplicationIcon">
     <Copy SourceFiles="$(MSBuildProjectDirectory)\Resources\Assets\AppIcon.ico" DestinationFiles="$(TargetDir)llcom-plus-taskbar-v2.ico" SkipUnchangedFiles="true" />
   </Target>
-  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopyOpenSslRuntimeFiles;CopyCh347RuntimeFiles;CopyTaskbarIcon;CopyUpdateSigningPublicKey" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="CreateReleaseZip" AfterTargets="Build" DependsOnTargets="CopyNativeRuntimeFiles;CopySerialMonitorBrokerFiles;CopyOpenSslRuntimeFiles;CopyCh347RuntimeFiles;CopyTaskbarIcon;CopyUpdateSigningPublicKey" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <ReleasePackageVersion>$(AppVersion)</ReleasePackageVersion>
       <ReleasePackagePlatform>$(PlatformTarget)</ReleasePackagePlatform>
@@ -694,7 +726,7 @@
       <ReleasePackageZip>$(ReleaseArtifactDirectory)\llcom.plus_$(ReleasePackageVersion)_$(ReleasePackagePlatform).zip</ReleasePackageZip>
     </PropertyGroup>
     <ItemGroup>
-      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json*;$(TargetDir).credentials\**\*;$(TargetDir)quick-send-backups\**\*;$(TargetDir)circular_send.json*;$(TargetDir)plot-settings.json*;$(TargetDir)ch347-presets.json*;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)user_script_run\logs\**\*" />
+      <ReleasePackageFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.vshost.*;$(TargetDir)settings.json*;$(TargetDir).credentials\**\*;$(TargetDir)quick-send-backups\**\*;$(TargetDir)workspaces\**\*;$(TargetDir)user_script_run\**\*;$(TargetDir)user_script_send_convert\**\*;$(TargetDir)user_script_recv_convert\**\*;$(TargetDir)circular_send.json*;$(TargetDir)plot-settings.json*;$(TargetDir)ch347-presets.json*;$(TargetDir)startup.log;$(TargetDir)logs\**\*;$(TargetDir)session_logs\**\*" />
       <ReleasePackageFile Include="$(TargetDir)UpdateSigningPublicKey.xml" Condition="Exists('$(TargetDir)UpdateSigningPublicKey.xml')" />
       <OldReleasePackageZip Include="$(ReleaseArtifactDirectory)\$(AssemblyName)_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />
       <OldReleasePackageZip Include="$(ReleaseArtifactDirectory)\llcom.plus_*_$(ReleasePackagePlatform).zip" Exclude="$(ReleasePackageZip)" />

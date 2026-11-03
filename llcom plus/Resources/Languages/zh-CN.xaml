@@ -113,6 +113,7 @@
     <system:String x:Key="QuickSendEditTitle">编辑快捷发送内容</system:String>
     <system:String x:Key="QuickSendEditPrompt">快捷发送 {0} 的内容（支持多行）：</system:String>
     <system:String x:Key="QuickSendRemoveItem">删除这条指令</system:String>
+    <system:String x:Key="QuickSendDeleteBackupFailed">删除前备份未成功，已保留当前指令。请稍后重试或检查历史版本目录。</system:String>
     <system:String x:Key="QuickSendPage">页面</system:String>
     <system:String x:Key="QuickSendDefaultPageName">未命名{0}</system:String>
     <system:String x:Key="QuickSendAddPage">新建页面</system:String>

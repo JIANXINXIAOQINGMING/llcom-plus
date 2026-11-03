@@ -10,7 +10,24 @@ function Get-NativeSourceFiles {
         'serial_monitor\build.rs',
         'serial_monitor\src\lib.rs',
         'serial_monitor_hook\Cargo.toml',
-        'serial_monitor_hook\src\lib.rs'
+        'serial_monitor_hook\build.rs',
+        'serial_monitor_hook\src\lib.rs',
+        'serial_monitor_hook\src\x86_detour.rs',
+        'vendor\minhook\UPSTREAM.md',
+        'vendor\minhook\LICENSE.txt',
+        'vendor\minhook\include\MinHook.h',
+        'vendor\minhook\src\buffer.c',
+        'vendor\minhook\src\buffer.h',
+        'vendor\minhook\src\hook.c',
+        'vendor\minhook\src\trampoline.c',
+        'vendor\minhook\src\trampoline.h',
+        'vendor\minhook\src\hde\hde32.c',
+        'vendor\minhook\src\hde\hde32.h',
+        'vendor\minhook\src\hde\hde64.c',
+        'vendor\minhook\src\hde\hde64.h',
+        'vendor\minhook\src\hde\pstdint.h',
+        'vendor\minhook\src\hde\table32.h',
+        'vendor\minhook\src\hde\table64.h'
     )
 }
 

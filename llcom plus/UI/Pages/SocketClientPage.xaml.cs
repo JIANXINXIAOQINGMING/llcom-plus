@@ -200,14 +200,26 @@ namespace llcom_plus.Pages
 
         private void RunInteractiveCallback(long epoch, Action callback)
         {
-            if (Volatile.Read(ref nativeSocketEpoch) != epoch ||
+            RunTransportCallback(() => Volatile.Read(ref nativeSocketEpoch) == epoch, callback);
+        }
+
+        private void PublishNativeData(SocketObj owner, long epoch, byte[] data)
+        {
+            if (data == null) return;
+            RunTransportCallback(() => IsCurrentNativeAttempt(owner, epoch),
+                () => DataRecived?.Invoke(null, data));
+        }
+
+        private void RunTransportCallback(Func<bool> isCurrent, Action callback)
+        {
+            if (!isCurrent() ||
                 Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
                 return;
             Action publish = () =>
             {
-                // An SSH/OpenSSL read can finish while its old process is being
+                // A transport read can finish while its connection is being
                 // closed. Recheck after dispatch, before logs and script channels.
-                if (Volatile.Read(ref nativeSocketEpoch) == epoch)
+                if (isCurrent())
                     callback();
             };
             try
@@ -1608,7 +1620,7 @@ namespace llcom_plus.Pages
                 var buffer = new byte[read];
                 if (read > 0)
                     Buffer.BlockCopy(state.buffer, 0, buffer, 0, read);
-                DataRecived?.Invoke(null, buffer);
+                PublishNativeData(state.owner, state.epoch, buffer);
 
                 if (!IsCurrentNativeAttempt(state.owner, state.epoch))
                     return;

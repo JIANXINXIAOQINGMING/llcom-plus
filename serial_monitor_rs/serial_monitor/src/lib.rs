@@ -9,8 +9,8 @@
 
 use std::ffi::{c_void, CString};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use windows::core::{PCSTR, PCWSTR};
@@ -52,7 +52,6 @@ const STATUS_STOP_PENDING_MODULE_RETAINED: i32 = 3;
 const STATUS_STOPPED_MODULE_STATE_UNKNOWN: i32 = 4;
 const STATUS_NO_SESSION: i32 = 0;
 const ERROR_INVALID_ARGUMENT: i32 = -1;
-const ERROR_X86_DISABLED: i32 = -2;
 const ERROR_ARCHITECTURE_UNKNOWN: i32 = -3;
 const ERROR_CROSS_BITNESS: i32 = -4;
 const ERROR_IPC_SETUP: i32 = -5;
@@ -120,6 +119,59 @@ type CallbackFn = unsafe extern "system" fn(*const c_void) -> i32;
 type RemoteThreadFn = unsafe extern "system" fn(*mut c_void) -> u32;
 type IsWow64Process2Fn = unsafe extern "system" fn(HANDLE, *mut u16, *mut u16) -> i32;
 type IsWow64ProcessFn = unsafe extern "system" fn(HANDLE, *mut i32) -> i32;
+
+static PENDING_CLEANUPS: AtomicUsize = AtomicUsize::new(0);
+
+struct CleanupGuard;
+
+struct CleanupTask {
+    task: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    _guard: CleanupGuard,
+}
+
+static RETAINED_CLEANUPS: OnceLock<Mutex<Vec<Arc<CleanupTask>>>> = OnceLock::new();
+
+impl CleanupGuard {
+    fn begin() -> Self {
+        PENDING_CLEANUPS.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        PENDING_CLEANUPS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn spawn_cleanup<F>(name: &str, task: F) -> std::io::Result<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    // Retain a second owner until spawn succeeds. A resource failure must not
+    // close IPC or free parameters underneath a still-running remote call.
+    let owned = Arc::new(CleanupTask {
+        task: Mutex::new(Some(Box::new(task))),
+        _guard: CleanupGuard::begin(),
+    });
+    let worker_owned = owned.clone();
+    match std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let task = lock_recover(&worker_owned.task).take();
+            if let Some(task) = task {
+                task();
+            }
+        }) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            // No worker exists, but ownership is still pending. The broker sees
+            // a nonzero cleanup count and retains this process until target exit.
+            lock_recover(RETAINED_CLEANUPS.get_or_init(|| Mutex::new(Vec::new()))).push(owned);
+            Err(error)
+        }
+    }
+}
 
 struct OwnedHandle(HANDLE);
 
@@ -376,6 +428,30 @@ fn local_machine() -> ProcessMachine {
     }
 }
 
+fn classify_wow64_fallback(
+    host: ProcessMachine,
+    host_wow64: bool,
+    target_wow64: bool,
+) -> ProcessMachine {
+    match host {
+        ProcessMachine::X64 => {
+            if target_wow64 {
+                ProcessMachine::X86
+            } else {
+                ProcessMachine::X64
+            }
+        }
+        ProcessMachine::X86 => {
+            if host_wow64 && !target_wow64 {
+                ProcessMachine::X64
+            } else {
+                ProcessMachine::X86
+            }
+        }
+        _ => ProcessMachine::Unknown,
+    }
+}
+
 fn query_process_machine(pid: u32) -> Option<ProcessMachine> {
     let process = unsafe { OpenProcess(PROCESS_ALL_ACCESS, false, pid).ok()? };
     let process = OwnedHandle::new(process)?;
@@ -410,13 +486,28 @@ fn query_process_machine(pid: u32) -> Option<ProcessMachine> {
             return None;
         }
         if local_machine() == ProcessMachine::X64 {
-            Some(if is_wow64 != 0 {
-                ProcessMachine::X86
-            } else {
-                ProcessMachine::X64
-            })
+            Some(classify_wow64_fallback(
+                local_machine(),
+                false,
+                is_wow64 != 0,
+            ))
         } else {
-            Some(ProcessMachine::X86)
+            // IsWow64Process(false) in an x86 host cannot distinguish native
+            // x86 Windows from a native x64 process on 64-bit Windows. Compare
+            // the host's own WOW64 state before accepting a same-bitness target.
+            let mut host_wow64 = 0i32;
+            if function(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+                &mut host_wow64,
+            ) == 0
+            {
+                return None;
+            }
+            Some(classify_wow64_fallback(
+                local_machine(),
+                host_wow64 != 0,
+                is_wow64 != 0,
+            ))
         }
     }
 }
@@ -666,11 +757,7 @@ fn spawn_load_timeout_reaper(process: OwnedHandle, thread: OwnedHandle, remote_m
         // If the target exited, its address space (including remote_memory) was
         // reclaimed by the kernel. OwnedHandle then closes both local handles.
     };
-    if std::thread::Builder::new()
-        .name("serial-monitor-load-reaper".into())
-        .spawn(task)
-        .is_err()
-    {
+    if spawn_cleanup("serial-monitor-load-reaper", task).is_err() {
         // The target kernel object still owns the allocation.  Avoid freeing
         // memory that a running remote thread may dereference; target exit is
         // the final reclamation boundary in this exceptional resource failure.
@@ -820,9 +907,7 @@ fn spawn_late_initialization_cleanup(
             spawn_deactivation_retry(session);
         }
     };
-    let _ = std::thread::Builder::new()
-        .name("serial-monitor-init-cleanup".into())
-        .spawn(task);
+    let _ = spawn_cleanup("serial-monitor-init-cleanup", task);
 }
 
 fn spawn_worker(
@@ -960,9 +1045,7 @@ fn spawn_deactivation_retry(mut session: Session) {
         }
         unsafe { Sleep(250) };
     };
-    let _ = std::thread::Builder::new()
-        .name("serial-monitor-deactivate-retry".into())
-        .spawn(task);
+    let _ = spawn_cleanup("serial-monitor-deactivate-retry", task);
 }
 
 fn stop_current_session() -> i32 {
@@ -999,9 +1082,7 @@ fn stop_current_session() -> i32 {
                     spawn_deactivation_retry(task_session);
                 }
             };
-            let _ = std::thread::Builder::new()
-                .name("serial-monitor-deactivate-wait".into())
-                .spawn(task);
+            let _ = spawn_cleanup("serial-monitor-deactivate-wait", task);
             STATUS_STOP_PENDING_MODULE_RETAINED
         }
         RemoteCallOutcome::Complete(_) | RemoteCallOutcome::Failed => {
@@ -1012,7 +1093,7 @@ fn stop_current_session() -> i32 {
 }
 
 /// Start monitoring. Returns a positive status on success and a negative,
-/// stable error code on failure. x86 injection is intentionally disabled.
+/// stable error code on failure. Host and target must have matching bitness.
 ///
 /// # Safety
 /// `callback` must remain a valid system-ABI function pointer until
@@ -1033,10 +1114,6 @@ pub unsafe extern "system" fn MonitorComm(
     if pid == 0 || com_index == 0 || com_index > 4096 {
         return ERROR_INVALID_ARGUMENT;
     }
-    if cfg!(target_arch = "x86") {
-        return ERROR_X86_DISABLED;
-    }
-
     let Some(target_machine) = query_process_machine(pid) else {
         return ERROR_ARCHITECTURE_UNKNOWN;
     };
@@ -1137,6 +1214,15 @@ pub extern "system" fn SerialMonitorGetAbiVersion() -> u32 {
     u32::from(ABI_VERSION)
 }
 
+/// Additive ABI v3 diagnostic: keep broker ownership until asynchronous native
+/// initialization/deactivation cleanup has finished (or the target has exited).
+#[no_mangle]
+pub extern "system" fn SerialMonitorGetPendingCleanupCount() -> u32 {
+    PENDING_CLEANUPS
+        .load(Ordering::Acquire)
+        .min(u32::MAX as usize) as u32
+}
+
 /// Stop callbacks and deactivate capture. The hook module intentionally stays
 /// mapped until the target exits; status 2/3/4 describes the deactivation state.
 #[no_mangle]
@@ -1149,4 +1235,61 @@ pub extern "system" fn UnMonitorComm() -> i32 {
 #[no_mangle]
 pub extern "system" fn DllMain(_module: *mut c_void, _reason: u32, _reserved: *mut c_void) -> i32 {
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abi_and_wow64_fallback_reject_cross_bitness() {
+        assert_eq!(std::mem::size_of::<MonitorPacket>(), 8256);
+        assert_eq!(std::mem::offset_of!(MonitorPacket, data), 64);
+        assert_eq!(std::mem::size_of::<SharedConfig>(), 512);
+        assert_eq!(
+            classify_wow64_fallback(ProcessMachine::X64, false, true),
+            ProcessMachine::X86
+        );
+        assert_eq!(
+            classify_wow64_fallback(ProcessMachine::X64, false, false),
+            ProcessMachine::X64
+        );
+        assert_eq!(
+            classify_wow64_fallback(ProcessMachine::X86, true, false),
+            ProcessMachine::X64
+        );
+        assert_eq!(
+            classify_wow64_fallback(ProcessMachine::X86, true, true),
+            ProcessMachine::X86
+        );
+        assert_eq!(
+            classify_wow64_fallback(ProcessMachine::X86, false, false),
+            ProcessMachine::X86
+        );
+    }
+
+    #[test]
+    fn cleanup_count_owns_nested_and_finished_background_work() {
+        assert_eq!(SerialMonitorGetPendingCleanupCount(), 0);
+        let (release, wait) = std::sync::mpsc::channel();
+        let (started, ready) = std::sync::mpsc::channel();
+        spawn_cleanup("serial-monitor-owned-test", move || {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+        })
+        .unwrap();
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(SerialMonitorGetPendingCleanupCount(), 1);
+        {
+            let _nested = CleanupGuard::begin();
+            assert_eq!(SerialMonitorGetPendingCleanupCount(), 2);
+        }
+        assert_eq!(SerialMonitorGetPendingCleanupCount(), 1);
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while SerialMonitorGetPendingCleanupCount() != 0 && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(SerialMonitorGetPendingCleanupCount(), 0);
+    }
 }

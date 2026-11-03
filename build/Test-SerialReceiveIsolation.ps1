@@ -73,10 +73,15 @@ Assert-Check ($read -match 'readPort.Read\(' -and
     'The main receive loop must not reselect a different port within one packet.'
 Write-Pass 'Source wiring: main receive aggregation reads and publishes one fixed port/generation/profile.'
 
-$flush = Get-SourceRegion $splitSource 'private void FlushReceivedData(' 'private void ResetReceiveBuffer('
-Assert-Check ($flush -match '(?s)generation = pendingReceiveGeneration;\s*profile = pendingReceiveProfile;') `
+$persist = Get-SourceRegion $splitSource 'private bool TryPersistPendingReceivePacket(' 'private bool QueueReceivedData('
+Assert-Check ($persist -match '(?s)lock \(serialLock\).*?lock \(receiveBufferLock\).*?generation = pendingReceiveGeneration;\s*profile = pendingReceiveProfile;.*?pendingReceiveData.Clear\(\);') `
     'A split flush must capture the buffered generation and profile before clearing it.'
-Assert-Check ($flush -match '(?s)owner.RunOnUi\(\(\) =>.*?lock \(serialLock\).*?if \(serialDisposed \|\| serialTransition \|\| generation != connectionGeneration\)\s*return;.*?WriteDataLog\(data, false, profile\)') `
+$flush = Get-SourceRegion $splitSource 'private void FlushReceivedData(' 'private void PublishReceivedPacket('
+Assert-Check ($flush -match '(?s)TryPersistPendingReceivePacket\(out data, out generation, out profile\).*?PublishReceivedPacket\(data, generation, profile\)' -and
+    $flush -notmatch 'lock \(serialLock\)') `
+    'A split flush must finish packet persistence before publishing outside its connection lock.'
+$publishSplit = Get-SourceRegion $splitSource 'private void PublishReceivedPacket(' 'private void ResetReceiveBuffer('
+Assert-Check ($publishSplit -match '(?s)owner.RunOnUi\(\(\) =>.*?lock \(serialLock\).*?if \(serialDisposed \|\| serialTransition \|\| generation != connectionGeneration\)\s*return;.*?WriteDataLog\(data, false, profile, writeSessionLog: false\)') `
     'A split UI callback must recheck generation/transition/disposal after dispatch, before logging.'
 Write-Pass 'Source wiring: delayed split UI callbacks reject stale generations and retain captured decoding.'
 
@@ -85,11 +90,24 @@ Assert-Check ($mainSubscriber -match '(?s)var received = e as UartReceiveEventAr
     'The main-port split subscriber must preserve receive metadata and reject a stale UI callback.'
 Write-Pass 'Source wiring: the main-port split subscriber carries its packet profile through UI dispatch.'
 
-$splitRead = Get-SourceRegion $splitSource 'private void Serial_DataReceived(' 'private void QueueReceivedData('
-Assert-Check ($splitRead -match '(?s)while \(true\).*?new byte\[Math.Min\(length, 65536\)\].*?QueueReceivedData\(read == block.Length \? block : block.Take\(read\).ToArray\(\),\s*generation, profile\)' -and
+$splitRead = Get-SourceRegion $splitSource 'private void Serial_DataReceived(' 'private bool TryPersistPendingReceivePacket('
+Assert-Check ($splitRead -match '(?s)while \(true\).*?new byte\[Math.Min\(length, 65536\)\].*?Array.Resize\(ref block, read\);.*?QueueReceivedData\(block, generation, profile\)' -and
     $splitRead -notmatch 'var result = new List<byte>') `
     'Continuous split input must reach the bounded packet queue on every read, without an unbounded local aggregate.'
 Write-Pass 'Source wiring: continuous split input is delivered in bounded driver blocks before the stream becomes idle.'
+
+Assert-Check ($splitRead -match '(?s)lock \(serialLock\).*?read = serial.Read\(block, 0, block.Length\);.*?flushImmediately = QueueReceivedData\(block, generation, profile\);' -and
+    $persist -match '(?s)generation != connectionGeneration.*?return false;.*?WriteSessionLog\("recv", data, profile\?\.encoding, finishExistingSession\);' -and
+    $splitRead -notmatch 'PersistReceivedBlock') `
+    'Actual receive blocks must join their captured packet before releasing the read lock, and the aggregated packet must persist with captured encoding before UI dispatch.'
+Write-Pass 'Source wiring: receive aggregation and persistence retain connection ownership and captured encoding.'
+
+$prepareOpen = Get-SourceRegion $splitSource 'private void PrepareDirectSessionForOpen(' 'private bool Open('
+$open = Get-SourceRegion $splitSource 'private bool Open(' 'private void ClearButton_Click('
+Assert-Check ($prepareOpen -match '(?s)lock \(serialLock\).*?TryPersistPendingReceivePacket\(out _, out _, out _, finishExistingSession: true\);\s*CloseSessionLog\(\);\s*ResetReceiveBuffer\(\);' -and
+    $open -match '(?s)PrepareDirectSessionForOpen\(\);\s*connectionGeneration = unchecked\(connectionGeneration \+ 1\)') `
+    'Reopening must finish and close the previous session writer before changing the connection generation.'
+Write-Pass 'Source wiring: reopening cannot inherit an old connection writer when its retired UI notification is skipped.'
 
 $mainSend = Get-SourceRegion $splitSource 'private void MainUart_UartDataSent(' 'private void MainUart_UartDataRecived('
 Assert-Check ($mainSend -match '(?s)var sent = e as UartSendEventArgs;.*?sent\?\.Profile.*?owner.RunOnUi.*?!sent.IsCurrent.*?return;.*?WriteDataLog\(data, true, profile') `

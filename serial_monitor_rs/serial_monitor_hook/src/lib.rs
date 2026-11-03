@@ -1,9 +1,9 @@
-//! serial_monitor_hook — injected x64 capture hook.
+//! serial_monitor_hook — same-bitness x86/x64 serial capture hook.
 //!
 //! Safety policy:
-//! * x86 injection is explicitly unsupported; there is no fixed-length patch.
+//! * x86 uses MinHook instruction relocation and suspended-thread EIP adjustment.
 //! * DllMain never connects IPC or installs/removes hooks.
-//! * x64 detours are initialized first, enabled with reverse rollback, and are
+//! * Detours are initialized first, enabled with reverse rollback, and are
 //!   never removed from a live process.
 //! * capture deactivation closes IPC only after new capture calls are gated and
 //!   all admitted calls have drained.
@@ -16,20 +16,18 @@ use std::ffi::c_void;
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 
 const HOOK_INIT_OK: u32 = 1;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOOK_DEACTIVATE_OK: u32 = 1;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOOK_ERROR_BAD_CONFIG: u32 = 101;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOOK_ERROR_PIPE: u32 = 102;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOOK_ERROR_INSTALL: u32 = 103;
-#[cfg(target_arch = "x86")]
-const HOOK_ERROR_X86_DISABLED: u32 = 104;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOOK_ERROR_BUSY: u32 = 105;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOOK_ERROR_DRAIN_TIMEOUT: u32 = 106;
 
 #[link(name = "kernel32")]
@@ -38,20 +36,13 @@ extern "system" {
 }
 
 #[cfg(target_arch = "x86")]
-#[no_mangle]
-pub unsafe extern "system" fn SerialMonitorInitialize(_parameter: *mut c_void) -> u32 {
-    HOOK_ERROR_X86_DISABLED
-}
+mod x86_detour;
 
-#[cfg(target_arch = "x86")]
-#[no_mangle]
-pub unsafe extern "system" fn SerialMonitorDeactivate(_parameter: *mut c_void) -> u32 {
-    HOOK_INIT_OK
-}
-
-#[cfg(target_arch = "x86_64")]
-mod x64 {
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod capture {
     use super::*;
+    #[cfg(target_arch = "x86")]
+    use crate::x86_detour as retour;
     use retour::GenericDetour;
     use std::cell::Cell;
     use std::collections::HashMap;
@@ -1286,18 +1277,251 @@ mod x64 {
         close_pipe_after_drain();
         HOOK_DEACTIVATE_OK
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn wire_layout_and_com_filter_remain_architecture_independent() {
+            assert_eq!(std::mem::size_of::<MonitorPacket>(), 8256);
+            assert_eq!(std::mem::offset_of!(MonitorPacket, data), 64);
+            assert_eq!(std::mem::size_of::<SharedConfig>(), 512);
+            assert_eq!(parse_com_str(r"\\.\COM7"), Some(7));
+            assert_eq!(parse_com_str(r"\\?\com4096"), Some(4096));
+            assert_eq!(parse_com_str("COM0"), None);
+            assert_eq!(parse_com_str("COM4097"), None);
+            assert_eq!(parse_com_str("COM7-other"), None);
+            assert_eq!(
+                std::mem::size_of::<FnCreateFileW>(),
+                std::mem::size_of::<usize>()
+            );
+        }
+
+        type FixtureFn = unsafe extern "system" fn(u32, u32, u32, u32, u32, u32, u32) -> u32;
+        static FIXTURE: OnceLock<GenericDetour<FixtureFn>> = OnceLock::new();
+
+        #[test]
+        fn own_process_real_hook_handshake_and_non_serial_io() {
+            use windows::Win32::Storage::FileSystem::{CreateFileA, ReadFile, WriteFile};
+            use windows::Win32::System::Memory::{
+                CreateFileMappingW, FILE_MAP_WRITE, PAGE_READWRITE,
+            };
+            use windows::Win32::System::Pipes::{
+                CreateNamedPipeW, NAMED_PIPE_MODE, PIPE_NOWAIT, PIPE_TYPE_MESSAGE,
+            };
+            use windows::Win32::System::IO::{
+                CancelIo, CancelIoEx, CreateIoCompletionPort, GetOverlappedResult,
+                GetOverlappedResultEx, GetQueuedCompletionStatus, GetQueuedCompletionStatusEx,
+                OVERLAPPED, OVERLAPPED_ENTRY,
+            };
+
+            // No DLL injection: initialize the real capture code linked into
+            // this test executable, with an IPC mapping owned by this same PID.
+            unsafe {
+                let pid = GetCurrentProcessId();
+                let pipe_text = format!(r"\\.\pipe\llcom_native_self_test_{pid}");
+                let pipe_wide: Vec<u16> = pipe_text.encode_utf16().chain(Some(0)).collect();
+                let pipe = CreateNamedPipeW(
+                    PCWSTR(pipe_wide.as_ptr()),
+                    FILE_FLAGS_AND_ATTRIBUTES(1),
+                    NAMED_PIPE_MODE(PIPE_NOWAIT.0 | PIPE_TYPE_MESSAGE.0),
+                    1,
+                    65536,
+                    65536,
+                    0,
+                    None,
+                );
+                assert!(!pipe.is_invalid());
+                let name: Vec<u16> = mapping_name().encode_utf16().chain(Some(0)).collect();
+                let mapping = CreateFileMappingW(
+                    INVALID_HANDLE_VALUE,
+                    None,
+                    PAGE_READWRITE,
+                    0,
+                    CONFIG_SIZE as u32,
+                    PCWSTR(name.as_ptr()),
+                )
+                .unwrap();
+                let view = MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, CONFIG_SIZE);
+                assert!(!view.Value.is_null());
+                let mut config = SharedConfig {
+                    magic: CONFIG_MAGIC,
+                    abi_version: ABI_VERSION,
+                    struct_size: CONFIG_SIZE as u16,
+                    generation: 7301,
+                    selected_com: 4096,
+                    host_process_id: pid,
+                    pipe_name_length: (pipe_wide.len() - 1) as u16,
+                    reserved: 0,
+                    pipe_name: [0; CONFIG_PIPE_CHARS],
+                };
+                config.pipe_name[..pipe_wide.len() - 1]
+                    .copy_from_slice(&pipe_wide[..pipe_wide.len() - 1]);
+                std::ptr::write_unaligned(view.Value as *mut SharedConfig, config);
+                UnmapViewOfFile(view).unwrap();
+                assert_eq!(initialize(), HOOK_INIT_OK);
+                assert_eq!(SESSION_GENERATION.load(Ordering::Acquire), 7301);
+
+                // Exercise real hooked Win32 entry points with NUL and an
+                // empty completion port. No serial device is created or opened.
+                let nul_wide: Vec<u16> = "NUL".encode_utf16().chain(Some(0)).collect();
+                let nul = CreateFileW(
+                    PCWSTR(nul_wide.as_ptr()),
+                    0xc0000000,
+                    FILE_SHARE_MODE(3),
+                    None,
+                    OPEN_EXISTING,
+                    FILE_FLAGS_AND_ATTRIBUTES(0),
+                    HANDLE::default(),
+                )
+                .unwrap();
+                let nul_ansi = CString::new("NUL").unwrap();
+                let ansi = CreateFileA(
+                    PCSTR(nul_ansi.as_ptr() as *const u8),
+                    0xc0000000,
+                    FILE_SHARE_MODE(3),
+                    None,
+                    OPEN_EXISTING,
+                    FILE_FLAGS_AND_ATTRIBUTES(0),
+                    HANDLE::default(),
+                )
+                .unwrap();
+                let mut transferred = 0;
+                WriteFile(nul, Some(&[1, 2, 3]), Some(&mut transferred), None).unwrap();
+                assert_eq!(transferred, 3);
+                ReadFile(nul, Some(&mut [0u8; 4]), Some(&mut transferred), None).unwrap();
+                assert_eq!(transferred, 0);
+                let mut overlapped = OVERLAPPED::default();
+                let _ = GetOverlappedResult(nul, &mut overlapped, &mut transferred, false);
+                let _ = GetOverlappedResultEx(nul, &mut overlapped, &mut transferred, 0, false);
+                let _ = CancelIo(nul);
+                let _ = CancelIoEx(nul, None);
+                let completion = CreateIoCompletionPort(INVALID_HANDLE_VALUE, None, 0, 0).unwrap();
+                let mut key = 0usize;
+                let mut completed = std::ptr::null_mut();
+                let _ = GetQueuedCompletionStatus(
+                    completion,
+                    &mut transferred,
+                    &mut key,
+                    &mut completed,
+                    0,
+                );
+                let mut entries = [OVERLAPPED_ENTRY::default(); 1];
+                let mut removed = 0;
+                let _ =
+                    GetQueuedCompletionStatusEx(completion, &mut entries, &mut removed, 0, false);
+                CloseHandle(completion).unwrap();
+                CloseHandle(ansi).unwrap();
+                CloseHandle(nul).unwrap();
+                assert!(com_handles().read().unwrap().is_empty());
+                assert_eq!(deactivate(), HOOK_DEACTIVATE_OK);
+                assert!(!ACCEPTING_EVENTS.load(Ordering::Acquire));
+                assert_eq!(PIPE_HANDLE.load(Ordering::Acquire), INVALID_PIPE);
+                CloseHandle(mapping).unwrap();
+                CloseHandle(pipe).unwrap();
+            }
+        }
+
+        #[inline(never)]
+        unsafe extern "system" fn fixture(
+            a: u32,
+            b: u32,
+            c: u32,
+            d: u32,
+            e: u32,
+            f: u32,
+            g: u32,
+        ) -> u32 {
+            // The fixture has a real relocatable prologue and cannot be folded
+            // into a call-site constant by the optimizing compiler.
+            std::hint::black_box(a)
+                .wrapping_add(std::hint::black_box(b))
+                .wrapping_add(std::hint::black_box(c))
+                .wrapping_add(std::hint::black_box(d))
+                .wrapping_add(std::hint::black_box(e))
+                .wrapping_add(std::hint::black_box(f))
+                .wrapping_add(std::hint::black_box(g))
+        }
+
+        unsafe extern "system" fn fixture_hook(
+            a: u32,
+            b: u32,
+            c: u32,
+            d: u32,
+            e: u32,
+            f: u32,
+            g: u32,
+        ) -> u32 {
+            FIXTURE
+                .get()
+                .unwrap()
+                .call(a, b, c, d, e, f, g)
+                .wrapping_add(1000)
+        }
+
+        #[test]
+        fn synthetic_stdcall_trampoline_and_thread_switching() {
+            // Only this test process's synthetic function is patched. Never
+            // call MonitorComm, install Win32 API hooks or open a COM here.
+            let detour = FIXTURE.get_or_init(|| unsafe {
+                GenericDetour::new(fixture as FixtureFn, fixture_hook as FixtureFn).unwrap()
+            });
+            let call = std::hint::black_box(fixture as FixtureFn);
+            unsafe {
+                assert_eq!(call(1, 2, 3, 4, 5, 6, 7), 28);
+                detour.enable().unwrap();
+                for input in 0..10000 {
+                    assert_eq!(call(input, 2, 3, 4, 5, 6, 7), input + 1027);
+                }
+                detour.disable().unwrap();
+                assert_eq!(call(1, 2, 3, 4, 5, 6, 7), 28);
+            }
+            #[cfg(target_arch = "x86")]
+            {
+                use std::sync::{Arc, Barrier};
+                let active = Arc::new(AtomicBool::new(true));
+                let barrier = Arc::new(Barrier::new(5));
+                let mut workers = Vec::new();
+                for _ in 0..4 {
+                    let active = active.clone();
+                    let barrier = barrier.clone();
+                    workers.push(std::thread::spawn(move || {
+                        let call = std::hint::black_box(fixture as FixtureFn);
+                        barrier.wait();
+                        while active.load(Ordering::Acquire) {
+                            let value = unsafe { call(1, 2, 3, 4, 5, 6, 7) };
+                            assert!(value == 28 || value == 1028);
+                        }
+                    }));
+                }
+                barrier.wait();
+                // Keep the enumerated threads alive through all patch changes.
+                for _ in 0..30 {
+                    unsafe {
+                        detour.enable().unwrap();
+                        detour.disable().unwrap();
+                    }
+                }
+                active.store(false, Ordering::Release);
+                for worker in workers {
+                    worker.join().unwrap();
+                }
+            }
+        }
+    }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[no_mangle]
 pub unsafe extern "system" fn SerialMonitorInitialize(_parameter: *mut c_void) -> u32 {
-    x64::initialize()
+    capture::initialize()
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[no_mangle]
 pub unsafe extern "system" fn SerialMonitorDeactivate(_parameter: *mut c_void) -> u32 {
-    x64::deactivate()
+    capture::deactivate()
 }
 
 #[no_mangle]

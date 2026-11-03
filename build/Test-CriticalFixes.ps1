@@ -2640,6 +2640,14 @@ public static class LlcomRuntimeWorkerLifecycleProbe
             (Join-Path $serialRoot 'serial_monitor\Cargo.toml'))
         $hookCargo = [IO.File]::ReadAllText(
             (Join-Path $serialRoot 'serial_monitor_hook\Cargo.toml'))
+        $x86DetourSource = [IO.File]::ReadAllText(
+            (Join-Path $serialRoot 'serial_monitor_hook\src\x86_detour.rs'))
+        $minHookSource = [IO.File]::ReadAllText(
+            (Join-Path $serialRoot 'vendor\minhook\src\hook.c'))
+        $brokerSource = [IO.File]::ReadAllText(
+            (Join-Path $projectDir 'Core\Tools\SerialMonitorBrokerClient.cs'))
+        $helperSource = [IO.File]::ReadAllText(
+            (Join-Path $root 'SerialMonitorBroker\Program.cs'))
         $buildScript = [IO.File]::ReadAllText(
             (Join-Path $serialRoot 'build.ps1'))
         $nativeSourceScript = [IO.File]::ReadAllText(
@@ -2659,7 +2667,12 @@ public static class LlcomRuntimeWorkerLifecycleProbe
             -not $hookSource.Contains('JMP_SZ') -and
             -not $hookSource.Contains('VirtualProtect') -and
             -not $hookSource.Contains('manual 5-byte') -and
-            $hookSource.Contains('HOOK_ERROR_X86_DISABLED')
+            -not $hookSource.Contains('HOOK_ERROR_X86_DISABLED') -and
+            $hookSource.Contains('mod x86_detour;') -and
+            $x86DetourSource.Contains('MH_CreateHook') -and
+            $minHookSource.Contains('MH_ERROR_THREAD_ACCESS') -and
+            $minHookSource.Contains('GetThreadContext') -and
+            $minHookSource.Contains('SetThreadContext')
         $explicitLifecycle =
             $hookSource.Contains('pub unsafe extern "system" fn SerialMonitorInitialize') -and
             $hookSource.Contains('pub unsafe extern "system" fn SerialMonitorDeactivate') -and
@@ -2688,8 +2701,15 @@ public static class LlcomRuntimeWorkerLifecycleProbe
             $hostSource.Contains('packet.com_port == selected_com')
         $safeInjection =
             $hostSource.Contains('SerialMonitorGetAbiVersion') -and
-            $serialPageSource.Contains('uint nativeAbi = SerialMonitorGetAbiVersion()') -and
-            $serialPageSource.Contains('nativePluginAvailable = false') -and
+            $hostSource.Contains('SerialMonitorGetPendingCleanupCount') -and
+            $helperSource.Contains('"SerialMonitorGetAbiVersion"') -and
+            $helperSource.Contains('"SerialMonitorGetPendingCleanupCount"') -and
+            $brokerSource.Contains('ValidateHelper(helper, architecture)') -and
+            $brokerSource.Contains('MonitorBrokerProtocol.IsPacketValid') -and
+            $serialPageSource.Contains('new Tools.SerialMonitorBrokerClient') -and
+            $serialPageSource.Contains('StartTimeUtcTicks') -and
+            $serialPageSource.Contains('BrokerPacketReceived(data, generation)') -and
+            -not $serialPageSource.Contains('status = MonitorComm(') -and
             $hostSource.Contains('IsWow64Process2') -and
             $hostSource.Contains('resolve_remote_system_proc') -and
             $hostSource.Contains('local_owner') -and

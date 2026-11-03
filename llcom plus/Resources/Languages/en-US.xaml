@@ -113,6 +113,7 @@
     <system:String x:Key="QuickSendEditTitle">Edit quick send content</system:String>
     <system:String x:Key="QuickSendEditPrompt">Content for quick send {0} (multiple lines supported):</system:String>
     <system:String x:Key="QuickSendRemoveItem">Delete this command</system:String>
+    <system:String x:Key="QuickSendDeleteBackupFailed">The backup could not be created, so the command was kept. Try again later or check the history directory.</system:String>
     <system:String x:Key="QuickSendPage">Page</system:String>
     <system:String x:Key="QuickSendDefaultPageName">Untitled {0}</system:String>
     <system:String x:Key="QuickSendAddPage">New page</system:String>

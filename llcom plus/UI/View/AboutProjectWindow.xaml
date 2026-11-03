@@ -46,7 +46,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Margin="0,0,20,0" Foreground="{DynamicResource AppGlassMutedBrush}" Text="{DynamicResource AboutProjectAuthor}" />
-                            <TextBlock x:Name="AuthorText" Grid.Column="1" FontWeight="SemiBold" Text="lawrenc.liu" />
+                            <TextBlock x:Name="AuthorText" Grid.Column="1" FontWeight="SemiBold" Text="lawrence.liu" />
                         </Grid>
                         <TextBlock Margin="0,0,0,5" FontWeight="SemiBold" Text="{DynamicResource AboutProjectFeaturesTitle}" />
                         <TextBlock Text="{DynamicResource AboutProjectFeatures}" TextWrapping="Wrap" />

@@ -18,4 +18,9 @@ foreach ($message in [SocketCallbackRegressionProbe]::Run($assembly)) { Write-Ho
 $source = [IO.File]::ReadAllText((Join-Path $project 'UI\Pages\SocketClientPage.xaml.cs'))
 if ([regex]::Matches($source, 'data => PublishInteractiveData\(epoch, data\)').Count -ne 2 -or
     $source -notmatch 'text => RunInteractiveCallback\(epoch,') { throw 'Both interactive transports must use the captured callback guard.' }
-Write-Host "PASS SSH, TLS/DTLS receive and diagnostic source wiring ($Platform $Configuration)."
+$readStart = $source.IndexOf('public void Read_Callback(IAsyncResult ar)', [StringComparison]::Ordinal)
+$readEnd = $source.IndexOf('private void Reconnect_TextInputCheck(', $readStart, [StringComparison]::Ordinal)
+$readSource = $source.Substring($readStart, $readEnd - $readStart)
+if ($readSource -notmatch 'PublishNativeData\(state.owner, state.epoch, buffer\)' -or
+    $readSource -match 'DataRecived\?\.Invoke') { throw 'Native TCP/UDP receives must use their captured owner/epoch publication guard.' }
+Write-Host "PASS TCP, UDP, SSH, TLS/DTLS receive and diagnostic source wiring ($Platform $Configuration)."

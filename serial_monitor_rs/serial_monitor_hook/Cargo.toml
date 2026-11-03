@@ -10,10 +10,13 @@ name = "serial_monitor_hook"
 [dependencies]
 
 # Exact pin: retour 0.3.1 provides instruction decoding/relocation-backed x64
-# GenericDetour on stable Rust. It is intentionally not compiled for x86; x86
-# monitoring is fail-closed instead of using a fixed five-byte patch.
+# GenericDetour on stable Rust. x86 uses vendored MinHook with thread-IP
+# relocation; neither architecture uses a fixed-length handwritten patch.
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 retour = "=0.3.1"
+
+[build-dependencies]
+cc = "=1.4.4"
 
 # Exact pin: windows 0.58.0 supplies the Win32 ABI bindings used by the hook.
 [dependencies.windows]
@@ -25,6 +28,7 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_IO",
+    "Win32_System_Pipes",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
 ]

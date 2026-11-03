@@ -1337,6 +1337,10 @@ namespace llcom_plus.Pages
                 {
                     if (serialDisposed || expectedGeneration != connectionGeneration ||
                         !ReferenceEquals(expectedPort, serial)) return null;
+                    // Retire owns the old writer until every byte read under this
+                    // connection lock has left the packet buffer. Do not invoke
+                    // scripts or queue UI work from this cleanup path.
+                    TryPersistPendingReceivePacket(out _, out _, out _, finishExistingSession: true);
                     oldPort = serial;
                     oldStream = serialBaseStream;
                     oldReservation = serialReservation;
@@ -1687,13 +1691,35 @@ namespace llcom_plus.Pages
 
             public void RestartSessionLog()
             {
-                CloseSessionLog();
-                EnsureSessionLogOpen();
+                byte[] data;
+                long generation;
+                UartPortProfile profile;
+                bool hadPacket;
+                lock (serialLock)
+                {
+                    hadPacket = TryPersistPendingReceivePacket(out data, out generation, out profile,
+                        finishExistingSession: true);
+                    CloseSessionLog();
+                    EnsureSessionLogOpen();
+                }
+                if (hadPacket)
+                    PublishReceivedPacket(data, generation, profile);
             }
 
             public void CloseSessionLogWriter()
             {
-                CloseSessionLog();
+                byte[] data;
+                long generation;
+                UartPortProfile profile;
+                bool hadPacket;
+                lock (serialLock)
+                {
+                    hadPacket = TryPersistPendingReceivePacket(out data, out generation, out profile,
+                        finishExistingSession: true);
+                    CloseSessionLog();
+                }
+                if (hadPacket)
+                    PublishReceivedPacket(data, generation, profile);
             }
 
             public void WriteNotificationToSession(DateTime timestamp, string title, string message)
@@ -1943,6 +1969,19 @@ namespace llcom_plus.Pages
                 ToggleOpen();
             }
 
+            private void PrepareDirectSessionForOpen()
+            {
+                lock (serialLock)
+                {
+                    // A retired connection's delayed UI notification may have
+                    // been superseded by this Open. Finish its file session here
+                    // so the new connection never inherits the previous writer.
+                    TryPersistPendingReceivePacket(out _, out _, out _, finishExistingSession: true);
+                    CloseSessionLog();
+                    ResetReceiveBuffer();
+                }
+            }
+
             private bool Open()
             {
                 LastErrorMessage = string.Empty;
@@ -2001,13 +2040,13 @@ namespace llcom_plus.Pages
                         // rejects a main/pane owner's still-running retired Close.
                         pendingReservation = SerialPortAccessCoordinator.Acquire(portName,
                             string.Format(owner.FindText("MultiPortSlotTitle", "串口 {0}"), Index));
-                        ResetReceiveBuffer();
                         DtrWakeController openingWake;
                         SerialPinMonitor openingPins;
                         lock (serialLock)
                         {
                             if (serialDisposed || !ReferenceEquals(openingPort, serial))
                                 throw new IOException("The split serial connection changed before opening.");
+                            PrepareDirectSessionForOpen();
                             connectionGeneration = unchecked(connectionGeneration + 1);
                             if (connectionGeneration == 0) connectionGeneration = 1;
                             generation = connectionGeneration;
@@ -2515,6 +2554,7 @@ namespace llcom_plus.Pages
                     {
                         byte[] block;
                         int read;
+                        var flushImmediately = false;
                         lock (serialLock)
                         {
                             if (serialDisposed ||
@@ -2530,6 +2570,15 @@ namespace llcom_plus.Pages
                                 break;
                             block = new byte[Math.Min(length, 65536)];
                             read = serial.Read(block, 0, block.Length);
+                            if (read > 0)
+                            {
+                                if (read != block.Length)
+                                    Array.Resize(ref block, read);
+                                // Make the bytes part of this connection's packet
+                                // before Close can retire it. Decode only after
+                                // packet aggregation, preserving split UTF-8/GBK.
+                                flushImmediately = QueueReceivedData(block, generation, profile);
+                            }
                         }
 
                         if (read <= 0)
@@ -2542,8 +2591,8 @@ namespace llcom_plus.Pages
                         // packet timer/size. Feed each bounded driver read into it
                         // so a continuous stream need not become idle before any
                         // bytes appear, and cannot grow an unbounded local List.
-                        QueueReceivedData(read == block.Length ? block : block.Take(read).ToArray(),
-                            generation, profile);
+                        if (flushImmediately)
+                            FlushReceivedData(null);
                     }
                 }
                 catch (Exception ex) when (IsClosedSerialException(ex))
@@ -2556,17 +2605,48 @@ namespace llcom_plus.Pages
                 }
             }
 
-            private void QueueReceivedData(byte[] data, long generation, UartPortProfile profile)
+            private bool TryPersistPendingReceivePacket(
+                out byte[] data, out long generation, out UartPortProfile profile,
+                bool finishExistingSession = true)
+            {
+                data = null;
+                generation = 0;
+                profile = null;
+                lock (serialLock)
+                {
+                    lock (receiveBufferLock)
+                    {
+                        receiveFlushScheduled = false;
+                        if (pendingReceiveData.Count == 0)
+                            return false;
+                        receiveFlushTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                        data = pendingReceiveData.ToArray();
+                        generation = pendingReceiveGeneration;
+                        profile = pendingReceiveProfile;
+                        pendingReceiveData.Clear();
+                        pendingReceiveProfile = null;
+                    }
+                    if (serialDisposed || serialTransition || generation != connectionGeneration)
+                        return false;
+                    // Keep serial ownership through disk publication. A timer
+                    // cannot remove a packet then lose it to a concurrent Close,
+                    // nor append it to a replacement session's writer.
+                    WriteSessionLog("recv", data, profile?.encoding, finishExistingSession);
+                    return true;
+                }
+            }
+
+            private bool QueueReceivedData(byte[] data, long generation, UartPortProfile profile)
             {
                 if (data == null || data.Length == 0)
-                    return;
+                    return false;
 
                 var flushImmediately = false;
                 lock (serialLock)
                 lock (receiveBufferLock)
                 {
                     if (serialDisposed || serialTransition || generation != connectionGeneration)
-                        return;
+                        return false;
                     if (pendingReceiveData.Count == 0 || pendingReceiveGeneration != generation)
                     {
                         pendingReceiveData.Clear();
@@ -2592,8 +2672,9 @@ namespace llcom_plus.Pages
                     }
                 }
 
-                if (flushImmediately)
-                    FlushReceivedData(null);
+                // The driver caller still holds serialLock. It must dispatch
+                // the flush only after leaving that outer critical section.
+                return flushImmediately;
             }
 
             private void RenewDtrWakeAfterReceive(long generation)
@@ -2607,19 +2688,14 @@ namespace llcom_plus.Pages
                 byte[] data;
                 long generation;
                 UartPortProfile profile;
-                lock (receiveBufferLock)
-                {
-                    receiveFlushScheduled = false;
-                    if (pendingReceiveData.Count == 0)
-                        return;
+                if (!TryPersistPendingReceivePacket(out data, out generation, out profile))
+                    return;
 
-                    data = pendingReceiveData.ToArray();
-                    generation = pendingReceiveGeneration;
-                    profile = pendingReceiveProfile;
-                    pendingReceiveData.Clear();
-                    pendingReceiveProfile = null;
-                }
+                PublishReceivedPacket(data, generation, profile);
+            }
 
+            private void PublishReceivedPacket(byte[] data, long generation, UartPortProfile profile)
+            {
                 owner.RunOnUi(() =>
                 {
                     // UI work can outlive a close/reopen or removal of this pane.
@@ -2628,7 +2704,7 @@ namespace llcom_plus.Pages
                         if (serialDisposed || serialTransition || generation != connectionGeneration)
                             return;
                     }
-                    WriteDataLog(data, false, profile);
+                    WriteDataLog(data, false, profile, writeSessionLog: false);
                     if (Index == owner.activeSlotNumber)
                         Global.NotifyActiveSerialTargetReceived(data);
                 });
@@ -2954,18 +3030,19 @@ namespace llcom_plus.Pages
                 }
             }
 
-            private void WriteSessionLog(string direction, byte[] data, int? encodingCodePage = null)
+            private void WriteSessionLog(string direction, byte[] data, int? encodingCodePage = null,
+                bool finishExistingSession = false)
             {
                 if (data == null || data.Length == 0)
                     return;
 
                 if (Global.setting == null || !Global.setting.sessionLogEnabled)
                 {
-                    CloseSessionLog();
-                    return;
+                    if (!finishExistingSession)
+                        return;
                 }
-
-                EnsureSessionLogOpen();
+                else
+                    EnsureSessionLogOpen();
                 lock (sessionLogLock)
                 {
                     if (sessionStringLogWriter == null && sessionHexLogWriter == null)
