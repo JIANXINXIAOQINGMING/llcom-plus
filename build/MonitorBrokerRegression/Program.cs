@@ -32,7 +32,7 @@ internal static class Program
         var input = Console.OpenStandardInput(); var output = Console.OpenStandardOutput();
         MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Hello,
             MonitorBrokerProtocol.Hello(Process.GetCurrentProcess().Id, Environment.Is64BitProcess ? 64 : 32));
-        var start = MonitorBrokerProtocol.Read(input);
+        var start = MonitorBrokerProtocol.ReadInitial(input);
         if (start == null || start.Type == MonitorBrokerProtocol.Kind.Stop)
         { stopObserved = true; MonitorBrokerProtocol.Write(output, MonitorBrokerProtocol.Kind.Stopped, BitConverter.GetBytes(2)); return 0; }
         uint com = BitConverter.ToUInt32(start.Payload, 4);
@@ -89,6 +89,43 @@ internal static class Program
         try { MonitorBrokerProtocol.Read(new MemoryStream(truncated)); throw new Exception("Truncated frame accepted."); }
         catch (EndOfStreamException) { }
         Pass("Framing tolerates partial reads and rejects oversized, unknown, truncated, wrong-COM and invalid-flags frames.");
+
+        byte[] frame = memory.ToArray();
+        byte[] preamble = new UTF8Encoding(true).GetPreamble();
+        using (var initial = new ShortStream(frame))
+            Assert(MonitorBrokerProtocol.IsPacketValid(MonitorBrokerProtocol.ReadInitial(initial).Payload, 77),
+                "The initial frame requires an unnecessary preamble.");
+        using (var initial = new ShortStream(JoinBytes(preamble, frame)))
+            Assert(MonitorBrokerProtocol.IsPacketValid(MonitorBrokerProtocol.ReadInitial(initial).Payload, 77),
+                "The initial frame rejected the .NET Framework stdin UTF-8 preamble.");
+        foreach (var invalid in new[] {
+            new byte[] { 0xEF }, new byte[] { 0xEF, 0xBB },
+            JoinBytes(new byte[] { 0xEF, 0xBC, 0xBF }, frame),
+            JoinBytes(new byte[] { 0xEF, 0xBB, 0x00 }, frame),
+            JoinBytes(preamble, JoinBytes(preamble, frame)) })
+        {
+            bool rejected = false;
+            try { MonitorBrokerProtocol.ReadInitial(new ShortStream(invalid)); }
+            catch (InvalidDataException) { rejected = true; }
+            catch (EndOfStreamException) { rejected = true; }
+            Assert(rejected, "A malformed, truncated, or repeated initial preamble was accepted.");
+        }
+        using (var later = new ShortStream(JoinBytes(frame, JoinBytes(preamble, frame))))
+        {
+            Assert(MonitorBrokerProtocol.ReadInitial(later) != null, "The first frame was lost.");
+            bool rejected = false;
+            try { MonitorBrokerProtocol.Read(later); }
+            catch (InvalidDataException) { rejected = true; }
+            Assert(rejected, "A preamble after the first frame was accepted by the strict reader.");
+        }
+        Pass("Initial frames support no BOM or one exact UTF-8 BOM; malformed, truncated, repeated and later preambles are rejected.");
+    }
+    private static byte[] JoinBytes(byte[] first, byte[] second)
+    {
+        var result = new byte[first.Length + second.Length];
+        Buffer.BlockCopy(first, 0, result, 0, first.Length);
+        Buffer.BlockCopy(second, 0, result, first.Length, second.Length);
+        return result;
     }
     private static async Task ClientChecks(string root, string oppositeExecutable)
     {
@@ -274,14 +311,30 @@ internal static class Program
     }
     private static int Main(string[] args)
     {
-        if (args.Length == 1 && args[0] == "--owned-target") { Console.OpenStandardInput().ReadByte(); return 0; }
+        if (args.Length == 1 && args[0] == "--owned-target")
+        {
+            // A redirected StreamWriter may already have emitted its UTF-8
+            // preamble. Stay alive until EOF, rather than the first byte.
+            Console.OpenStandardInput().CopyTo(Stream.Null);
+            return 0;
+        }
         if (args.Length == 2 && int.TryParse(args[0], out _))
         {
             try { return Fake(); }
             catch (Exception error) { Console.Error.WriteLine("Fake monitoring helper failed: " + error); return 1; }
         }
         if (args.Length != 3) { Console.Error.WriteLine("Expected isolated test root, actual helper, and opposite-architecture test executable."); return 1; }
-        try { ProtocolChecks(); ClientChecks(args[0], args[2]).GetAwaiter().GetResult(); RelayChecks(args[1]); IdentityAndParentChecks(args[1]); return 0; }
+        Encoding previousInputEncoding = Console.InputEncoding;
+        try
+        {
+            // Process.StandardInput uses Console.InputEncoding on .NET Framework.
+            // UTF-8 with a preamble reproduces CI independently of the local code page.
+            Console.InputEncoding = new UTF8Encoding(true);
+            Assert(BitConverter.ToString(Console.InputEncoding.GetPreamble()) == "EF-BB-BF", "The CI stdin preamble scenario was not enabled.");
+            Pass("CI stdin encoding simulation is active: UTF-8 preamble EF-BB-BF.");
+            ProtocolChecks(); ClientChecks(args[0], args[2]).GetAwaiter().GetResult(); RelayChecks(args[1]); IdentityAndParentChecks(args[1]); return 0;
+        }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+        finally { Console.InputEncoding = previousInputEncoding; }
     }
 }

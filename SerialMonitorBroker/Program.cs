@@ -148,7 +148,7 @@ namespace Llcom.SerialMonitoring
                     // The initial stdin read also belongs to a background worker.
                     // A leaked inherited pipe handle must not prevent parent-exit
                     // cleanup before native monitoring has even started.
-                    var firstCommand = Task.Run(() => MonitorBrokerProtocol.Read(input));
+                    var firstCommand = Task.Run(() => MonitorBrokerProtocol.ReadInitial(input));
                     while (!firstCommand.IsCompleted && !stop.WaitOne(50)) { }
                     if (stop.WaitOne(0)) return 0;
                     var command = firstCommand.GetAwaiter().GetResult();

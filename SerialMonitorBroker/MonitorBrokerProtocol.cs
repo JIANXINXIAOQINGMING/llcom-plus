@@ -35,7 +35,26 @@ namespace Llcom.SerialMonitoring
         }
         internal static Frame Read(Stream stream)
         {
+            return ReadFrame(stream, stream.ReadByte());
+        }
+        internal static Frame ReadInitial(Stream stream)
+        {
             int first = stream.ReadByte();
+            // .NET Framework's Process.StandardInput uses Console.InputEncoding
+            // and can flush its UTF-8 preamble before BaseStream is accessed.
+            // Permit that exact prefix once, before the first control frame;
+            // subsequent frames must still start directly with protocol magic.
+            if (first == 0xEF)
+            {
+                if (stream.ReadByte() != 0xBB || stream.ReadByte() != 0xBF)
+                    throw new InvalidDataException("Invalid serial monitor helper stream preamble.");
+                first = stream.ReadByte();
+                if (first < 0) throw new EndOfStreamException("The serial monitor helper stream has no initial frame.");
+            }
+            return ReadFrame(stream, first);
+        }
+        private static Frame ReadFrame(Stream stream, int first)
+        {
             if (first < 0) return null;
             var header = new byte[12];
             header[0] = (byte)first;
